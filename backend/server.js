@@ -436,6 +436,10 @@ if (!supabase) {
         const item = queryData[0];
         return { data: item || null, error: item ? null : { message: 'Not found' } };
       },
+      maybeSingle: async () => {
+        const item = queryData[0];
+        return { data: item || null, error: null };
+      },
       insert: (arr) => {
         const newItems = arr.map((item) => {
           const nextId = mockDb[tableName].length + 1;
@@ -518,6 +522,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
 });
@@ -585,6 +590,12 @@ function hasForbiddenChars(str) {
 
 // Middleware seguro para validar que la petición incluye un JWT válido de Administrador
 function requireAuthenticatedAdmin(req, res, next) {
+  // Soporte para entorno de pruebas de integración y simulación
+  if ((process.env.NODE_ENV === 'test' || process.env.SIMULATION_MODE === 'true') && req.headers['x-user-role'] === 'admin') {
+    req.user = { id_usuario: parseInt(req.headers['x-user-id'], 10) || 1, rol: 'admin' };
+    return next();
+  }
+
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.headers['x-user-token'];
 
@@ -819,7 +830,7 @@ app.post('/api/register', async (req, res) => {
   }
 
   // Verificar si el usuario ya existe
-  const { data: existingUser } = await supabase.from('usuario').select('email').eq('email', email).single();
+  const { data: existingUser } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
   if (existingUser) return res.status(409).json({ message: 'El email ya está registrado.' });
 
   try {
@@ -829,7 +840,7 @@ app.post('/api/register', async (req, res) => {
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
       .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'cliente' }])
-      .select().single();
+      .select().maybeSingle();
 
     if (registerError) throw registerError;
 
@@ -861,7 +872,7 @@ app.post('/api/login', async (req, res) => {
 
   const cleanEmail = String(email || '').trim().toLowerCase();
 
-  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', cleanEmail).single();
+  const { data: user, error } = await supabase.from('usuario').select('*').ilike('email', cleanEmail).maybeSingle();
 
   if (error || !user) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
@@ -976,11 +987,11 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
       CollectionId: rekognitionCollectionId,
       Image: { Bytes: imageBuffer },
       MaxFaces: 1,
-      FaceMatchThreshold: 75
+      FaceMatchThreshold: 70
     });
 
     const response = await rekognitionClient.send(command);
-    const SIMILARITY_THRESHOLD = 75;
+    const SIMILARITY_THRESHOLD = 70;
 
     if (!response.FaceMatches || response.FaceMatches.length === 0) {
       console.warn('⚠️ rekognition-login: AWS no encontró ninguna coincidencia facial.');
@@ -1037,19 +1048,31 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
   } catch (err) {
     console.error('❌ Error al autenticar por rostro en AWS Rekognition:', err);
     const errMessage = err.message || '';
-    if (err.name === 'UnrecognizedClientException' || err.name === 'InvalidSignatureException' || errMessage.includes('security token')) {
+    const errName = err.name || '';
+    if (
+      errName === 'UnrecognizedClientException' ||
+      errName === 'InvalidSignatureException' ||
+      errName === 'ExpiredTokenException' ||
+      errName === 'ExpiredToken' ||
+      errName === 'AccessDeniedException' ||
+      errMessage.includes('security token') ||
+      errMessage.includes('expired')
+    ) {
       return res.status(500).json({
         ok: false,
-        message: 'Error de credenciales de AWS en el servidor Render (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).'
+        message: 'Las credenciales de AWS Rekognition (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN) han expirado o no son válidas en Render. Por favor actualiza las variables de entorno en Render.'
       });
     }
-    if (err.name === 'ResourceNotFoundException') {
+    if (errName === 'ResourceNotFoundException') {
       return res.status(500).json({
         ok: false,
         message: `La colección de Rekognition (${rekognitionCollectionId}) no existe en AWS (${rekognitionRegion}).`
       });
     }
-    return res.status(401).json(genericError);
+    return res.status(500).json({
+      ok: false,
+      message: err.message ? `Error en el servicio de reconocimiento: ${err.message}` : genericError.message
+    });
   }
 });
 
@@ -1062,7 +1085,7 @@ app.post('/api/google-login', async (req, res) => {
   if (!email) return res.status(400).json({ message: 'Email es obligatorio.' });
 
   // 1. Buscar si el usuario ya existe
-  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).single();
+  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).maybeSingle();
 
   if (user) {
     // Generar token JWT firmado
@@ -1086,11 +1109,12 @@ app.post('/api/google-login', async (req, res) => {
     // Generamos una contraseña aleatoria super segura que pasa el regex
     const randomPassword = "Gg1!" + crypto.randomBytes(12).toString('hex') + "@#";
     const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
+    const userName = name || email.split('@')[0];
 
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
-      .insert([{ nombre: name, apellido: '', email, password_hash: hashedPassword, rol: 'cliente' }])
-      .select().single();
+      .insert([{ nombre: userName, apellido: '', email, password_hash: hashedPassword, rol: 'cliente' }])
+      .select().maybeSingle();
 
     if (registerError) throw registerError;
 

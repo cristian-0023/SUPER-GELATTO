@@ -20,32 +20,26 @@ async function fixPasswords() {
   const { error: err1 } = await supabase
     .from('usuario')
     .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'saldarriagac890@gmail.com');
-  console.log('Update saldarriagac890:', err1 ? err1.message : 'OK');
+    .eq('email', 'muneracristian63@gmail.com');
+  console.log('Update muneracristian63:', err1 ? err1.message : 'OK');
 
   const { error: err2 } = await supabase
     .from('usuario')
     .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'supergelattoadmin@gmail.com');
-  console.log('Update supergelattoadmin:', err2 ? err2.message : 'OK');
+    .eq('email', 'miguelvilla00@gmail.com');
+  console.log('Update miguelvilla00:', err2 ? err2.message : 'OK');
 
   const { error: err3 } = await supabase
     .from('usuario')
     .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'jefe@supergelatto.com');
-  console.log('Update jefe@supergelatto.com:', err3 ? err3.message : 'OK');
+    .eq('email', 'emiliofunes28@gmail.com');
+  console.log('Update emiliofunes28:', err3 ? err3.message : 'OK');
 
   const { error: err4 } = await supabase
     .from('usuario')
-    .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'cristianmunera979@gmail.com');
-  console.log('Update cristianmunera979@gmail.com:', err4 ? err4.message : 'OK');
-
-  const { error: err5 } = await supabase
-    .from('usuario')
-    .update({ password_hash: hash, rol: 'admin' })
-    .eq('email', 'emiliofunes28@gmail.com');
-  console.log('Update emiliofunes28@gmail.com:', err5 ? err5.message : 'OK');
+    .update({ password_hash: hash })
+    .eq('email', 'cristianmunera427@gmail.com');
+  console.log('Update cristianmunera427:', err4 ? err4.message : 'OK');
 
   console.log('✅ Passwords reset successfully to: gelato1234');
 }
