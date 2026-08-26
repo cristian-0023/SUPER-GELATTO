@@ -693,6 +693,15 @@ function hasForbiddenChars(str) {
   return /[<>&"'\/]/.test(str);
 }
 
+const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
+const ADMIN_EMAILS = [
+  'muneracristian63@gmail.com',
+  'saldarriagac890@gmail.com',
+  'cristianmunera427@gmail.com',
+  'miguelvilla00@gmail.com',
+  'emiliofunes28@gmail.com'
+];
+
 // Middleware seguro para validar que la petición incluye un JWT válido de Administrador
 function requireAuthenticatedAdmin(req, res, next) {
   // Soporte para entorno de pruebas de integración y simulación
@@ -710,10 +719,18 @@ function requireAuthenticatedAdmin(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    if (!decoded || decoded.rol !== 'admin') {
+    const email = (decoded?.email || '').toLowerCase().trim();
+
+    const isAuthorizedAdmin = decoded?.rol === 'admin' || decoded?.rol === 'super_admin' || ADMIN_EMAILS.includes(email);
+
+    if (!decoded || !isAuthorizedAdmin) {
       return res.status(403).json({ message: 'Acceso denegado. Se requieren permisos de administrador.' });
     }
-    req.user = decoded;
+
+    req.user = {
+      ...decoded,
+      rol: 'admin'
+    };
     next();
   } catch (err) {
     return res.status(401).json({ message: 'Token de sesión inválido o expirado. Por favor inicia sesión nuevamente.' });
@@ -1214,9 +1231,10 @@ app.post('/api/google-login', async (req, res) => {
     }
 
     if (user) {
+      const userRole = ADMIN_EMAILS.includes(cleanEmail.toLowerCase()) ? 'admin' : user.rol;
       // Generar token JWT firmado
       const token = jwt.sign(
-        { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
+        { id_usuario: user.id_usuario, email: user.email, rol: userRole },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -1225,7 +1243,7 @@ app.post('/api/google-login', async (req, res) => {
         ok: true,
         message: 'Inicio de sesión con Google exitoso.',
         token,
-        user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
+        user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: userRole }
       });
     }
 
@@ -1614,8 +1632,6 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     return res.status(500).json({ message: 'Error al obtener datos del panel de control.' });
   }
 });
-
-const SUPER_ADMIN_EMAIL = 'muneracristian63@gmail.com';
 
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
