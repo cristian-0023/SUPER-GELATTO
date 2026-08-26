@@ -585,6 +585,108 @@ function sanitizeInput(str) {
     .replace(/\//g, '&#x2F;');
 }
 
+// ─── Envío de Correo Electrónico de Actualización de Estado ──────────────
+async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newStatus, total }) {
+  if (!customerEmail || typeof customerEmail !== 'string' || !customerEmail.includes('@')) {
+    console.warn(`⚠️ No se pudo enviar correo para la orden #${saleId}: Dirección de correo no válida (${customerEmail}).`);
+    return;
+  }
+
+  try {
+    const emailTransporter = await getTransporter();
+    const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
+    const orderCode = `#SG-${saleId}`;
+    const formattedTotal = typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || '');
+
+    let statusBg = '#d4af37';
+    let statusText = 'Actualización de Pedido';
+    let statusMessage = `El estado de tu pedido <strong>${orderCode}</strong> ha sido actualizado a <strong>${newStatus}</strong>.`;
+
+    switch (newStatus) {
+      case 'En proceso':
+        statusBg = '#3b82f6';
+        statusText = '🍦 Tu pedido está en preparación';
+        statusMessage = `¡Excelente noticia! Tu pedido <strong>${orderCode}</strong> está siendo preparado artesanalmente con la mayor dedicación.`;
+        break;
+      case 'En entrega':
+      case 'Enviado':
+        statusBg = '#f59e0b';
+        statusText = '🚚 Tu pedido va en camino';
+        statusMessage = `¡Tu pedido <strong>${orderCode}</strong> se encuentra en camino a tu dirección de entrega! Prepárate para disfrutar.`;
+        break;
+      case 'Entregado':
+      case 'Completado':
+        statusBg = '#10b981';
+        statusText = '🎉 ¡Pedido Entregado con Éxito!';
+        statusMessage = `¡Tu pedido <strong>${orderCode}</strong> ha sido entregado exitosamente! Esperamos que disfrutes cada cucharada de tu Super Gelatto.`;
+        break;
+      case 'Cancelado':
+        statusBg = '#ef4444';
+        statusText = '❌ Pedido Cancelado';
+        statusMessage = `Lamentamos informarte que tu pedido <strong>${orderCode}</strong> ha sido cancelado. Si tienes dudas, contáctanos.`;
+        break;
+    }
+
+    const htmlContent = `
+      <div style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #0d0d0d; color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #262626; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <div style="background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%); padding: 28px 20px; text-align: center; border-bottom: 2px solid #d4af37;">
+          <h1 style="color: #d4af37; margin: 0; font-size: 26px; letter-spacing: 2px; text-transform: uppercase;">super gelatto 🍦</h1>
+          <p style="color: #a3a3a3; font-size: 12px; margin-top: 6px; text-transform: uppercase; letter-spacing: 1px;">Notificación Oficial de Pedido</p>
+        </div>
+
+        <div style="padding: 28px 24px;">
+          <p style="font-size: 16px; color: #e5e5e5; margin-top: 0;">Hola <strong style="color: #ffffff;">${customerName || 'Cliente'}</strong>,</p>
+          <p style="font-size: 15px; color: #cccccc; line-height: 1.6;">
+            ${statusMessage}
+          </p>
+
+          <div style="background-color: #171717; border: 1px solid #333333; border-radius: 12px; padding: 22px; margin: 25px 0; text-align: center;">
+            <span style="font-size: 11px; color: #a3a3a3; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 10px;">Nuevo Estado del Pedido</span>
+            <div style="display: inline-block; background-color: ${statusBg}; color: #000000; font-weight: bold; font-size: 15px; padding: 8px 24px; border-radius: 20px; text-transform: uppercase; letter-spacing: 1px;">
+              ${newStatus}
+            </div>
+            
+            <div style="margin-top: 20px; border-top: 1px dashed #333333; padding-top: 16px; display: flex; justify-content: space-around;">
+              <div>
+                <span style="font-size: 11px; color: #888888; display: block;">Número de Orden</span>
+                <strong style="color: #d4af37; font-size: 14px;">${orderCode}</strong>
+              </div>
+              ${formattedTotal ? `
+              <div>
+                <span style="font-size: 11px; color: #888888; display: block;">Valor Total</span>
+                <strong style="color: #ffffff; font-size: 14px;">${formattedTotal}</strong>
+              </div>
+              ` : ''}
+            </div>
+          </div>
+
+          <p style="font-size: 13px; color: #888888; text-align: center; margin-top: 28px; line-height: 1.5;">
+            Gracias por elegir Super Gelatto. Si tienes alguna consulta, puedes responder directamente a este correo.
+          </p>
+        </div>
+
+        <div style="background-color: #050505; padding: 14px; text-align: center; border-top: 1px solid #1a1a1a;">
+          <p style="font-size: 11px; color: #666666; margin: 0;">© 2026 Super Gelatto. Todos los derechos reservados.</p>
+        </div>
+      </div>
+    `;
+
+    const info = await emailTransporter.sendMail({
+      from: `"super gelatto 🍦" <${fromEmail}>`,
+      to: customerEmail,
+      subject: `${statusText} - ${orderCode}`,
+      html: htmlContent
+    });
+
+    console.log(`✉️ Correo de actualización de estado enviado con éxito a ${customerEmail} (Estado: ${newStatus}). MessageId: ${info.messageId}`);
+    if (nodemailer.getTestMessageUrl && nodemailer.getTestMessageUrl(info)) {
+      console.log(`🔗 Vista previa del correo de prueba (Ethereal): ${nodemailer.getTestMessageUrl(info)}`);
+    }
+  } catch (err) {
+    console.error(`❌ Error al enviar correo de notificación a ${customerEmail}:`, err.message);
+  }
+}
+
 // Validación de caracteres prohibidos para inputs
 function hasForbiddenChars(str) {
   if (typeof str !== 'string') return false;
@@ -1613,7 +1715,7 @@ app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   }
 });
 
-// Endpoint para actualizar el estado de una venta (orden)
+// Endpoint para actualizar el estado de una venta (orden) y notificar al cliente por correo
 app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
@@ -1624,28 +1726,63 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   }
 
   try {
-    // Actualizar en FALLBACK_SALES
+    let customerEmail = null;
+    let customerName = null;
+    let totalValue = null;
+
+    // 1. Buscar primero en FALLBACK_SALES
     const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(id));
     if (fbSale) {
       fbSale.estado = estado;
+      customerEmail = fbSale.email || fbSale.deliveryDetails?.email;
+      customerName = fbSale.nombre || fbSale.deliveryDetails?.fullName;
+      totalValue = fbSale.total;
       saveFallbackSales(FALLBACK_SALES);
     }
 
-    const { data, error } = await supabase
+    // 2. Actualizar en Supabase
+    const { data: supaSale, error } = await supabase
       .from('venta')
       .update({ estado })
       .eq('id_venta', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.warn('Advertencia al actualizar estado en Supabase:', error.message);
     }
 
+    // 3. Buscar datos del cliente si no los teníamos en memoria
+    if (!customerEmail) {
+      const saleData = supaSale || (await supabase.from('venta').select('*').eq('id_venta', id).maybeSingle()).data;
+      if (saleData) {
+        totalValue = totalValue || saleData.total;
+        if (saleData.id_usuario) {
+          const { data: userData } = await supabase.from('usuario').select('email, nombre, apellido').eq('id_usuario', saleData.id_usuario).maybeSingle();
+          if (userData) {
+            customerEmail = userData.email;
+            customerName = `${userData.nombre || ''} ${userData.apellido || ''}`.trim();
+          }
+        }
+      }
+    }
+
+    // 4. Disparar el envío de correo de notificación (Asíncrono)
+    if (customerEmail) {
+      sendStatusUpdateEmail({
+        saleId: id,
+        customerEmail,
+        customerName: customerName || 'Cliente',
+        newStatus: estado,
+        total: totalValue
+      });
+    }
+
     return res.status(200).json({
-      message: 'Estado de venta actualizado correctamente.',
+      message: 'Estado de venta actualizado correctamente y correo enviado.',
       id_venta: id,
-      estado
+      estado,
+      emailNotified: Boolean(customerEmail)
     });
   } catch (error) {
     console.error('Error al actualizar el estado de la venta:', error);
