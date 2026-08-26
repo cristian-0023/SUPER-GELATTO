@@ -64,10 +64,10 @@ async function runTests() {
     if (productRes.statusCode !== 201) throw new Error('Fallo al crear producto');
 
     console.log('\n🎉 ¡PRUEBAS COMPLETADAS CON EXITO!');
-    process.exit(0);
+    setTimeout(() => process.exit(0), 100);
   } catch (err) {
     console.error('\n❌ Falla en la validación:', err.message);
-    process.exit(1);
+    setTimeout(() => process.exit(1), 100);
   }
 }
 

@@ -471,6 +471,11 @@ if (!supabase) {
         queryData = queryData.filter(item => values.includes(item[field]));
         return builder;
       },
+      ilike: (field, value) => {
+        const target = String(value || '').toLowerCase();
+        queryData = queryData.filter(item => String(item[field] || '').toLowerCase() === target);
+        return builder;
+      },
       delete: async () => {
         const idsToRemove = queryData.map(item => item.id_usuario || item.id_producto || item.id_venta);
         mockDb[tableName] = mockDb[tableName].filter(item => {
@@ -523,6 +528,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
 });
@@ -1082,45 +1088,94 @@ app.post('/api/admin/faceid/rekognition-login', async (req, res) => {
 app.post('/api/google-login', async (req, res) => {
   const { email, name } = req.body;
 
-  if (!email) return res.status(400).json({ message: 'Email es obligatorio.' });
-
-  // 1. Buscar si el usuario ya existe
-  const { data: user, error } = await supabase.from('usuario').select('*').eq('email', email).maybeSingle();
-
-  if (user) {
-    // Generar token JWT firmado
-    const token = jwt.sign(
-      { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    // Si existe, lo logueamos directamente (Google ya validó su identidad)
-    return res.status(200).json({
-      ok: true,
-      message: 'Inicio de sesión con Google exitoso.',
-      token,
-      user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
-    });
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ message: 'Email es obligatorio.' });
   }
 
-  // 2. Si no existe, lo registramos automáticamente
+  const cleanEmail = email.trim();
+
   try {
-    // Generamos una contraseña aleatoria super segura que pasa el regex
+    // 1. Buscar si el usuario ya existe (búsqueda insensible a mayúsculas/minúsculas)
+    let user = null;
+    const { data: userIlike, error: searchErr } = await supabase
+      .from('usuario')
+      .select('*')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    user = userIlike;
+
+    if (!user) {
+      const { data: userEq } = await supabase
+        .from('usuario')
+        .select('*')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+      user = userEq;
+    }
+
+    if (user) {
+      // Generar token JWT firmado
+      const token = jwt.sign(
+        { id_usuario: user.id_usuario, email: user.email, rol: user.rol },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      return res.status(200).json({
+        ok: true,
+        message: 'Inicio de sesión con Google exitoso.',
+        token,
+        user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
+      });
+    }
+
+    // 2. Si no existe, lo registramos automáticamente
     const randomPassword = "Gg1!" + crypto.randomBytes(12).toString('hex') + "@#";
     const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
-    const userName = name || email.split('@')[0];
+    const userName = name || cleanEmail.split('@')[0];
 
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
-      .insert([{ nombre: userName, apellido: '', email, password_hash: hashedPassword, rol: 'cliente' }])
+      .insert([{ nombre: userName, apellido: '', email: cleanEmail.toLowerCase(), password_hash: hashedPassword, rol: 'cliente' }])
       .select().maybeSingle();
 
-    if (registerError) throw registerError;
+    if (registerError) {
+      // Si el error es por duplicado (ya registrado), buscar el usuario existente y loguear
+      if (registerError.code === '23505' || registerError.message?.includes('duplicate') || registerError.message?.includes('unique')) {
+        const { data: existingUser } = await supabase
+          .from('usuario')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+
+        if (existingUser) {
+          const token = jwt.sign(
+            { id_usuario: existingUser.id_usuario, email: existingUser.email, rol: existingUser.rol },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+          );
+
+          return res.status(200).json({
+            ok: true,
+            message: 'Inicio de sesión con Google exitoso.',
+            token,
+            user: { id: existingUser.id_usuario, id_usuario: existingUser.id_usuario, name: existingUser.nombre, email: existingUser.email, rol: existingUser.rol }
+          });
+        }
+      }
+      throw registerError;
+    }
+
+    const createdUser = newUser || (await supabase.from('usuario').select('*').eq('email', cleanEmail.toLowerCase()).maybeSingle()).data;
+
+    if (!createdUser) {
+      throw new Error('No se pudo recuperar los datos del nuevo usuario registrado.');
+    }
 
     // Generar token JWT firmado
     const token = jwt.sign(
-      { id_usuario: newUser.id_usuario, email: newUser.email, rol: newUser.rol },
+      { id_usuario: createdUser.id_usuario, email: createdUser.email, rol: createdUser.rol },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -1129,11 +1184,14 @@ app.post('/api/google-login', async (req, res) => {
       ok: true,
       message: 'Registro e inicio de sesión con Google exitoso.',
       token,
-      user: { id: newUser.id_usuario, id_usuario: newUser.id_usuario, name: newUser.nombre, email: newUser.email, rol: newUser.rol }
+      user: { id: createdUser.id_usuario, id_usuario: createdUser.id_usuario, name: createdUser.nombre, email: createdUser.email, rol: createdUser.rol }
     });
   } catch (err) {
-    console.error('Error en Google Login:', err);
-    return res.status(500).json({ message: 'Error al vincular cuenta de Google.' });
+    console.error('❌ Error en Google Login:', err);
+    return res.status(500).json({
+      ok: false,
+      message: err.message ? `Error al vincular cuenta de Google: ${err.message}` : 'Error al vincular cuenta de Google.'
+    });
   }
 });
 
