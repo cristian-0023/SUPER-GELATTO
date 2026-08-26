@@ -1588,45 +1588,45 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
       };
     });
 
-    // Obtener productos
-    let products = [];
+    // Obtener productos combinando Supabase y FALLBACK_PRODUCTS en tiempo real
+    const prodMap = new Map();
     try {
       const { data: prodData } = await supabase.from('producto').select('*').order('id_producto', { ascending: true });
       if (prodData && prodData.length > 0) {
-        products = prodData.map(p => ({
-          id: p.id_producto,
-          name: p.nombre,
-          precio: p.precio,
-          desc: p.descripcion,
-          image: p.imagen || getProductImage(p.nombre),
-          categoria: p.categoria || 'Clásico',
-          destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
-          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : (p.stock_disponible !== undefined && p.stock_disponible !== null ? Number(p.stock_disponible) : 50)
-        }));
-      } else {
-        products = FALLBACK_PRODUCTS.map(p => ({
-          id: p.id_producto,
-          name: p.nombre,
-          precio: p.precio,
-          desc: p.descripcion,
-          image: p.imagen || getProductImage(p.nombre),
-          categoria: p.categoria || 'Clásico',
-          destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
-          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
-        }));
+        prodData.forEach(p => {
+          prodMap.set(String(p.id_producto), {
+            id: p.id_producto,
+            name: p.nombre,
+            precio: p.precio,
+            desc: p.descripcion,
+            image: p.imagen || getProductImage(p.nombre),
+            categoria: p.categoria || 'Clásico',
+            destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
+            stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : (p.stock_disponible !== undefined && p.stock_disponible !== null ? Number(p.stock_disponible) : 50)
+          });
+        });
       }
     } catch (e) {
-      products = FALLBACK_PRODUCTS.map(p => ({
-        id: p.id_producto,
-        name: p.nombre,
-        precio: p.precio,
-        desc: p.descripcion,
-        image: p.imagen || getProductImage(p.nombre),
-        categoria: p.categoria || 'Clásico',
-        destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
-        stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
-      }));
+      console.warn('Advertencia obteniendo productos de Supabase:', e.message);
     }
+
+    FALLBACK_PRODUCTS.forEach(p => {
+      const pId = String(p.id_producto || p.id);
+      if (!prodMap.has(pId)) {
+        prodMap.set(pId, {
+          id: p.id_producto || p.id,
+          name: p.nombre || p.name,
+          precio: p.precio || p.price,
+          desc: p.descripcion || p.desc,
+          image: p.imagen || p.image || getProductImage(p.nombre || p.name),
+          categoria: p.categoria || 'Clásico',
+          destacado: Boolean(p.destacado),
+          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
+        });
+      }
+    });
+
+    const products = Array.from(prodMap.values());
 
     // Calcular estadísticas
     const totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
@@ -1988,14 +1988,59 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
   const numStock = stock !== undefined && stock !== null && !isNaN(parseInt(stock, 10)) ? Math.max(0, parseInt(stock, 10)) : 50;
 
   try {
-    const nextId = Date.now();
+    // 1. Calcular próximo ID de tipo entero válido (< 2.147.483.647) para PostgreSQL
+    let maxId = 0;
+    try {
+      const { data: existingProds } = await supabase.from('producto').select('id_producto').order('id_producto', { ascending: false }).limit(20);
+      if (existingProds && existingProds.length > 0) {
+        maxId = Math.max(...existingProds.map(p => Number(p.id_producto) || 0).filter(id => id < 2000000000));
+      }
+    } catch (e) {}
+
+    FALLBACK_PRODUCTS.forEach(p => {
+      const pId = Number(p.id_producto || p.id || 0);
+      if (pId > maxId && pId < 2000000000) maxId = pId;
+    });
+
+    const nextId = maxId > 0 ? maxId + 1 : 13;
     const finalImage = image || getProductImage(name);
     const isFeatured = Boolean(featured);
     const cat = category || 'Clásico';
     const desc = description || '';
 
-    const newProdItem = {
+    const supaProdItem = {
       id_producto: nextId,
+      nombre: name,
+      precio: numPrice,
+      descripcion: desc,
+      imagen: finalImage,
+      categoria: cat,
+      stock: numStock,
+      estado: true
+    };
+
+    // 2. Insertar en Supabase
+    let assignedId = nextId;
+    try {
+      const { data: inserted, error: insErr } = await supabase.from('producto').insert([supaProdItem]).select().maybeSingle();
+      if (insErr) {
+        console.warn('Advertencia Supabase al insertar producto con ID explícito:', insErr.message);
+        // Si falla por ID o conflicto, intentar sin id_producto explícito para que Postgres asigne el ID
+        const copyItem = { ...supaProdItem };
+        delete copyItem.id_producto;
+        const { data: insertedAuto } = await supabase.from('producto').insert([copyItem]).select().maybeSingle();
+        if (insertedAuto && insertedAuto.id_producto) {
+          assignedId = insertedAuto.id_producto;
+        }
+      } else if (inserted && inserted.id_producto) {
+        assignedId = inserted.id_producto;
+      }
+    } catch (e) {
+      console.warn('Advertencia Supabase al insertar producto:', e.message);
+    }
+
+    const newProdItem = {
+      id_producto: assignedId,
       nombre: name,
       precio: numPrice,
       descripcion: desc,
@@ -2009,23 +2054,16 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       reviews: 1
     };
 
-    // Insertar en Supabase o mockDb
-    try {
-      await supabase.from('producto').insert([newProdItem]);
-    } catch (e) {
-      console.warn('Advertencia al insertar producto en Supabase:', e);
-    }
-
-    // Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
+    // 3. Agregar a FALLBACK_PRODUCTS para sincronización local en memoria
     FALLBACK_PRODUCTS.unshift(newProdItem);
 
-    // Iniciar generación 3D con Tripo AI si se proporcionó un prompt
+    // 4. Iniciar generación 3D con Tripo AI si se proporcionó un prompt
     let modelObj = null;
     const tripoPrompt = prompt_usado || prompt3d || prompt;
     if (tripoPrompt && tripoPrompt.trim()) {
       try {
         const taskId = await startTripoTask(tripoPrompt);
-        TRIPO_MODELS_STATE[nextId] = {
+        TRIPO_MODELS_STATE[assignedId] = {
           taskId,
           prompt: tripoPrompt,
           estado: 'generando',
@@ -2040,8 +2078,10 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
     }
 
     const createdProductObj = {
-      id: nextId,
+      id: assignedId,
+      id_producto: assignedId,
       name: name,
+      nombre: name,
       precio: numPrice,
       price: numPrice,
       desc: desc,
@@ -2051,6 +2091,7 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
       stock: numStock
     };
 
+    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${assignedId}, Nombre: "${name}", Precio: $${numPrice}`);
     return res.status(201).json({
       ok: true,
       message: 'Producto creado y agregado al catálogo exitosamente.',
