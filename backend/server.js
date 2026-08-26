@@ -348,6 +348,101 @@ const FALLBACK_PRODUCTS = [
   }
 ];
 
+// Base de datos local simulada en memoria
+const mockDb = {
+  producto: FALLBACK_PRODUCTS,
+  usuario: [
+    { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'saldarriagac890@gmail.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+    { id_usuario: 2, nombre: 'Admin', apellido: 'Secundario', email: 'admin@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
+    { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
+  ],
+  rostros_admin: [],
+  venta: []
+};
+
+const makeQueryBuilder = (tableName) => {
+  let queryData = [...(mockDb[tableName] || [])];
+  
+  const builder = {
+    select: (fields) => {
+      return builder;
+    },
+    eq: (field, value) => {
+      queryData = queryData.filter(item => String(item[field]) === String(value));
+      return builder;
+    },
+    order: (field, options) => {
+      const asc = options?.ascending !== false;
+      queryData.sort((a, b) => {
+        if (a[field] < b[field]) return asc ? -1 : 1;
+        if (a[field] > b[field]) return asc ? 1 : -1;
+        return 0;
+      });
+      return builder;
+    },
+    limit: (n) => {
+      queryData = queryData.slice(0, n);
+      return builder;
+    },
+    single: async () => {
+      const item = queryData[0];
+      return { data: item || null, error: item ? null : { message: 'Not found' } };
+    },
+    maybeSingle: async () => {
+      const item = queryData[0];
+      return { data: item || null, error: null };
+    },
+    insert: (arr) => {
+      const newItems = arr.map((item) => {
+        const nextId = mockDb[tableName].length + 1;
+        return {
+          id_usuario: nextId,
+          id_producto: nextId,
+          id_venta: nextId,
+          id_detalle_venta: nextId,
+          fecha: new Date().toISOString(),
+          ...item
+        };
+      });
+      mockDb[tableName].push(...newItems);
+      queryData = newItems;
+      return builder;
+    },
+    upsert: (obj) => {
+      const item = Array.isArray(obj) ? obj[0] : obj;
+      if (!mockDb[tableName]) mockDb[tableName] = [];
+      const existingIdx = mockDb[tableName].findIndex(i => i.id_usuario === item.id_usuario);
+      if (existingIdx >= 0) {
+        Object.assign(mockDb[tableName][existingIdx], item);
+      } else {
+        mockDb[tableName].push({ ...item });
+      }
+      return Promise.resolve({ data: item, error: null });
+    },
+    in: (field, values) => {
+      queryData = queryData.filter(item => values.includes(item[field]));
+      return builder;
+    },
+    ilike: (field, value) => {
+      const target = String(value || '').toLowerCase();
+      queryData = queryData.filter(item => String(item[field] || '').toLowerCase() === target);
+      return builder;
+    },
+    delete: async () => {
+      const idsToRemove = queryData.map(item => item.id_usuario || item.id_producto || item.id_venta);
+      mockDb[tableName] = mockDb[tableName].filter(item => {
+        const id = item.id_usuario || item.id_producto || item.id_venta;
+        return !idsToRemove.includes(id);
+      });
+      return { data: null, error: null };
+    },
+    then: (onfulfilled, onrejected) => {
+      return Promise.resolve({ data: queryData, error: null }).then(onfulfilled, onrejected);
+    }
+  };
+  return builder;
+};
+
 let supabase;
 
 const isSupabaseConfigured = supabaseUrl && 
@@ -395,107 +490,9 @@ if (isSupabaseConfigured) {
 
 if (!supabase) {
   console.warn('⚠️ Advertencia: Usando base de datos en memoria (Mock Supabase) debido a la falta de configuración válida.');
-  
-  // Base de datos local simulada en memoria
-  const mockDb = {
-    producto: FALLBACK_PRODUCTS,
-    usuario: [
-      { id_usuario: 1, nombre: 'Admin', apellido: 'SuperGelatto', email: 'saldarriagac890@gmail.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
-      { id_usuario: 2, nombre: 'Admin', apellido: 'Secundario', email: 'admin@supergelatto.com', password_hash: '$2a$10$GamiM2h7IwlRhosL5hQD0.OSBb2rdwSXVmkfpQS1rNOTkC2.Cw3zK', rol: 'admin' },
-      { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
-    ],
-    rostros_admin: [],
-    venta: []
-  };
-
-  const makeQueryBuilder = (tableName) => {
-    let queryData = [...(mockDb[tableName] || [])];
-    
-    const builder = {
-      select: (fields) => {
-        return builder;
-      },
-      eq: (field, value) => {
-        queryData = queryData.filter(item => String(item[field]) === String(value));
-        return builder;
-      },
-      order: (field, options) => {
-        const asc = options?.ascending !== false;
-        queryData.sort((a, b) => {
-          if (a[field] < b[field]) return asc ? -1 : 1;
-          if (a[field] > b[field]) return asc ? 1 : -1;
-          return 0;
-        });
-        return builder;
-      },
-      limit: (n) => {
-        queryData = queryData.slice(0, n);
-        return builder;
-      },
-      single: async () => {
-        const item = queryData[0];
-        return { data: item || null, error: item ? null : { message: 'Not found' } };
-      },
-      maybeSingle: async () => {
-        const item = queryData[0];
-        return { data: item || null, error: null };
-      },
-      insert: (arr) => {
-        const newItems = arr.map((item) => {
-          const nextId = mockDb[tableName].length + 1;
-          return {
-            id_usuario: nextId,
-            id_producto: nextId,
-            id_venta: nextId,
-            id_detalle_venta: nextId,
-            fecha: new Date().toISOString(),
-            ...item
-          };
-        });
-        mockDb[tableName].push(...newItems);
-        queryData = newItems;
-        return builder;
-      },
-      upsert: (obj) => {
-        const item = Array.isArray(obj) ? obj[0] : obj;
-        if (!mockDb[tableName]) mockDb[tableName] = [];
-        const existingIdx = mockDb[tableName].findIndex(i => i.id_usuario === item.id_usuario);
-        if (existingIdx >= 0) {
-          Object.assign(mockDb[tableName][existingIdx], item);
-        } else {
-          mockDb[tableName].push({ ...item });
-        }
-        return Promise.resolve({ data: item, error: null });
-      },
-      in: (field, values) => {
-        queryData = queryData.filter(item => values.includes(item[field]));
-        return builder;
-      },
-      ilike: (field, value) => {
-        const target = String(value || '').toLowerCase();
-        queryData = queryData.filter(item => String(item[field] || '').toLowerCase() === target);
-        return builder;
-      },
-      delete: async () => {
-        const idsToRemove = queryData.map(item => item.id_usuario || item.id_producto || item.id_venta);
-        mockDb[tableName] = mockDb[tableName].filter(item => {
-          const id = item.id_usuario || item.id_producto || item.id_venta;
-          return !idsToRemove.includes(id);
-        });
-        return { data: null, error: null };
-      },
-      then: (onfulfilled, onrejected) => {
-        return Promise.resolve({ data: queryData, error: null }).then(onfulfilled, onrejected);
-      }
-    };
-    return builder;
-  };
-
   supabase = {
     from: (tableName) => makeQueryBuilder(tableName),
-    rpc: (name, args) => {
-      return Promise.resolve({ data: [], error: null });
-    }
+    rpc: (name, args) => Promise.resolve({ data: [], error: null })
   };
 }
 
