@@ -7,7 +7,7 @@ import { k, helpers, basePlate, namePlate, staticSvg, livePage, write } from "./
 
 const WIDTH = 720;
 const HEIGHT = 330;
-const BASE = { x: -272, y: -158, w: 482, d: 202, r: 10 };
+const BASE = { x: -272, y: -158, w: 482, d: 210, r: 10 };
 const TRACK_Y = 16;
 const GATE_X = -63;
 
@@ -17,7 +17,7 @@ const PROVIDERS = [
   { id: "google", plate: "GOOGLE", name: "Google", what: "inicio de sesión con Google" },
   { id: "groq", plate: "GROQ", name: "Groq", what: "el chatbot Gelbot" },
   { id: "aws", plate: "AWS", name: "AWS Rekognition", what: "login facial de los admins" },
-  { id: "tripo", plate: "TRIPO 3D", name: "Tripo 3D", what: "modelos 3D de productos" },
+  { id: "tripo", plate: "TRIPO", name: "Tripo 3D", what: "modelos 3D de productos" },
   { id: "correo", plate: "CORREO", name: "Correo (nodemailer)", what: "avisos por correo al cliente" },
 ];
 const MOD_X = [-96, -48, 0, 48, 96];
@@ -101,7 +101,7 @@ function module(index) {
   // conector de donde sale el cable
   out.push(S(k.slabOf({ x: cx - 3, y: box.y + box.d, w: 6, d: 2.4, r: 0.6 }, 28.6, 4, P, 2), { tone: "mid" }));
   out.push("</g>");
-  out.push(namePlate(P, { x: cx - 19, y: -120, w: 38, d: 8 }, PROVIDERS[index].plate, { z: 26, size: 4.6 }));
+  out.push(namePlate(P, { x: cx - 19, y: -121, w: 38, d: 9 }, `${String.fromCharCode(65 + index)} ${PROVIDERS[index].plate}`, { z: 26, size: 5.4 }));
   return out.join("");
 }
 
@@ -293,11 +293,11 @@ function puck() {
 }
 
 const plates = [
-  [{ x: -262, y: 28, w: 62 }, "1 CLIENTE"],
-  [{ x: -180, y: 28, w: 86 }, "2 MOSTRADOR"],
-  [{ x: -88, y: 33, w: 64 }, "3 GUARDIA"],
-  [{ x: -14, y: 28, w: 66 }, "4 COCINA"],
-  [{ x: 112, y: 28, w: 66 }, "5 BODEGA"],
+  [{ x: -264, y: 30, w: 70 }, "1 CLIENTE"],
+  [{ x: -184, y: 30, w: 90 }, "2 MOSTRADOR"],
+  [{ x: -88, y: 32, w: 68 }, "3 GUARDIA"],
+  [{ x: -12, y: 30, w: 66 }, "4 COCINA"],
+  [{ x: 112, y: 30, w: 66 }, "5 BODEGA"],
 ];
 
 const LABEL =
@@ -321,7 +321,7 @@ function drawing(pose) {
     duct(),
     bodega(),
     track(),
-    ...plates.map(([plan, text]) => namePlate(P, { ...plan, d: 12 }, text, { size: 6.4 })),
+    ...plates.map(([plan, text]) => namePlate(P, { ...plan, d: 14 }, text, { size: 8.6 })),
     puckX < GATE_X ? puckSvg + gateSvg : gateSvg + puckSvg,
   ].join("");
 }
@@ -329,10 +329,10 @@ function drawing(pose) {
 // ---------- SVG estático (pose: el pedido en la cocina, el cable de Groq activo) ----------
 const LEGEND = [
   { n: "1", name: "Cliente", what: "navegador o celular" },
-  { n: "2", name: "Mostrador: página web", what: "React, Vercel" },
+  { n: "2", name: "Mostrador: página web (React, Vercel)", what: "" },
   { n: "3", name: "Guardia", what: "revisa el token / la sesión" },
-  { n: "4", name: "Cocina: servidor", what: "Express, Render" },
-  { n: "5", name: "Bodega: base de datos", what: "Supabase / Postgres" },
+  { n: "4", name: "Cocina: servidor (Express, Render)", what: "" },
+  { n: "5", name: "Bodega: base de datos (Supabase / Postgres)", what: "" },
   ...PROVIDERS.map((p, i) => ({ n: String.fromCharCode(65 + i), name: p.name, what: p.what })),
 ];
 const CAPTION =

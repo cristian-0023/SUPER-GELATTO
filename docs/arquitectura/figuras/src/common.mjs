@@ -46,7 +46,7 @@ export function namePlate(P, { x, y, w, d = 9 }, text, { z = 0, size = 4.2, lit 
     S(k.slabOf(plan, z, 0.9, P, 4), { tone: lit ? "hi" : "lo", crease: "none" }),
     L(k.planOutline(k.insetPlan(plan, 1.2), top, P, 4), { tone: "faint" }),
     D([at([x + 2.6, y + d / 2, top]), at([x + w - 2.6, y + d / 2, top])], { size: 0.42 }),
-    k.faceTextSvg(k.topMatrix([x + w / 2, y + d / 2 + size * 0.36], top, P, "x"), text, { size, tone: lit ? "hi" : "mid", anchor: "middle" }),
+    k.faceTextSvg(k.topMatrix([x + w / 2, y + d / 2 + size * 0.36], top, P, "x"), text, { size, tone: "hi", anchor: "middle" }),
   ].join("");
 }
 
@@ -86,7 +86,7 @@ export function staticSvg({ width, height, drawing, label, fig, title, hint, rea
   const cardH = drawH + 64;
   const colW = (W - pad * 2) / 2;
   const legendRows = Math.ceil(legend.length / 2);
-  const capLines = wrap(caption, 126);
+  const capLines = wrap(caption, 110);
   const legendTop = cardH + 26;
   const capTop = legendTop + legendRows * 19 + 12;
   const H = capTop + capLines.length * 17 + 14;

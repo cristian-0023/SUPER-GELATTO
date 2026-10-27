@@ -7,7 +7,7 @@ import { k, helpers, basePlate, namePlate, staticSvg, livePage, write } from "./
 
 const WIDTH = 720;
 const HEIGHT = 305;
-const BASE = { x: -272, y: -122, w: 520, d: 170, r: 10 };
+const BASE = { x: -272, y: -122, w: 520, d: 176, r: 10 };
 const BELT_Y = 15.5;
 const STOP = { carrito: -212, pago: -92, caja: 0, estados: 124 };
 const LAMP_X = [100, 118, 136, 154];
@@ -221,11 +221,11 @@ function puck() {
 }
 
 const PLATES = [
-  [{ x: -246, y: 33, w: 62 }, "1 CARRITO"],
-  [{ x: -120, y: 33, w: 56 }, "2 PAGO"],
-  [{ x: -28, y: 33, w: 56 }, "3 CAJA"],
-  [{ x: 98, y: 33, w: 62 }, "4 ESTADOS"],
-  [{ x: 178, y: 33, w: 56 }, "5 CORREO"],
+  [{ x: -246, y: 32, w: 62 }, "1 CARRITO"],
+  [{ x: -120, y: 32, w: 56 }, "2 PAGO"],
+  [{ x: -28, y: 32, w: 56 }, "3 CAJA"],
+  [{ x: 98, y: 32, w: 62 }, "4 ESTADOS"],
+  [{ x: 178, y: 32, w: 56 }, "5 CORREO"],
 ];
 
 const LABEL =
@@ -244,7 +244,7 @@ function drawing(pose) {
     estados(),
     buzon(),
     belt(),
-    ...PLATES.map(([plan, text]) => namePlate(P, { ...plan, d: 12 }, text, { size: 6.4 })),
+    ...PLATES.map(([plan, text]) => namePlate(P, { ...plan, d: 14 }, text, { size: 8.6 })),
     `<g data-part="puck" transform="${k.translateAlong(P, [pose.x, 0, 0])}">${puck()}</g>`,
     beltFront(),
   ].join("");
@@ -272,7 +272,7 @@ const LEGEND = [
   { n: "!", name: "Si falta stock", what: "STOCK_INSUFICIENTE: no se guarda nada" },
 ];
 const CAPTION =
-  "El pedido sale del carrito. En el pago, la cocina revisa que el carrito tenga sentido, tira a la papelera los precios que mandó el navegador y cuenta los intentos (máximo 10 por minuto). La caja registradora registrar_venta busca los precios reales en la base, guarda la venta y su detalle y descuenta los potes del estante, todo junto o nada: si falta un pote responde STOCK_INSUFICIENTE y no queda nada guardado. La venta queda «Pagado» y luego avanza (En proceso → Enviado → Entregado…); en cada cambio sale un correo al cliente.";
+  "El pedido sale del carrito. En el pago, la cocina revisa que el carrito tenga sentido, tira a la papelera los precios que mandó el navegador y cuenta los intentos (por defecto, máximo 10 por minuto). La caja registradora registrar_venta busca los precios reales en la base, guarda la venta y su detalle y descuenta los potes del estante, todo junto o nada: si falta un pote responde STOCK_INSUFICIENTE y no queda nada guardado. La venta queda «Pagado» y luego avanza (En proceso → Enviado → Entregado…); en cada cambio sale un correo al cliente.";
 
 write(
   "viaje-compra.svg",
@@ -307,7 +307,7 @@ const step = (prev, change, secs, text) => ({ ...prev, ...change, secs, text });
 const OK = [];
 OK.push(step(base, { x: STOP.carrito }, 2.6, "1 · carrito: el cliente junta 2 helados"));
 OK.push(step(OK[0], { x: STOP.pago }, 1.6, "2 · pago: llega el carrito"));
-OK.push(step(OK[1], { tag: 0, bin: 1, tries: 1 }, 2.6, "2 · ignora precios del navegador · intento 1 de 10"));
+OK.push(step(OK[1], { tag: 0, bin: 1, tries: 1 }, 2.6, "2 · ignora precios del navegador · intento 1 de 10/min"));
 OK.push(step(OK[2], { x: STOP.caja }, 1.4, "3 · registrar_venta: todo o nada"));
 OK.push(step(OK[3], { drawer: 1, tubs: 1, sheet: 1 }, 2.8, "3 · guarda venta + detalle y descuenta 2 potes"));
 OK.push(step(OK[4], { x: STOP.estados, drawer: 0, status: 0 }, 2.2, "4 · venta «Pagado»"));
