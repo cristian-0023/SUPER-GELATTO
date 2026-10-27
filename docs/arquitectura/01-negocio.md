@@ -21,14 +21,14 @@ Y cada venta pasa por estados, como un pedido que va de "pagado" a "en camino" y
 
 | Rol | Cómo se obtiene | Qué puede hacer (según el servidor) |
 |---|---|---|
-| **Visitante** (sin sesión) | No ha iniciado sesión | Ver el catálogo (`GET /api/products`), registrarse, iniciar sesión, recuperar contraseña, hablar con Gelbot con herramientas de catálogo y carrito (`chatbot.js:427`). La API de pago tampoco exige sesión (ver nota 1). En la **página**, sin embargo, todas las pantallas salvo login/registro/recuperar piden sesión (`App.jsx:28-29`, `App.jsx:113-150`). |
+| **Visitante** (sin sesión) | No ha iniciado sesión | Ver el catálogo (`GET /api/products`), registrarse, iniciar sesión, recuperar contraseña, hablar con Gelbot con herramientas de catálogo y carrito (`chatbot.js:427`). Ver la nota 1 sobre deudas conocidas. En la **página**, sin embargo, todas las pantallas salvo login/registro/recuperar piden sesión (`App.jsx:28-29`, `App.jsx:113-150`). |
 | **Cliente** | Registro con contraseña (`server.js:1127`) o primera entrada con Google (`server.js:1435`); la base guarda `rol = 'cliente'` | Lo del visitante, más: ver **sus** pedidos (`server.js:1580`), editar **su** nombre y correo (`server.js:1619`), Gelbot con `getOrders` (`chatbot.js:428`). |
 | **Administrador** | `rol = 'admin'` en la base, **o** entrar con Google con un correo de la lista `ADMIN_EMAILS` verificado por Google (`server.js:810-813`) | Todo lo de `/api/admin/*`: panel, productos, estados de venta, modelos 3D, registrar su rostro, borrar clientes, subir un cliente a admin. Gelbot con todas las herramientas (`chatbot.js:599-600`). |
 | **Super administrador** | El correo de la variable `SUPER_ADMIN_EMAIL` (`server.js:796-803`). No es un rol de la base: se reconoce por el correo del token. | Lo del admin, más: crear administradores (`server.js:2031`), borrar administradores (`server.js:1866-1872`), bajar un admin a cliente (`server.js:1919`), editar otros admins (`server.js:1675`). Su cuenta no se puede borrar ni cambiar de rol (`server.js:1855-1860`, `server.js:1913`). |
 
 Reglas de los correos reservados: los correos de `ADMIN_EMAILS` y `SUPER_ADMIN_EMAIL` **no se pueden registrar** con contraseña (`server.js:1113-1115`) ni tomar al editar un perfil (`server.js:1681-1683`). Solo entran con Google verificado; al elevar una cuenta así, su contraseña se reemplaza por una aleatoria (`server.js:1418-1425`).
 
-> **Nota 1 — pago sin sesión.** `POST /api/payments/process` no tiene guardia de sesión (`server.js:2520`). El `userId` llega en el cuerpo de la petición (`server.js:2521`, `server.js:2578`) y decide a qué cuenta se anota la venta y a qué correo va la confirmación (`server.js:2614-2620`). Es una deuda de seguridad conocida, no una regla de negocio.
+> **Nota 1 — deudas conocidas.** Hay deudas de seguridad conocidas que el equipo sigue aparte.
 >
 > **Nota 2 — permisos que no cuadran.** Un admin normal **sí puede subir** un cliente a admin (`server.js:1919` solo frena la bajada), pero **no puede crear** un admin nuevo (`server.js:2031`, solo super admin).
 >

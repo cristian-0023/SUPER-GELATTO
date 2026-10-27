@@ -4,10 +4,10 @@
 
 Ahora entramos a la heladería y vemos sus tres espacios grandes.
 El **mostrador** (la Tienda web) es lo que ve el cliente en su navegador; está en un local alquilado a Vercel.
-La **cocina** (la API Express) recibe cada pedido del mostrador, revisa el carnet del cliente y habla con la bodega y los proveedores; está en un local alquilado a Render.
-La **bodega con su libreta** (la base de datos Postgres) guarda todo de forma permanente; está en Supabase.
+La **cocina** (la API Express; una API es la puerta por la que los programas se piden cosas entre sí) recibe cada pedido del mostrador, revisa el carnet del cliente y habla con la bodega y los proveedores; está en un local alquilado a Render.
+La **bodega con su libreta** (la base de datos Postgres, un programa muy usado para guardar tablas de datos) guarda todo de forma permanente; está en Supabase.
 El mostrador nunca entra a la bodega: siempre le pide las cosas a la cocina.
-Las llaves de los proveedores (contraseñas, claves) se guardan como **variables de entorno**: papelitos que se le entregan a la cocina al abrir, nunca pegados en la pared.
+Las llaves de los proveedores (contraseñas, claves) deben ir en **variables de entorno**: papelitos que se le entregan a la cocina al abrir, no pegados en la pared.
 
 ## Detalle técnico
 
@@ -25,6 +25,7 @@ Estos nombres se usan **igual** en todos los diagramas y figuras de esta carpeta
 | **Base de datos** | Postgres con las tablas del negocio | Bodega con su libreta | Supabase | Postgres, supabase-js con llave `service_role` |
 | **registrar_venta** | Función de la base que cobra y anota la venta | Caja registradora | Dentro de la Base de datos | PL/pgSQL, `security invoker` |
 | **Archivos JSON locales** | Estado guardado en el disco del servidor | Notas sueltas pegadas en la cocina | Disco de la API Express | `featured_state.json`, `fallback_sales.json`, `tripo_models_state.json` |
+| **Guardia (token de sesión)** | Revisión del token en cada petición (middleware de la API) | Guardia que pide carnet | Dentro de la API Express | JWT |
 | **Google Sign-In** | Identidad con Google | Oficina que emite carnets | Externo | OAuth / ID token |
 | **Groq** | Modelo de lenguaje | "Cerebro" alquilado de Gelbot | Externo | `llama-3.1-8b-instant` |
 | **AWS Rekognition** | Reconocimiento facial | Portero que reconoce caras | Externo | Colección de rostros |
@@ -76,7 +77,7 @@ flowchart LR
 |---|---|---|
 | Tienda web → API Express | `fetch` a `VITE_API_URL` + ruta. Con sesión se manda `Authorization: Bearer <token>` (ayudante `apiFetch`) | `frontend/src/utils/api.js:9`, `api.js:52-73` |
 | API Express acepta a | `localhost`, `127.0.0.1`, `FRONTEND_URL`, cualquier `*.vercel.app` o `*.netlify.app` (CORS) | `server.js:576-594` |
-| API Express → Base de datos | Cliente `@supabase/supabase-js` con la llave `service_role` (salta las reglas RLS) | `server.js:31-33`, `server.js:457-461` |
+| API Express → Base de datos | Cliente `@supabase/supabase-js` con la llave `service_role` | `server.js:31-33`, `server.js:457-461` |
 | API Express → Base (modo simulado) | Si falta Supabase, una base de mentira en memoria (`mockDb`) con su propia versión de `registrar_venta` (no descuenta stock) | `server.js:355-448`, `server.js:523-561` |
 | Desarrollo local | Vite en el puerto 3000 reenvía `/api` al servidor en el 5000 | `frontend/vite.config.js:10-17`, `server.js:572` |
 

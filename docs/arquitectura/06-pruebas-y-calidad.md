@@ -4,7 +4,7 @@
 
 Antes de abrir cada día, una heladería seria prueba sus helados: que la caja cobre bien, que el guardia no deje pasar a quien no tiene carnet, que no se venda un sabor agotado.
 Las **pruebas automáticas** hacen eso con el código: son 322 pequeños "exámenes" que se ejecutan solos en un minuto y medio.
-Para no tocar la bodega de verdad, usan una **bodega de juguete**: una base Postgres real pero en memoria (PGlite) y una Supabase falsa que responde como la de verdad.
+Para no tocar la bodega de verdad, usan una **bodega de juguete**: una base Postgres (el programa de bases de datos que usa el proyecto) real pero en memoria (PGlite) y una Supabase falsa que responde como la de verdad.
 Si un examen falla, algo se rompió y no se debe publicar.
 La regla del equipo es "primero la prueba, después el código" (TDD): se escribe el examen, se ve fallar y luego se arregla el código hasta que pase.
 

@@ -68,7 +68,7 @@ flowchart TB
 |---|---|---|---|
 | `Navbar` + `CartDrawer` | Menú, botón de SuperPoints, cajón del carrito. Los SuperPoints son solo un cálculo en pantalla (total / 10); no se guardan | `CartContext` | `Navbar.jsx:6`, `CartDrawer.jsx:93` |
 | `Gelbot` | Ventana de chat; manda el token como `Bearer`; puede agregar al carrito y mostrar tablas | `POST /api/chatbot`, `CartContext` | `Gelbot.jsx:142-144`, `:220-221` |
-| `PaymentGateway` | Modal de pago simulado (PSE, Nequi, Bancolombia). Manda el carrito y `userId`; **no** manda token | `POST /api/payments/process` | `PaymentGateway.jsx:127-150` |
+| `PaymentGateway` | Modal de pago simulado (PSE, Nequi, Bancolombia). Manda el carrito y los datos del pago | `POST /api/payments/process` | `PaymentGateway.jsx:127-150` |
 | `GelatoBuilder3D` | Constructor 3D del inicio (cono, copa, vaso) con modelos `.glb` fijos de `public/` | — | `GelatoBuilder3D.jsx:98-100` |
 | `Model3DPreview` | Visor del modelo 3D generado por Tripo para un producto (panel admin) | URL del modelo | `Model3DPreview.jsx:16`; `AdminDashboard.jsx:10` |
 | `CapturaFacial` | Toma la foto de la cámara para el login facial y para registrar el rostro del admin | (la pantalla que lo usa) | `Login.jsx:332-337`; `AdminDashboard.jsx:11`, `:188` |

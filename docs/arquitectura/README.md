@@ -11,7 +11,7 @@ Estos documentos son como un mapa con zoom: primero se ve la heladería desde le
 
 ![La heladería como máquina](figuras/heladeria-maquina.svg)
 
-*Figura: la heladería como máquina. [Ver la versión animada](figuras/heladeria-maquina.html).*
+*Figura: la heladería como máquina. [Descarga el archivo y ábrelo en el navegador para verla animada](figuras/heladeria-maquina.html).*
 
 ## Detalle técnico
 
@@ -71,7 +71,7 @@ flowchart LR
 | **Middleware** | Un paso que revisa la petición antes de que llegue a la ruta (por ejemplo, revisar el token). | El guardia en la puerta de la cocina |
 | **Límite de intentos** (rate limiting) | Tope de peticiones por minuto desde la misma conexión, contra bots. | "Máximo 10 pedidos por persona cada minuto" |
 | **Despliegue** | Publicar la app en internet. La página va en Vercel y el servidor en Render. | Abrir la tienda al público |
-| **Variable de entorno** | Un dato de configuración (por ejemplo una llave secreta) que se le da al servidor desde afuera, nunca escrito en el código. Se guarda en `.env`, que no se sube a git. | La clave de la caja fuerte, que no se pega en la vitrina |
+| **Variable de entorno** | Un dato de configuración (por ejemplo una llave secreta) que se le da al servidor desde afuera; las llaves deben ir aquí. Se guarda en `.env`, que no se sube a git. | La clave de la caja fuerte, que no se pega en la vitrina |
 | **Servicio externo** | Un proveedor de afuera con el que habla el servidor (Google, Groq, AWS, Tripo, correo). | Los proveedores de leche, frutas y transporte |
 | **Transacción "todo o nada"** | Varias operaciones que se hacen juntas o no se hace ninguna. | La caja registradora: si falla algo, no se cobra ni se saca helado de la bodega |
 | **Modo simulado** (mockDb) | Si falta la configuración de Supabase, el servidor usa una base de mentira en memoria (solo para desarrollo). | Una libreta de práctica que se borra al cerrar |

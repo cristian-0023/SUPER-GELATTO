@@ -3,7 +3,7 @@
 ## Para principiantes
 
 La cocina (la API Express) tiene estaciones, cada una con su trabajo: una revisa la puerta, otra atiende las cuentas de los clientes, otra el catálogo, otra los pagos y otra los correos.
-Cada pedido que llega del mostrador entra por una **ventanilla** (una ruta, por ejemplo `POST /api/login`).
+Cada pedido que llega del mostrador entra por una **ventanilla** (una ruta, por ejemplo `POST /api/login`; POST significa "enviar datos" y API es la puerta por la que los programas se piden cosas entre sí).
 Antes de atenderlo, un **guardia que pide carnet** (el middleware) mira si el pedido trae token y qué rol dice: algunas ventanillas atienden a cualquiera, otras solo a clientes con sesión y otras solo a administradores.
 Algunas ventanillas tienen además un **límite de turnos**: si alguien insiste demasiadas veces seguidas, se le pide que espere, para frenar a los robots.
 Gelbot, el ayudante del chat, también vive en esta cocina y solo puede usar las herramientas que su carnet permite.
@@ -69,7 +69,7 @@ flowchart TB
 |---|---|---|
 | *(ninguna)* = **público** | Nada | — |
 | `requireAuth` | `Authorization: Bearer <token>` válido (cualquier rol). Deja el contenido en `req.user` | `server.js:867-875` |
-| `requireAdmin` (= `requireAuthenticatedAdmin`) | Token válido con `rol` `admin` o `super_admin`. Acepta el token en `Authorization: Bearer` **o** en la cabecera `x-user-token` | `server.js:836-863` |
+| `requireAdmin` (= `requireAuthenticatedAdmin`) | Token válido con `rol` `admin` o `super_admin`. Lee el token de la petición | `server.js:836-863` |
 | **Super admin** | No es un middleware: es `requireAdmin` más una comprobación del correo del token (`esSuperAdminEmail`) **dentro** de la ruta | `server.js:800-803` |
 
 El permiso sale **solo** del rol firmado en el token, nunca de cabeceras como `x-user-role` ni del cuerpo (`server.js:834-835`).
@@ -96,7 +96,7 @@ Al pasar el tope responden **429** con un mensaje en español.
 | 4 | POST | `/api/admin/faceid/rekognition-login` | `server.js:1257` | público | Cualquiera; solo da token si el rostro es de un usuario con `rol = 'admin'` en la base (`:1313`) | `limitadorLoginFacial` (cuerpo 8 MB) | Busca el rostro en AWS (similitud ≥ 70 %) → token |
 | 5 | POST | `/api/google-login` | `server.js:1397` | público | Cualquiera con cuenta Google verificada | `limitadorGoogleLogin` | Verifica el `credential`; crea la cuenta si no existe; `ADMIN_EMAILS` → token de admin |
 | 6 | POST | `/api/forgot-password` | `server.js:1466` | público | Cualquiera | `limitadorOlvidoClave` | Envía un enlace válido 1 hora; respuesta genérica (no revela si el correo existe) |
-| 7 | POST | `/api/reset-password/:token` | `server.js:1521` | público | Quien tenga el código del correo | **ninguno** | Cambia la contraseña (código de un solo uso) |
+| 7 | POST | `/api/reset-password/:token` | `server.js:1521` | público | Quien tenga el código del correo | — | Cambia la contraseña (código de un solo uso) |
 | 8 | GET | `/api/orders/:userId` | `server.js:1575` | `requireAuth` | El dueño o un admin (`:1580`) | — | Pedidos del usuario, paginados (`limit` ≤ 50, `offset`) |
 | 9 | PUT | `/api/users/:id` | `server.js:1611` | `requireAuth` | El dueño o un admin (`:1619`); a otros admins solo el super admin (`:1675`) | — | Cambia solo nombre y correo |
 | 10 | GET | `/api/admin/dashboard` | `server.js:1723` | `requireAdmin` | Admin | — | Usuarios, ventas, productos y estadísticas (sin paginar) |
@@ -112,7 +112,7 @@ Al pasar el tope responden **429** con un mensaje en español.
 | 20 | PUT | `/api/admin/products/:id/category` | `server.js:2293` | `requireAdmin` | Admin | — | Cambia la categoría (4 permitidas) |
 | 21 | PUT | `/api/admin/products/:id/stock` | `server.js:2321` | `requireAdmin` | Admin | — | Cambia el stock (entero ≥ 0) |
 | 22 | GET | `/api/products` | `server.js:2351` | público | Cualquiera | — | Catálogo activo con datos de sabor; si la base falla, catálogo del código |
-| 23 | POST | `/api/payments/process` | `server.js:2520` | **público** | Cualquiera; el `userId` lo manda el cuerpo (`:2521`) | `limitadorPagos` | Pago simulado + `registrar_venta` + correo |
+| 23 | POST | `/api/payments/process` | `server.js:2520` | público | Ver sección de seguridad | `limitadorPagos` | Pago simulado + `registrar_venta` + correo |
 | 24 | POST | `/api/chatbot` | `server.js:2703` | público (token opcional) | Cualquiera; las herramientas dependen del rol del token | `limitadorChatbot` | Gelbot |
 | 25 | GET | `/api/admin/products/:id/model-3d` | `server.js:2712` | `requireAdmin` | Admin | — | Estado del modelo 3D; al terminar guarda `model_3d_url` |
 | 26 | POST | `/api/admin/products/:id/regenerate-3d` | `server.js:2778` | `requireAdmin` | Admin | — | Inicia una nueva tarea en Tripo 3D |
@@ -127,7 +127,7 @@ Rutas que **ya no existen**: `POST /api/orders` y `POST /api/sales` (`server.js:
 | Herramientas por rol | Visitante: `getProducts`, `addToCart`. Cliente: + `getOrders` (siempre los del token). Admin: todas (+ `getAllUsers`, `getAllOrders`, `deleteUser`, `deleteProduct`, `addProduct`, `getSalesSummary`) | `chatbot.js:15-121`, `chatbot.js:427-428`, `chatbot.js:599-600` |
 | Confirmación | `deleteUser`, `deleteProduct` y `addProduct` no se ejecutan: se **proponen** con un código aleatorio ligado al admin, de un solo uso, que vence en 5 min. Se confirma en otra petición (`{ confirmar: código }`) | `chatbot.js:333-382`, `chatbot.js:519-538` |
 | Reglas de borrado | Las mismas que la ruta 11 (super admin protegido, admins solo por super admin) | `chatbot.js:198-240` |
-| Límites | Mensaje ≤ 1.000 caracteres; historial ≤ 20 turnos (se usan los 4 últimos); máximo 3 llamadas a herramientas | `chatbot.js:342`, `chatbot.js:430-441`, `chatbot.js:588-591` |
+| Límites | Mensaje ≤ 1.000 caracteres; historial ≤ 20 turnos (se usan los 4 últimos); máximo 3 llamadas a herramientas | `chatbot.js:431` (largo del mensaje), `chatbot.js:342` (tope de llamadas a herramientas), `chatbot.js:588-591` |
 | Datos no confiables | Lo que viene de clientes (nombres, correos) se marca y limpia antes de pasarlo al modelo | `chatbot.js:396-424` |
 | Atajo y caché | "Agregar X al carrito" sin llamar a la IA; catálogo en caché 1 min | `chatbot.js:462-517`, `chatbot.js:570-577` |
 | Modelo | Groq `llama-3.1-8b-instant`, `max_tokens` 300 | `chatbot.js:658-665` |
@@ -141,25 +141,21 @@ Rutas que **ya no existen**: `POST /api/orders` y `POST /api/sales` (`server.js:
 - Contraseñas con bcrypt, 10 rondas (`server.js:573`).
 - Correos de administradores reservados (`server.js:805-808`).
 - Precios y total los calcula la base; todo o nada (ver [07-modelo-datos.md](07-modelo-datos.md)).
-- Datos escapados antes de entrar al HTML de los correos (`server.js:688-692`, `server.js:2501-2503`).
+- Datos escapados antes de entrar al HTML de los correos de cambio de estado y de pago (`server.js:688-692`, `server.js:2501-2503`).
 - Producción no arranca en modo simulado, para no aprobar pagos que no se guardan (`server.js:495-499`).
 - La verificación TLS solo se relaja fuera de producción (`server.js:6-10`).
 
-**Deuda conocida (verificada en el código)**
+**Deuda conocida**
+
+Hay deudas de seguridad conocidas que el equipo sigue aparte. Lo que sigue es deuda de mantenimiento verificada en el código.
 
 | Tema | Detalle | Dónde |
 |---|---|---|
-| Pago sin sesión | La ruta 23 no exige token y usa el `userId` del cuerpo para la venta y el correo | `server.js:2520-2521`, `server.js:2578`, `server.js:2614-2620` |
-| Recuperar contraseña | Ruta 7 sin límite de intentos; los códigos viven en memoria (se pierden al reiniciar) | `server.js:1521`, `server.js:624` |
-| Cabecera alternativa | `requireAdmin` acepta `x-user-token` además de `Bearer` | `server.js:838` |
-| Contraseñas antiguas | El login acepta una contraseña guardada en texto plano y la convierte a bcrypt | `server.js:1167-1172` |
 | Restos al arrancar | Intenta crear `admin_face_rekognition` llamando a `exec_sql`, función que ya no existe en la base (solo deja un aviso en el registro) | `server.js:463-489` |
 | Tablas inexistentes | Al borrar un usuario intenta borrar en `admin_face_credentials` y `admin_webauthn_challenges`, que no existen (el error se ignora) | `server.js:1876-1878`, `chatbot.js:242-245` |
 | Estado en disco | Destacados, ventas de respaldo y tareas 3D en Archivos JSON locales; los destacados del archivo **mandan** sobre la base en el catálogo | `server.js:57`, `server.js:80`, `server.js:102`, `server.js:2402-2405` |
 | Mezcla con datos del código | El dashboard añade los 12 productos y las ventas de respaldo a lo que viene de la base | `server.js:1751-1757`, `server.js:1794-1808` |
 | Librería sin uso | `@simplewebauthn/server` está instalada pero no se usa | `backend/package.json` |
-| Validación floja | `PUT /api/admin/products/:id` no valida precio ni tipos (solo el CHECK de la base frena precios negativos) | `server.js:2199-2208` |
-| RLS | Las reglas de seguridad por fila de la base quedaron para una fase aparte; el servidor usa `service_role` | migración, línea 10 |
 
 ### Rendimiento
 

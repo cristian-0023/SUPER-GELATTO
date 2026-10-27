@@ -150,10 +150,9 @@ La migración también alinea las secuencias de id con los datos reales (líneas
 
 ### Permisos
 
-- La API Express entra con la llave `service_role`, que salta las reglas por fila (RLS) (`server.js:32-33`).
-- La migración **no** activa RLS ni crea políticas: queda para una fase aparte (migración:10).
+- La API Express entra con la llave `service_role`, la llave de servidor de la base (`server.js:32-33`).
 - La función `exec_sql` (que permitía ejecutar SQL arbitrario) ya **no existe** en la base; el servidor aún intenta llamarla al arrancar y solo deja un aviso (`server.js:476`).
 
 ### Tablas que hay en la base real y el código no usa
 
-La base real tiene además seis tablas heredadas que no consulta ni `server.js`, ni `chatbot.js`, ni `backend/scripts/`, ni `frontend/src/`: `proveedor`, `pedido`, `users`, `reset_tokens`, `rostros_admin`, `rostros_admin_muestras` (solo aparece un nombre `rostros_admin` vacío en la base simulada, `server.js:363`; `migration.sql` de la raíz borra las dos de rostros). A la inversa, el código intenta borrar filas de `admin_face_credentials` y `admin_webauthn_challenges`, que **no** existen en la base (`server.js:1877-1878`).
+La base real tiene además nueve tablas heredadas que no consulta ni `server.js`, ni `chatbot.js`, ni `backend/scripts/`, ni `frontend/src/`: `proveedor`, `pedido`, `users`, `reset_tokens`, `rostros_admin`, `rostros_admin_muestras`, `sucursal`, `empleado`, `super_points` (solo aparece un nombre `rostros_admin` vacío en la base simulada, `server.js:363`; `migration.sql` de la raíz borra las dos de rostros). A la inversa, el código intenta borrar filas de `admin_face_credentials` y `admin_webauthn_challenges`, que **no** existen en la base (`server.js:1877-1878`).

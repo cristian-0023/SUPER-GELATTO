@@ -9,7 +9,7 @@ Los nombres de las piezas son los mismos de la [tabla de piezas](03-contenedores
 
 ![El viaje de una compra](figuras/viaje-compra.svg)
 
-*Figura: el viaje de una compra. [Ver la versión animada](figuras/viaje-compra.html).*
+*Figura: el viaje de una compra. [Descarga el archivo y ábrelo en el navegador para verla animada](figuras/viaje-compra.html).*
 
 ## Detalle técnico
 

@@ -4,7 +4,7 @@
 
 Aquí miramos la heladería desde la calle, sin entrar.
 Vemos quién llega (clientes, administradores) y con qué proveedores de afuera trabaja.
-Igual que una heladería compra leche a un proveedor y contrata un transporte, SUPER-GELATTO usa servicios de otras empresas: Google para el carnet de entrada, Groq para que el asistente Gelbot "piense", AWS para reconocer la cara de los administradores, Tripo para fabricar modelos 3D de los helados y un servicio de correo para mandar avisos.
+Igual que una heladería compra leche a un proveedor y contrata un transporte, SUPER-GELATTO usa servicios de otras empresas: Google para el carnet de entrada, Groq para que el asistente Gelbot "piense", AWS (Amazon Web Services, los servicios en la nube de Amazon) para reconocer la cara de los administradores, Tripo para fabricar modelos 3D de los helados y un servicio de correo para mandar avisos.
 También alquila dos locales: Vercel para el mostrador (la página) y Render para la cocina (el servidor).
 La bodega (la base de datos) está en Supabase.
 
