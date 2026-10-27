@@ -16,8 +16,8 @@ flowchart TB
   classDef sistema fill:#1168bd,stroke:#0b4884,color:#fff
   classDef externo fill:#999999,stroke:#6b6b6b,color:#fff
 
-  V["Visitante / Cliente<br/>(compra helados)"]:::persona
-  A["Administrador / Super admin<br/>(maneja catálogo y ventas)"]:::persona
+  V["Cliente<br/>(visitante o con sesión: compra helados)"]:::persona
+  A["Administrador<br/>(admin o super admin: catálogo y ventas)"]:::persona
 
   SG["SUPER-GELATTO<br/>Tienda web + API Express + Base de datos"]:::sistema
 

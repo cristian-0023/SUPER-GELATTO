@@ -90,7 +90,7 @@ flowchart TB
 | La página hace | Pero el servidor | Efecto |
 |---|---|---|
 | `PUT /api/admin/products/:id/image` (`AdminDashboard.jsx:446`) | No tiene esa ruta | Cambiar la imagen de un producto falla |
-| `GET /api/reset-password/:token` (`ResetPassword.jsx:20`) | Solo tiene `POST` (`server.js:1521`) | La comprobación previa del enlace falla |
+| `GET /api/reset-password/:token` (`ResetPassword.jsx:20`) | Solo tiene `POST` (`server.js:1521`) | **Recuperar la contraseña no funciona**: la respuesta 404 no es JSON, la página muestra "Error de conexión con el servidor" y nunca enseña el formulario de nueva contraseña (`ResetPassword.jsx:17-38`, `:195`) |
 | `QrVerification` llama a `/api/admin/verificar-qr` y `/api/admin/enrolar-qr` | No existen | Sin efecto: el componente no se usa |
 | `apiFetch` cierra la sesión también con **403** (`api.js:67`) | Usa 403 para "no tienes permiso" (por ejemplo, un admin que intenta borrar a otro admin) | Un admin normal es expulsado al intentar una acción reservada al super admin |
 | `AdminRoute` exige `rol === 'admin'` (`App.jsx:44`) | Acepta `admin` o `super_admin` (`server.js:849`) | Un token con `super_admin` no vería el panel (solo pasaría si en la base algún usuario tuviera `rol = 'super_admin'`; el super admin normal se reconoce por su correo) |

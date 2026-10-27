@@ -131,13 +131,19 @@ sequenceDiagram
   API->>API: Crea un código aleatorio válido 1 hora, guardado en memoria
   API->>M: Correo con el enlace FRONTEND_URL/reset-password/código
   API-->>W: Mensaje genérico, no revela si el correo existe
-  C->>W: Abre el enlace y escribe la nueva contraseña
+  C->>W: Abre el enlace
+  W->>API: GET /api/reset-password/código para validar el enlace
+  API-->>W: 404, esa ruta no existe
+  Note over C,W: Hoy el flujo se corta aquí: la página muestra un error y no enseña el formulario
+  C->>W: Escribe la nueva contraseña, solo si el formulario apareciera
   W->>API: POST /api/reset-password/código
   API->>DB: Guarda el nuevo password_hash
   API-->>W: Contraseña actualizada, el código ya no sirve
 ```
 
-Referencias: `server.js:1466-1518`, `server.js:1521-1562`; códigos en memoria `server.js:624`; páginas `ForgotPassword.jsx:49`, `ResetPassword.jsx:138`.
+Referencias: `server.js:1466-1518`, `server.js:1521-1562`; códigos en memoria `server.js:624`; páginas `ForgotPassword.jsx:49`, `ResetPassword.jsx:20` (validación con `GET`, que el servidor no tiene), `ResetPassword.jsx:195` (pantalla de error), `ResetPassword.jsx:138` (envío con `POST`).
+
+> **Error conocido:** la recuperación de contraseña está rota de punta a punta. El servidor solo acepta `POST /api/reset-password/:token`; la página primero pide un `GET` a esa dirección, recibe 404 y se queda en la pantalla de error. Ver [05-componentes-frontend.md](05-componentes-frontend.md#desajustes-entre-la-página-y-el-servidor).
 
 ### 4. Cambio de estado de una venta y correo
 
