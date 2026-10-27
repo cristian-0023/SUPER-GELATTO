@@ -14,11 +14,11 @@ const GATE_X = -63;
 // Paradas del pedido sobre el riel (coordenada x).
 const STOP = { cliente: -229, mostrador: -135, guardia: -84, cocina: 20, bodega: 145 };
 const PROVIDERS = [
-  { id: "google", plate: "GOOGLE", name: "Google", what: "inicio de sesión con Google" },
+  { id: "google", plate: "GOOGLE", name: "Google Sign-In", what: "inicio de sesión con Google" },
   { id: "groq", plate: "GROQ", name: "Groq", what: "el chatbot Gelbot" },
   { id: "aws", plate: "AWS", name: "AWS Rekognition", what: "login facial de los admins" },
   { id: "tripo", plate: "TRIPO", name: "Tripo 3D", what: "modelos 3D de productos" },
-  { id: "correo", plate: "CORREO", name: "Correo (nodemailer)", what: "avisos por correo al cliente" },
+  { id: "correo", plate: "CORREO", name: "Servidor de correo SMTP", what: "avisos por correo al cliente" },
 ];
 const MOD_X = [-96, -48, 0, 48, 96];
 const PORT_X = [-4, 8, 20, 32, 44];
@@ -301,7 +301,7 @@ const plates = [
 ];
 
 const LABEL =
-  "La heladería como máquina. Sobre un banco, en fila: el cliente con su celular, el mostrador (la página web, hecha con React y publicada en Vercel), un guardia con una barrera, la cocina (el servidor, hecho con Express y publicado en Render) y la bodega (la base de datos Supabase / Postgres). Detrás, en un estante, cinco proveedores cableados a la cocina: Google, Groq, AWS Rekognition, Tripo 3D y Correo. Un pedido viaja por el riel del cliente a la bodega.";
+  "La heladería como máquina. Sobre un banco, en fila: el cliente con su celular, el mostrador (la página web, hecha con React y publicada en Vercel), un guardia con una barrera, la cocina (el servidor, hecho con Express y publicado en Render) y la bodega (la base de datos Supabase / Postgres). Detrás, en un estante, cinco proveedores cableados a la cocina: Google Sign-In, Groq, AWS Rekognition, Tripo 3D y Servidor de correo SMTP. Un pedido viaja por el riel del cliente a la bodega.";
 
 function drawing(pose) {
   const puckX = pose.x;
@@ -326,11 +326,11 @@ function drawing(pose) {
   ].join("");
 }
 
-// ---------- SVG estático (pose: el pedido en la cocina, el cable de Groq activo) ----------
+// ---------- SVG estático (pose: el pedido en la cocina, cable de ejemplo activo) ----------
 const LEGEND = [
   { n: "1", name: "Cliente", what: "navegador o celular" },
   { n: "2", name: "Mostrador: página web (React, Vercel)", what: "" },
-  { n: "3", name: "Guardia", what: "revisa el token / la sesión" },
+  { n: "3", name: "Guardia (token de sesión)", what: "revisa el token / la sesión" },
   { n: "4", name: "Cocina: servidor (Express, Render)", what: "" },
   { n: "5", name: "Bodega: base de datos (Supabase / Postgres)", what: "" },
   ...PROVIDERS.map((p, i) => ({ n: String.fromCharCode(65 + i), name: p.name, what: p.what })),
@@ -351,7 +351,7 @@ write(
     fig: "Fig 1",
     title: "La heladería como máquina",
     hint: "Versión interactiva: heladeria-maquina.html",
-    readout: "pedido en la cocina · pide a Groq",
+    readout: "pedido en la cocina",
     legend: LEGEND,
     caption: CAPTION,
   }),
@@ -500,7 +500,7 @@ const plate = k.plateHtml({
     { mark: "dashed", label: "Cable activo hacia un proveedor" },
   ],
   caption:
-    "1 Cliente (navegador o celular) · 2 Mostrador: página web (React, Vercel) · 3 Guardia: revisa el token / la sesión · 4 Cocina: servidor (Express, Render) · 5 Bodega: base de datos (Supabase / Postgres). En el estante, de izquierda a derecha: Google (login), Groq (chatbot Gelbot), AWS Rekognition (login facial de admins), Tripo 3D (modelos 3D de productos) y Correo (nodemailer). " +
+    "1 Cliente (navegador o celular) · 2 Mostrador: página web (React, Vercel) · 3 Guardia: revisa el token / la sesión · 4 Cocina: servidor (Express, Render) · 5 Bodega: base de datos (Supabase / Postgres). En el estante, de izquierda a derecha: Google Sign-In (login), Groq (chatbot Gelbot), AWS Rekognition (login facial de admins), Tripo 3D (modelos 3D de productos) y Servidor de correo SMTP (nodemailer). " +
     CAPTION,
   body: `<div class="iso-stage" tabindex="0" role="slider" aria-label="La heladería como máquina: las flechas mueven el pedido de una pieza a otra" aria-valuetext="${TEXT0()}">${svg}</div>`,
 });
