@@ -41,6 +41,8 @@ La pasarela simula el flujo de pago de **Wompi** (pasarela de pago colombiana), 
 
 ### `POST /api/payments/process`
 
+Exige sesión: cabecera `Authorization: Bearer <token>` (sin ella, 401). La venta y el recibo quedan a nombre del usuario del token.
+
 #### Petición (Request Body)
 ```json
 {
@@ -51,7 +53,6 @@ La pasarela simula el flujo de pago de **Wompi** (pasarela de pago colombiana), 
   ],
   "amount": 25000,
   "reference": "ORD-SG-1722729600000-A1B2C3",
-  "userId": 3,
   "forceDecline": false
 }
 ```

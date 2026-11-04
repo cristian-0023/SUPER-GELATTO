@@ -24,13 +24,13 @@ sequenceDiagram
   participant RV as registrar_venta
   participant M as Servidor de correo SMTP
   C->>W: Pagar en /checkout (PaymentGateway)
-  W->>API: POST /api/payments/process con método, banco, items y userId
-  API->>API: Límite 10 por minuto, valida método y carrito
+  W->>API: POST /api/payments/process con token, método, banco e items
+  API->>API: Verifica la sesión, límite 10 por minuto, valida método y carrito
   API->>API: Simula la pasarela, 1 a 2 s, aprox. 90 por ciento aprobado
-  API->>RV: rpc registrar_venta(userId, items, Pagado o Fallido)
+  API->>RV: rpc registrar_venta(usuario del token, items, Pagado o Fallido)
   alt Todo bien
     RV-->>API: id_venta, total con precios de la base, items
-    opt Aprobado y con userId
+    opt Aprobado
       API->>M: Correo de pago confirmado
     end
     API-->>W: 200 ok, id_venta, total, transaction

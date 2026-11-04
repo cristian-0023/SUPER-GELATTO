@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
-import { cargarServidor } from '../helpers/cargarServidor.js';
+import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 
 const fake = crearFakeSupabase();
 let app;
@@ -35,7 +35,9 @@ const cuerpo = (extra = {}) => ({
   ...extra,
 });
 
-const pagar = (extra) => request(app).post('/api/payments/process').send(cuerpo(extra));
+// El usuario sale del token (ver pagoConSesion.test.js): el cliente de estas pruebas es el 3.
+const sesion = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 3, email: 'u3@example.com', rol: 'cliente' })}` });
+const pagar = (extra) => request(app).post('/api/payments/process').set(sesion()).send(cuerpo(extra));
 const rpcVenta = () => fake.rpcs('registrar_venta');
 
 beforeAll(() => {
@@ -81,11 +83,11 @@ describe('POST /api/payments/process - pago aprobado', () => {
     expect(res.body.transaction.amount).toBe(27500);
   });
 
-  it('b. sin userId manda p_id_usuario null (nunca 1)', async () => {
+  it('b. sin userId en el cuerpo la venta queda a nombre del token (nunca null ni 1)', async () => {
     const res = await pagar({ userId: undefined });
 
     expect(rpcVenta()).toHaveLength(1);
-    expect(rpcVenta()[0].args.p_id_usuario).toBeNull();
+    expect(rpcVenta()[0].args.p_id_usuario).toBe(3);
     expect(res.body.ok).toBe(true);
   });
 

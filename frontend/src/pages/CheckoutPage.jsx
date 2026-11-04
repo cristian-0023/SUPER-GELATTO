@@ -253,7 +253,6 @@ const CheckoutPage = ({ user }) => {
         onClose={handleClosePayment}
         totalPrice={totalPrice}
         cart={cart}
-        user={user}
         onPaymentSuccess={handlePaymentSuccess}
       />
     </div>

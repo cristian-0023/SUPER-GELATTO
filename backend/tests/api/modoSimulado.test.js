@@ -2,7 +2,7 @@
 // con la misma forma de respuesta que la función real registrar_venta, y total calculado en el servidor.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
-import { cargarServidor } from '../helpers/cargarServidor.js';
+import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 
 let app;
 beforeAll(() => {
@@ -18,8 +18,20 @@ afterEach(() => {
   vi.mocked(globalThis.setTimeout).mockRestore();
 });
 
-const pagar = (items, extra = {}) =>
+const sesion = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 1, email: 'u1@example.com', rol: 'cliente' })}` });
+const pagarSinSesion = (items, extra = {}) =>
   request(app).post('/api/payments/process').send({ method: 'NEQUI', bank: 'Nequi', items, amount: 1, ...extra });
+const pagar = (items, extra = {}) =>
+  request(app).post('/api/payments/process').set(sesion()).send({ method: 'NEQUI', bank: 'Nequi', items, amount: 1, ...extra });
+
+describe('modo simulado (sin Supabase): sesión', () => {
+  it('pagar también exige sesión: sin base real no hay puerta trasera', async () => {
+    const res = await pagarSinSesion([{ id: 1, quantity: 1 }], { userId: 1 });
+
+    expect(res.status).toBe(401);
+    expect(res.body.ok).toBe(false);
+  });
+});
 
 describe('modo simulado (sin Supabase): registrar_venta', () => {
   it('calcula el total con el catálogo local e ignora el precio del cliente', async () => {
