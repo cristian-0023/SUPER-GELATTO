@@ -10,6 +10,8 @@ const raizSupabase = resolve(aqui, '../../../supabase');
 export const RUTA_ESQUEMA = resolve(raizSupabase, 'schema_base_2026-10-25.sql');
 export const RUTA_MIGRACION = resolve(raizSupabase, 'migrations/20261025120000_ventas_pagos_y_productos.sql');
 export const RUTA_ROLLBACK = resolve(raizSupabase, 'rollbacks/20261025120000_ventas_pagos_y_productos.rollback.sql');
+export const RUTA_MIGRACION_RLS = resolve(raizSupabase, 'migrations/20261104120000_rls_tablas_publicas.sql');
+export const RUTA_ROLLBACK_RLS = resolve(raizSupabase, 'rollbacks/20261104120000_rls_tablas_publicas.rollback.sql');
 
 export const leer = (ruta) => readFileSync(ruta, 'utf8');
 
