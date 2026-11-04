@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
-import { cargarServidor } from '../helpers/cargarServidor.js';
+import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 
 const fake = crearFakeSupabase();
 let app;
@@ -13,9 +13,18 @@ beforeAll(() => {
 });
 
 // Cuerpo inválido a propósito: responde 400 al instante (sin la espera de la pasarela) pero cuenta como intento.
-const intento = () => request(app).post('/api/payments/process').send({ method: 'NOPE' });
+const sesion = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 3, rol: 'cliente' })}` });
+const intento = () => request(app).post('/api/payments/process').set(sesion()).send({ method: 'NOPE' });
 
 describe('POST /api/payments/process - límite de intentos', () => {
+  // Debe ir primero: los intentos se cuentan por servidor y las demás pruebas los gastan.
+  it('sin sesión responde 401 y no gasta los intentos de los clientes de esa IP', async () => {
+    for (let i = 0; i < LIMITE + 2; i++) {
+      const res = await request(app).post('/api/payments/process').send({ method: 'NOPE' });
+      expect(res.status).toBe(401);
+    }
+  });
+
   it(`las primeras ${LIMITE} peticiones pasan y la siguiente recibe 429 en español`, async () => {
     for (let i = 0; i < LIMITE; i++) expect((await intento()).status).toBe(400);
 

@@ -112,7 +112,7 @@ Al pasar el tope responden **429** con un mensaje en español.
 | 20 | PUT | `/api/admin/products/:id/category` | `server.js:2293` | `requireAdmin` | Admin | — | Cambia la categoría (4 permitidas) |
 | 21 | PUT | `/api/admin/products/:id/stock` | `server.js:2321` | `requireAdmin` | Admin | — | Cambia el stock (entero ≥ 0) |
 | 22 | GET | `/api/products` | `server.js:2351` | público | Cualquiera | — | Catálogo activo con datos de sabor; si la base falla, catálogo del código |
-| 23 | POST | `/api/payments/process` | `server.js:2520` | público | Ver sección de seguridad | `limitadorPagos` | Pago simulado + `registrar_venta` + correo |
+| 23 | POST | `/api/payments/process` | `server.js:2530` | sesión | `requireAuth` | `limitadorPagos` | Pago simulado + `registrar_venta` + correo |
 | 24 | POST | `/api/chatbot` | `server.js:2703` | público (token opcional) | Cualquiera; las herramientas dependen del rol del token | `limitadorChatbot` | Gelbot |
 | 25 | GET | `/api/admin/products/:id/model-3d` | `server.js:2712` | `requireAdmin` | Admin | — | Estado del modelo 3D; al terminar guarda `model_3d_url` |
 | 26 | POST | `/api/admin/products/:id/regenerate-3d` | `server.js:2778` | `requireAdmin` | Admin | — | Inicia una nueva tarea en Tripo 3D |

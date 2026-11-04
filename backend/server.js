@@ -121,9 +121,17 @@ function saveTripoModelsState(state) {
 let TRIPO_MODELS_STATE = loadTripoModelsState();
 
 // ─── Tripo 3D AI Helper Functions ─────────────────────────────
-const TRIPO_API_KEY = process.env.TRIPO_API_KEY || 'tsk_2lZ_a8JY7brp7zM_Ucbx77blqm3R3T3CScLfd-MHF3W';
+// La llave solo vive en la variable de entorno: el repositorio es público. Sin ella no hay modelos 3D,
+// pero el resto de la tienda funciona igual.
+const TRIPO_API_KEY = process.env.TRIPO_API_KEY?.trim();
+const MENSAJE_TRIPO_SIN_LLAVE = 'La generación de modelos 3D no está disponible en este momento.';
+if (!TRIPO_API_KEY) {
+  console.warn('⚠️ Falta TRIPO_API_KEY: la generación de modelos 3D queda desactivada.');
+}
 
 async function startTripoTask(promptText) {
+  if (!TRIPO_API_KEY) throw new Error(MENSAJE_TRIPO_SIN_LLAVE);
+
   const finalPrompt = (promptText && promptText.trim())
     ? promptText.trim()
     : 'A 3D model of a gourmet artisanal gelato ice cream cone with vibrant colors and rich textures';
@@ -2517,8 +2525,16 @@ const limitadorPagos = rateLimit({
 const MAX_LARGO_BANCO = 80;
 const MAX_LARGO_REFERENCIA = 64;
 
-app.post('/api/payments/process', limitadorPagos, async (req, res) => {
-  const { method, bank, items, reference, userId, forceDecline } = req.body;
+// Primero la sesión y después el límite (igual que create-admin): verificar un token es barato y así un
+// visitante sin sesión no gasta los intentos de los clientes que comparten su IP.
+app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) => {
+  const { method, bank, items, reference, forceDecline } = req.body;
+
+  // El dueño de la venta y del recibo sale SOLO del token verificado, nunca del cuerpo.
+  const idUsuario = req.user.id_usuario;
+  if (!Number.isSafeInteger(idUsuario) || idUsuario <= 0) {
+    return res.status(401).json({ ok: false, message: 'Debes iniciar sesión. Tu sesión no es válida o expiró.' });
+  }
 
   // ── Validaciones ────────────────────────────────────────────
   const validMethods = ['PSE', 'NEQUI', 'BANCOLOMBIA'];
@@ -2575,7 +2591,7 @@ app.post('/api/payments/process', limitadorPagos, async (req, res) => {
   // ── Registrar la venta en la base (descuenta stock y calcula el total real) ──
   const estadoVenta = status === 'APPROVED' ? 'Pagado' : 'Fallido';
   const { data: venta, error: ventaErr } = await supabase.rpc('registrar_venta', {
-    p_id_usuario: userId ?? null,
+    p_id_usuario: idUsuario,
     p_items: carrito.items,
     p_estado: estadoVenta
   });
@@ -2611,12 +2627,12 @@ app.post('/api/payments/process', limitadorPagos, async (req, res) => {
   pushPaymentTransaction(transaction);
 
   // ── Si APPROVED: enviar correo de confirmación ───────────────
-  if (status === 'APPROVED' && userId) {
+  if (status === 'APPROVED') {
     try {
       const { data: user } = await supabase
         .from('usuario')
         .select('nombre, email')
-        .eq('id_usuario', userId)
+        .eq('id_usuario', idUsuario)
         .single();
 
       if (user && user.email) {
@@ -2732,6 +2748,11 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
 
     // Si hay una tarea activa en Tripo AI, consultar estado en tiempo real
     if (modelState.taskId && (modelState.estado === 'generando' || modelState.estado === 'enviando')) {
+      // Sin llave no se le pregunta a Tripo; la tarea se conserva para retomarla cuando vuelva la llave.
+      if (!TRIPO_API_KEY) {
+        return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
+      }
+
       const taskInfo = await getTripoTaskStatus(modelState.taskId);
 
       if (taskInfo.status === 'success' && taskInfo.modelUrl) {
@@ -2782,6 +2803,10 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res)
 
   if (!prompt || !prompt.trim()) {
     return res.status(400).json({ message: 'El prompt descriptivo es obligatorio para generar el modelo 3D.' });
+  }
+
+  if (!TRIPO_API_KEY) {
+    return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
   }
 
   try {

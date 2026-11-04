@@ -11,6 +11,8 @@ import {
   CheckCircle, XCircle, RefreshCw, X, Lock, ChevronDown
 } from 'lucide-react';
 import { formatPrice } from '../context/CartContext';
+import { getToken, clearSessionAndRedirect } from '../utils/api';
+import { armarPago, resultadoPago } from '../utils/pagos';
 
 const PSE_BANKS = [
   'Bancolombia',
@@ -69,7 +71,7 @@ const PROCESSING_MESSAGES = [
   'Confirmando con el banco emisor...'
 ];
 
-const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, user, onPaymentSuccess }) => {
+const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, onPaymentSuccess }) => {
   const [step, setStep] = useState('method');    // method | details | processing | result
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [pseBank, setPseBank] = useState('');
@@ -125,34 +127,35 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, user, onPaymentSucc
   };
 
   const handlePay = async () => {
+    // Sin token no hay nada que intentar: el servidor exige la sesión para registrar la venta.
+    const token = getToken();
+    if (!token) {
+      setResult(resultadoPago(401));
+      setStep('result');
+      return;
+    }
+
     setStep('processing');
     try {
       const API_URL = import.meta.env.VITE_API_URL || '';
       const orderRef = `ORD-SG-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
+      // fetch directo y no apiFetch: con un 401 apiFetch saca al cliente de la página sin explicarle nada.
       const response = await fetch(`${API_URL}/api/payments/process`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          method: selectedMethod.id,
-          bank: selectedMethod.id === 'PSE' ? pseBank : 
-                selectedMethod.id === 'BANCOLOMBIA' ? 'Bancolombia' : 'Nequi',
-          items: cart.map(item => ({
-            id: item.id,
-            id_producto: item.id,
-            name: item.nombre || item.name,
-            quantity: item.quantity,
-            price: item.precio || item.price
-          })),
-          amount: totalPrice,
-          reference: orderRef,
-          userId: user?.id || user?.id_usuario,
-          deliveryDetails: {},
-          forceDecline: pseBank.toLowerCase().includes('pruebas')
+        ...armarPago({
+          token,
+          metodo: selectedMethod.id,
+          banco: selectedMethod.id === 'PSE' ? pseBank :
+                 selectedMethod.id === 'BANCOLOMBIA' ? 'Bancolombia' : 'Nequi',
+          cart,
+          totalPrice,
+          referencia: orderRef,
+          forzarRechazo: pseBank.toLowerCase().includes('pruebas')
         })
       });
 
-      const data = await response.json();
+      const data = resultadoPago(response.status, await response.json());
       setResult(data);
       setStep('result');
       if (data.ok && onPaymentSuccess) {
@@ -423,7 +426,7 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, user, onPaymentSucc
                         <XCircle className="text-red-400" size={42} />
                       </motion.div>
                       <div>
-                        <h3 className="text-2xl font-playfair font-bold mb-1 text-white">Pago Rechazado</h3>
+                        <h3 className="text-2xl font-playfair font-bold mb-1 text-white">{result.sesionVencida ? 'Sesión vencida' : 'Pago Rechazado'}</h3>
                         <p className="text-sm text-red-300/80">{result.message}</p>
                       </div>
                       {result.transaction && (
@@ -432,9 +435,15 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, user, onPaymentSucc
                           <div className="flex justify-between"><span className="text-white/50">Estado:</span><span className="font-bold text-red-400">DECLINADO</span></div>
                         </div>
                       )}
-                      <button onClick={handleRetry} className="w-full py-3.5 rounded-full font-bold text-sm bg-white/10 border border-white/10 hover:bg-white/15 transition-all flex items-center justify-center gap-2 text-white" id="payment-retry-button">
-                        <RefreshCw size={16} /> Reintentar pago
-                      </button>
+                      {result.sesionVencida ? (
+                        <button onClick={clearSessionAndRedirect} className="w-full py-3.5 rounded-full font-bold text-sm bg-white/10 border border-white/10 hover:bg-white/15 transition-all flex items-center justify-center gap-2 text-white" id="payment-login-button">
+                          <Lock size={16} /> Iniciar sesión
+                        </button>
+                      ) : (
+                        <button onClick={handleRetry} className="w-full py-3.5 rounded-full font-bold text-sm bg-white/10 border border-white/10 hover:bg-white/15 transition-all flex items-center justify-center gap-2 text-white" id="payment-retry-button">
+                          <RefreshCw size={16} /> Reintentar pago
+                        </button>
+                      )}
                     </>
                   )}
                 </motion.div>

@@ -36,9 +36,12 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
 //  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
 //    rekognition-login (por defecto muy alto).
+//  - tripoApiKey: valor de TRIPO_API_KEY (ficticio por defecto; '' = sin configurar). Las pruebas nunca
+//    llaman a Tripo de verdad: las que llegan a fetch lo reemplazan por uno falso.
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
-  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000 } = {}) {
+  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000,
+  tripoApiKey = 'tripo-llave-falsa-de-prueba' } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase ? '' : 'service-role-key-falsa';
@@ -48,6 +51,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   process.env.LOGIN_RATE_LIMIT_MAX = String(limiteLogin);
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
   process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
+  process.env.TRIPO_API_KEY = tripoApiKey;
   process.env.JWT_SECRET = jwtSecret;
   process.env.GOOGLE_CLIENT_ID = googleClientId;
   process.env.ADMIN_EMAILS = adminEmails;
