@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// Producción = NODE_ENV=production o Render (Render define RENDER aunque NODE_ENV no esté puesto).
-const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+// Producción = NODE_ENV=production, Render o Vercel (definen RENDER / VERCEL aunque NODE_ENV no esté puesto).
+const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER || !!process.env.VERCEL;
 
 // Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys.
 // Nunca en producción: la verificación del login con Google descarga certificados por HTTPS.
@@ -29,8 +29,17 @@ const {
 } = require('@aws-sdk/client-rekognition');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-// Priorizar SUPABASE_SERVICE_ROLE_KEY para realizar operaciones administrativas de backend sin restricciones de RLS
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+// El servidor entra a la base con SUPABASE_SERVICE_ROLE_KEY. Las tablas tienen candados (RLS y sin permisos
+// para la llave pública), así que con SUPABASE_KEY (la pública) todas las consultas fallarían.
+// En producción es obligatoria; fuera de producción se acepta la pública como respaldo, con aviso.
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+if (esProduccion && !supabaseServiceKey && (supabaseUrl || '').trim()) {
+  throw new Error('Configuración incompleta: falta SUPABASE_SERVICE_ROLE_KEY. En producción (Vercel, Render o NODE_ENV=production) el servidor no arranca solo con la llave pública (SUPABASE_KEY): la base la rechaza y los pedidos, pagos y cuentas fallarían. Agrega SUPABASE_SERVICE_ROLE_KEY en las variables de entorno del proyecto y vuelve a publicar.');
+}
+if (!supabaseServiceKey && process.env.SUPABASE_KEY) {
+  console.warn('⚠️ Falta SUPABASE_SERVICE_ROLE_KEY: se usa SUPABASE_KEY (solo desarrollo). Con los candados de la base, casi todo fallará.');
+}
+const supabaseKey = supabaseServiceKey || process.env.SUPABASE_KEY;
 
 // ─── AWS Rekognition Config ─────────────────────────────────────
 const rekognitionRegion = process.env.AWS_REGION || 'us-east-2';
@@ -465,7 +474,7 @@ const isSupabaseConfigured = supabaseUrl &&
 if (isSupabaseConfigured) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
-    const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Service Role Key (Bypass RLS)' : 'Anon Key';
+    const keyType = supabaseServiceKey ? 'Service Role Key (Bypass RLS)' : 'Anon Key';
     console.log(`✅ Cliente Supabase inicializado correctamente con ${keyType}.`);
 
     // Auto-crear tabla admin_face_rekognition si no existe
@@ -500,10 +509,11 @@ if (isSupabaseConfigured) {
   }
 }
 
-// En producción (o en Render) el modo simulado aprobaría pagos sin guardarlos: mejor no arrancar.
-// Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje.
-if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) {
-  throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_KEY). En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
+// En producción (NODE_ENV, Render o Vercel) el modo simulado aprobaría pagos sin guardarlos: mejor no arrancar.
+// Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje y, en
+// Vercel, cada invocación falla mostrándolo en el registro (Logs) de la función.
+if (!supabase && esProduccion) {
+  throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY. En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
 }
 
 // ─── Secreto de las sesiones (JWT) ──────────────────────────
@@ -569,11 +579,11 @@ if (!supabase) {
 }
 
 const app = express();
-// Detrás del proxy de Render (el frontend apunta a *.onrender.com) la IP real llega en X-Forwarded-For;
-// sin esto el límite de intentos vería a todos los clientes como una sola IP. Solo se confía en 1 salto
-// (el proxy de Render) y solo si estamos en Render o se pide con TRUST_PROXY=1: en local, confiar en esa
-// cabecera dejaría a cualquiera falsificar su IP para esquivar el límite.
-if (process.env.RENDER || process.env.TRUST_PROXY === '1') {
+// Detrás del proxy de Render o de Vercel la IP real llega en X-Forwarded-For; sin esto el límite de
+// intentos vería a todos los clientes como una sola IP. Solo se confía en 1 salto (el proxy de la
+// plataforma, que agrega la IP real al final de la cabecera) y solo en Render, en Vercel o si se pide
+// con TRUST_PROXY=1: en local, confiar en esa cabecera dejaría a cualquiera falsificar su IP.
+if (process.env.RENDER || process.env.VERCEL || process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', 1);
 }
 app.use(compression());
@@ -628,9 +638,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// In-memory reset token store
-const resetTokens = [];
-
 // ─── Email Transport ────────────────────────────────────────
 let transporter = null;
 async function getTransporter() {
@@ -662,14 +669,13 @@ async function getTransporter() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+// Recuperar contraseña: el enlace lleva un token aleatorio (32 bytes = 64 caracteres hex) y la base
+// (tabla reset_tokens) guarda SOLO su sha256: quien lea la tabla no puede usar los enlaces.
+// Vive en la base y no en memoria: en Vercel cada petición puede caer en una instancia distinta.
+const VIGENCIA_TOKEN_RESET_MS = 30 * 60 * 1000;
+const FORMATO_TOKEN_RESET = /^[a-f0-9]{64}$/;
 function generateResetToken() { return crypto.randomBytes(32).toString('hex'); }
-
-function cleanExpiredTokens() {
-  const now = Date.now();
-  for (let i = resetTokens.length - 1; i >= 0; i--) {
-    if (resetTokens[i].expiresAt < now) resetTokens.splice(i, 1);
-  }
-}
+const hashTokenReset = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 // Sanitización XSS: Escapa caracteres peligrosos (<, >, &, ", ', /)
 function sanitizeInput(str) {
@@ -903,6 +909,8 @@ const limitadorLogin = crearLimitadorCuenta();
 const limitadorGoogleLogin = crearLimitadorCuenta();
 const limitadorRegistro = crearLimitadorCuenta();
 const limitadorOlvidoClave = crearLimitadorCuenta();
+const limitadorValidarEnlace = crearLimitadorCuenta();
+const limitadorRestablecer = crearLimitadorCuenta();
 const limitadorLoginFacial = crearLimitadorCuenta();
 const limitadorCrearAdmin = crearLimitadorCuenta();
 
@@ -1112,9 +1120,8 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
     return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
 
-  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
-  if (!passwordRegex.test(password)) {
-    return res.status(400).json({ message: 'La contraseña debe tener 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.' });
+  if (!REGEX_CONTRASENA.test(password)) {
+    return res.status(400).json({ message: MENSAJE_CONTRASENA_DEBIL });
   }
 
   // Correos de administradores: solo entran con Google verificado (mensaje genérico, no revela cuáles son).
@@ -1149,6 +1156,9 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) return res.status(400).json({ message: 'Campos obligatorios.' });
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length > 254 || password.length > 200) {
+    return res.status(400).json({ message: 'Email o contraseña con formato no válido.' });
+  }
 
   if (hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1169,19 +1179,10 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
 
   if (error || !user) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
-  // COMPARAR HASH Y MIGRACIÓN LEGACY
-  const isMatch = await bcrypt.compare(password, user.password_hash);
-  
-  if (!isMatch) {
-    // Si no hace match con bcrypt, comprobamos si es una contraseña en texto plano antigua
-    if (password === user.password_hash) {
-      // MIGRACIÓN AUTOMÁTICA: Convertir texto plano a bcrypt hash
-      const newHash = await bcrypt.hash(password, saltRounds);
-      await supabase.from('usuario').update({ password_hash: newHash }).eq('id_usuario', user.id_usuario);
-    } else {
-      return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
-    }
-  }
+  // Solo bcrypt: todas las contraseñas guardadas están cifradas. Nunca se compara contra el texto
+  // guardado (si no, la contraseña cifrada serviría como contraseña).
+  const isMatch = typeof user.password_hash === 'string' && await bcrypt.compare(password, user.password_hash);
+  if (!isMatch) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
   // GENERAR TOKEN JWT FIRMADO (rol de la base: el registro con contraseña no verifica el correo,
   // así que aquí ADMIN_EMAILS no da permisos)
@@ -1471,10 +1472,32 @@ app.post('/api/google-login', limitadorGoogleLogin, async (req, res) => {
 });
 
 // ─── Forgot Password ───────────────────────────────────────
+// Reglas de contraseña (las mismas del registro).
+const REGEX_CONTRASENA = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
+const MENSAJE_CONTRASENA_DEBIL = 'La contraseña debe tener 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.';
+const LARGO_MAXIMO_CONTRASENA = 72; // bcrypt solo usa los primeros 72 bytes
+const MENSAJE_RECUPERACION_NO_DISPONIBLE = 'La recuperación de contraseña no está disponible en este momento. Inténtalo más tarde o contacta a la tienda.';
+const MENSAJE_ENLACE_INVALIDO = 'Este enlace venció, ya fue usado o no es válido. Pide uno nuevo.';
+
+// Dirección del frontend para el enlace. En producción es obligatoria (nunca enlaces a localhost).
+function urlFrontendRecuperacion() {
+  const url = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+  if (url) return url;
+  return esProduccion ? null : 'http://localhost:3000';
+}
+// En producción el correo debe ser real (SMTP): sin él el enlace no llegaría a nadie.
+const hayCorreoReal = () => !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+// Para ilike: "_" y "%" son comodines; se escapan para comparar el correo exacto (sin mayúsculas).
+const correoParaIlike = (correo) => correo.replace(/[\\%_]/g, (c) => `\\${c}`);
+
 app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
   const { email } = req.body;
 
   if (!email) return res.status(400).json({ message: 'Email es obligatorio.' });
+  if (typeof email !== 'string' || email.length > 254) {
+    return res.status(400).json({ message: 'El correo no es válido.' });
+  }
 
   if (hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1488,85 +1511,134 @@ app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
   if (!emailRegex.test(email)) {
     return res.status(400).json({ message: 'El correo debe ser un email válido (sin caracteres especiales) terminado en .com, .net o .edu.' });
   }
+
+  // Antes de mirar la base: así la respuesta no depende de si la cuenta existe.
+  const urlFrontend = urlFrontendRecuperacion();
+  if (!isSupabaseConfigured || !urlFrontend || (esProduccion && !hayCorreoReal())) {
+    console.error('⚠️ Recuperación de contraseña desactivada: falta base de datos, FRONTEND_URL o SMTP.');
+    return res.status(503).json({ ok: false, message: MENSAJE_RECUPERACION_NO_DISPONIBLE });
+  }
+
   const genericMessage = 'Si este correo está registrado, recibirás un enlace.';
+  const errorRecuperacion = 'No se pudo procesar la solicitud. Inténtalo de nuevo.';
 
-  const { data: dbUser } = await supabase.from('usuario').select('nombre, email').eq('email', email).single();
-  if (!dbUser) return res.status(200).json({ message: genericMessage });
+  const { data: dbUser, error: errorUsuario } = await supabase
+    .from('usuario').select('nombre, email').ilike('email', correoParaIlike(email.trim())).maybeSingle();
+  if (falloSupabase(res, errorUsuario, errorRecuperacion)) return;
+  if (!dbUser) return res.status(200).json({ ok: true, message: genericMessage });
 
-  cleanExpiredTokens();
+  // Un solo enlace vivo por cuenta: se anulan los anteriores antes de crear el nuevo.
+  const { error: errorAnular } = await supabase
+    .from('reset_tokens').update({ used: true }).eq('email', dbUser.email).eq('used', false);
+  if (falloSupabase(res, errorAnular, errorRecuperacion)) return;
+
   const token = generateResetToken();
-  resetTokens.push({ token, email, expiresAt: Date.now() + 3600000, used: false });
+  const { error: errorGuardar } = await supabase.from('reset_tokens').insert([{
+    token: hashTokenReset(token),
+    email: dbUser.email,
+    expires_at: Date.now() + VIGENCIA_TOKEN_RESET_MS,
+    used: false
+  }]);
+  if (falloSupabase(res, errorGuardar, errorRecuperacion)) return;
 
-  const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${token}`;
+  const resetLink = `${urlFrontend}/reset-password/${token}`;
 
   try {
     const emailTransporter = await getTransporter();
     const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
     const info = await emailTransporter.sendMail({
       from: `"super gelatto 🍦" <${fromEmail}>`,
-      to: email,
+      to: dbUser.email,
       subject: '🔐 Restablecer contraseña',
-      html: `<p>Hola ${dbUser.nombre}, haz clic aquí: <a href="${resetLink}">${resetLink}</a></p>`
+      html: `<p>Hola ${escapeHtml(dbUser.nombre)}, haz clic aquí para elegir una nueva contraseña: <a href="${resetLink}">${resetLink}</a></p>`
+        + `<p>El enlace vence en ${VIGENCIA_TOKEN_RESET_MS / 60000} minutos y sirve una sola vez. Si no lo pediste, ignora este correo.</p>`
     });
-    
-    // Obtener link de Ethereal solo si no se configuró un SMTP real
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`📬 Preview Link (Ethereal): ${previewUrl}`);
-    } else {
-      console.log(`📬 Correo de recuperación enviado a: ${email}`);
-    }
-    
-    // En el modo desarrollador, podemos devolver la previewUrl para mostrarla en pantalla
-    return res.status(200).json({ message: genericMessage, previewUrl: previewUrl || undefined });
+
+    // Vista previa de Ethereal: solo en desarrollo (en producción entregaría el enlace a quien lo pidió).
+    const previewUrl = esProduccion ? false : nodemailer.getTestMessageUrl(info);
+    if (previewUrl) console.log(`📬 Preview Link (Ethereal): ${previewUrl}`);
+    else console.log('📬 Correo de recuperación enviado.');
+    return res.status(200).json({ ok: true, message: genericMessage, previewUrl: previewUrl || undefined });
   } catch (err) {
-    console.error('Error al enviar email:', err);
-    return res.status(500).json({ message: 'Error al enviar email.' });
+    // Misma respuesta que si la cuenta no existiera: un error aquí no debe revelar que existe.
+    console.error('Error al enviar el correo de recuperación:', err.message);
+    return res.status(200).json({ ok: true, message: genericMessage });
   }
 });
 
 // ─── Reset Password (CON BCRYPT & SUPABASE) ────────────────
-app.post('/api/reset-password/:token', async (req, res) => {
+// Solo dice si el enlace sirve; no devuelve datos de la cuenta.
+app.get('/api/reset-password/:token', limitadorValidarEnlace, async (req, res) => {
+  const { token } = req.params;
+  if (!isSupabaseConfigured) return res.status(503).json({ ok: false, valid: false, message: MENSAJE_RECUPERACION_NO_DISPONIBLE });
+  if (!FORMATO_TOKEN_RESET.test(token)) {
+    return res.status(400).json({ ok: false, valid: false, code: 'ENLACE_INVALIDO', message: MENSAJE_ENLACE_INVALIDO });
+  }
+  const { data, error } = await supabase
+    .from('reset_tokens').select('id')
+    .eq('token', hashTokenReset(token)).eq('used', false).gt('expires_at', Date.now())
+    .maybeSingle();
+  if (error) {
+    console.error('Error al validar el enlace de recuperación:', error);
+    return res.status(500).json({ ok: false, valid: false, message: 'No se pudo comprobar el enlace. Inténtalo de nuevo.' });
+  }
+  if (!data) return res.status(400).json({ ok: false, valid: false, code: 'ENLACE_INVALIDO', message: MENSAJE_ENLACE_INVALIDO });
+  return res.status(200).json({ ok: true, valid: true });
+});
+
+app.post('/api/reset-password/:token', limitadorRestablecer, async (req, res) => {
   const { token } = req.params;
   const { password, confirmPassword } = req.body;
+  // Sin base (modo simulado) no hay dónde guardar ni gastar enlaces.
+  if (!isSupabaseConfigured) return res.status(503).json({ ok: false, message: MENSAJE_RECUPERACION_NO_DISPONIBLE });
 
-  if (!password || !confirmPassword) return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
-
-  if (password !== confirmPassword) return res.status(400).json({ message: 'No coinciden.' });
-
-  if (password.length < 8) {
-    return res.status(400).json({ message: 'La contraseña debe tener al menos 8 caracteres.' });
+  if (!password || !confirmPassword) return res.status(400).json({ ok: false, message: 'Todos los campos son obligatorios.' });
+  if (typeof password !== 'string' || typeof confirmPassword !== 'string') {
+    return res.status(400).json({ ok: false, message: 'La contraseña no es válida.' });
   }
 
-  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
-  if (!passwordRegex.test(password)) {
-    return res.status(400).json({ message: 'La contraseña debe tener 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.' });
-  }
+  if (password !== confirmPassword) return res.status(400).json({ ok: false, message: 'Las contraseñas no coinciden.' });
 
   if (/\s/.test(password)) {
-    return res.status(400).json({ message: 'La contraseña no puede contener espacios.' });
+    return res.status(400).json({ ok: false, message: 'La contraseña no puede contener espacios.' });
   }
 
-  cleanExpiredTokens();
-  const tokenEntry = resetTokens.find(t => t.token === token && !t.used);
-  if (!tokenEntry) return res.status(400).json({ message: 'Token inválido o expirado.' });
-
-  try {
-    // ENCRIPTAR NUEVA CONTRASEÑA
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    const { error } = await supabase
-      .from('usuario')
-      .update({ password_hash: hashedPassword })
-      .eq('email', tokenEntry.email);
-
-    if (error) throw error;
-
-    tokenEntry.used = true;
-    return res.status(200).json({ message: 'Contraseña actualizada correctamente.' });
-  } catch (error) {
-    return res.status(500).json({ message: 'Error al actualizar.' });
+  if (password.length < 8 || !REGEX_CONTRASENA.test(password)) {
+    return res.status(400).json({ ok: false, message: MENSAJE_CONTRASENA_DEBIL });
   }
+  if (password.length > LARGO_MAXIMO_CONTRASENA) {
+    return res.status(400).json({ ok: false, message: `La contraseña puede tener como máximo ${LARGO_MAXIMO_CONTRASENA} caracteres.` });
+  }
+
+  if (!FORMATO_TOKEN_RESET.test(token)) {
+    return res.status(400).json({ ok: false, code: 'ENLACE_INVALIDO', message: MENSAJE_ENLACE_INVALIDO });
+  }
+
+  const errorActualizar = 'No se pudo cambiar la contraseña. Pide un enlace nuevo e inténtalo otra vez.';
+  const ahora = Date.now();
+
+  // Se gasta el token en UN paso (solo si sigue sin usar y vigente): dos envíos a la vez no pueden
+  // usar el mismo enlace.
+  const { data: consumido, error: errorConsumir } = await supabase
+    .from('reset_tokens').update({ used: true })
+    .eq('token', hashTokenReset(token)).eq('used', false).gt('expires_at', ahora)
+    .select('email').maybeSingle();
+  if (falloSupabase(res, errorConsumir, errorActualizar)) return;
+  if (!consumido) return res.status(400).json({ ok: false, code: 'ENLACE_INVALIDO', message: MENSAJE_ENLACE_INVALIDO });
+
+  const hashedPassword = await bcrypt.hash(password, saltRounds);
+  const { error } = await supabase
+    .from('usuario')
+    .update({ password_hash: hashedPassword })
+    .eq('email', consumido.email);
+  if (falloSupabase(res, error, errorActualizar)) return;
+
+  // Por si quedó otro enlace vivo de la misma cuenta (pedidos simultáneos): también se anula.
+  const { error: errorAnular } = await supabase
+    .from('reset_tokens').update({ used: true }).eq('email', consumido.email).eq('used', false);
+  if (errorAnular) console.error('No se pudieron anular otros enlaces de recuperación:', errorAnular);
+
+  return res.status(200).json({ ok: true, message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' });
 });
 
 // ─── Pedidos del usuario ──────────────────────────────────────

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import '../styles/Auth.css';
+import { leerJson, mensajeErrorOlvido } from '../utils/recuperarClave';
 
 function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -52,10 +53,10 @@ function ForgotPassword() {
         body: JSON.stringify({ email }),
       });
 
-      const data = await res.json();
+      const data = await leerJson(res);
 
       if (!res.ok) {
-        setError(data.message || 'Error al procesar la solicitud.');
+        setError(mensajeErrorOlvido(res.status, data));
         setLoading(false);
         return;
       }
@@ -149,7 +150,7 @@ function ForgotPassword() {
             <div className="login-footer" style={{ textAlign: 'left', marginTop: '1rem' }}>
               <p style={{ color: 'rgba(255,255,255,0.8)', lineHeight: '1.6' }}>
                 Si el correo <strong>{email}</strong> está registrado, recibirás un enlace para restablecer tu contraseña.
-                Revisa también tu carpeta de spam.
+                El enlace vence en 30 minutos y sirve una sola vez. Revisa también tu carpeta de spam.
               </p>
 
               {previewUrl && (
