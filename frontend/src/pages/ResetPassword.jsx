@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import '../styles/Auth.css';
+import { leerJson, resultadoValidarEnlace, resultadoCambioClave } from '../utils/recuperarClave';
 
 function ResetPassword() {
   const { token } = useParams();
@@ -17,15 +18,10 @@ function ResetPassword() {
   useEffect(() => {
     const validateToken = async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/reset-password/${token}`);
-        const data = await res.json();
-
-        if (data.valid) {
-          setTokenValid(true);
-        } else {
-          setError(data.message || 'Enlace inválido o expirado.');
-          setTokenValid(false);
-        }
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/reset-password/${encodeURIComponent(token)}`);
+        const { valido, mensaje } = resultadoValidarEnlace(res.status, await leerJson(res));
+        setTokenValid(valido);
+        if (!valido) setError(mensaje);
       } catch (err) {
         setError('Error de conexión con el servidor.');
         setTokenValid(false);
@@ -135,21 +131,23 @@ function ResetPassword() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/reset-password/${token}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/reset-password/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
 
-      const data = await res.json();
+      const resultado = resultadoCambioClave(res.status, await leerJson(res));
 
-      if (!res.ok) {
-        setError(data.message || 'Error al restablecer la contraseña.');
+      if (!resultado.exito) {
+        setError(resultado.mensaje);
+        // Si el enlace venció o ya se usó mientras llenaba el formulario, se muestra "pide uno nuevo".
+        if (resultado.enlaceInvalido) setTokenValid(false);
         setLoading(false);
         return;
       }
 
-      setSuccess(data.message);
+      setSuccess(resultado.mensaje);
       setLoading(false);
 
       // Redirect to login after 3 seconds

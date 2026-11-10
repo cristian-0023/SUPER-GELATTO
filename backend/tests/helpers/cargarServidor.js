@@ -38,12 +38,16 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //    rekognition-login (por defecto muy alto).
 //  - vercel: true -> define VERCEL (como en Vercel, donde corre el backend): cuenta como producción.
 //  - soloLlavePublica: true -> SUPABASE_SERVICE_ROLE_KEY vacía y solo SUPABASE_KEY (la llave pública).
+//  - frontendUrl: valor de FRONTEND_URL ('' = sin configurar; así no se lee de un .env local).
+//  - smtp: true -> SMTP_HOST/SMTP_USER/SMTP_PASS ficticios (correo "real" configurado); false -> vacíos.
+//    El envío nunca sale a la red: con la opción `correo` nodemailer es falso.
 //  - tripoApiKey: valor de TRIPO_API_KEY (ficticio por defecto; '' = sin configurar). Las pruebas nunca
 //    llaman a Tripo de verdad: las que llegan a fetch lo reemplazan por uno falso.
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
   simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000,
-  tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false } = {}) {
+  tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false,
+  frontendUrl = '', smtp = false } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase || soloLlavePublica ? '' : 'service-role-key-falsa';
@@ -54,6 +58,10 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
   process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
   process.env.TRIPO_API_KEY = tripoApiKey;
+  process.env.FRONTEND_URL = frontendUrl;
+  process.env.SMTP_HOST = smtp ? 'smtp.prueba.local' : '';
+  process.env.SMTP_USER = smtp ? 'tienda@prueba.local' : '';
+  process.env.SMTP_PASS = smtp ? 'clave-smtp-falsa' : '';
   process.env.JWT_SECRET = jwtSecret;
   process.env.GOOGLE_CLIENT_ID = googleClientId;
   process.env.ADMIN_EMAILS = adminEmails;
