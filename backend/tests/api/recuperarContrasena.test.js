@@ -344,4 +344,12 @@ describe('modo simulado (sin base)', () => {
     const res = await request(app).post('/api/forgot-password').send({ email: 'cliente@supergelatto.com' });
     expect(res.status).toBe(503);
   });
+
+  it('validar o usar un enlace también responde 503 (no se cae el servidor)', async () => {
+    const { app } = cargarServidor(null, { sinSupabase: true, frontendUrl: FRONT });
+    const token = crypto.randomBytes(32).toString('hex');
+    expect((await request(app).get(`/api/reset-password/${token}`)).status).toBe(503);
+    const res = await request(app).post(`/api/reset-password/${token}`).send({ password: CLAVE_NUEVA, confirmPassword: CLAVE_NUEVA });
+    expect(res.status).toBe(503);
+  });
 });

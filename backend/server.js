@@ -1570,6 +1570,7 @@ app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
 // Solo dice si el enlace sirve; no devuelve datos de la cuenta.
 app.get('/api/reset-password/:token', limitadorValidarEnlace, async (req, res) => {
   const { token } = req.params;
+  if (!isSupabaseConfigured) return res.status(503).json({ ok: false, valid: false, message: MENSAJE_RECUPERACION_NO_DISPONIBLE });
   if (!FORMATO_TOKEN_RESET.test(token)) {
     return res.status(400).json({ ok: false, valid: false, code: 'ENLACE_INVALIDO', message: MENSAJE_ENLACE_INVALIDO });
   }
@@ -1588,6 +1589,8 @@ app.get('/api/reset-password/:token', limitadorValidarEnlace, async (req, res) =
 app.post('/api/reset-password/:token', limitadorRestablecer, async (req, res) => {
   const { token } = req.params;
   const { password, confirmPassword } = req.body;
+  // Sin base (modo simulado) no hay dónde guardar ni gastar enlaces.
+  if (!isSupabaseConfigured) return res.status(503).json({ ok: false, message: MENSAJE_RECUPERACION_NO_DISPONIBLE });
 
   if (!password || !confirmPassword) return res.status(400).json({ ok: false, message: 'Todos los campos son obligatorios.' });
   if (typeof password !== 'string' || typeof confirmPassword !== 'string') {
