@@ -36,16 +36,18 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
 //  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
 //    rekognition-login (por defecto muy alto).
+//  - vercel: true -> define VERCEL (como en Vercel, donde corre el backend): cuenta como producción.
+//  - soloLlavePublica: true -> SUPABASE_SERVICE_ROLE_KEY vacía y solo SUPABASE_KEY (la llave pública).
 //  - tripoApiKey: valor de TRIPO_API_KEY (ficticio por defecto; '' = sin configurar). Las pruebas nunca
 //    llaman a Tripo de verdad: las que llegan a fetch lo reemplazan por uno falso.
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
   simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000,
-  tripoApiKey = 'tripo-llave-falsa-de-prueba' } = {}) {
+  tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase ? '' : 'service-role-key-falsa';
-  process.env.SUPABASE_KEY = '';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase || soloLlavePublica ? '' : 'service-role-key-falsa';
+  process.env.SUPABASE_KEY = soloLlavePublica ? 'llave-publica-falsa' : '';
   process.env.PAYMENT_RATE_LIMIT_MAX = String(limitePagos);
   process.env.CHATBOT_RATE_LIMIT_MAX = String(limiteChatbot);
   process.env.LOGIN_RATE_LIMIT_MAX = String(limiteLogin);
@@ -61,6 +63,8 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   process.env.NODE_ENV = produccion ? 'production' : 'development';
   if (render) process.env.RENDER = 'true';
   else delete process.env.RENDER;
+  if (vercel) process.env.VERCEL = '1';
+  else delete process.env.VERCEL;
 
   // Ninguna prueba debe tocar featured_state.json, fallback_sales.json ni tripo_models_state.json.
   const escrituras = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});

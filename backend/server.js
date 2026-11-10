@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// Producción = NODE_ENV=production o Render (Render define RENDER aunque NODE_ENV no esté puesto).
-const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+// Producción = NODE_ENV=production, Render o Vercel (definen RENDER / VERCEL aunque NODE_ENV no esté puesto).
+const esProduccion = process.env.NODE_ENV === 'production' || !!process.env.RENDER || !!process.env.VERCEL;
 
 // Desactivar temporalmente la verificación estricta de SSL en Node para entornos locales con certificados auto-firmados / proxys.
 // Nunca en producción: la verificación del login con Google descarga certificados por HTTPS.
@@ -29,8 +29,17 @@ const {
 } = require('@aws-sdk/client-rekognition');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-// Priorizar SUPABASE_SERVICE_ROLE_KEY para realizar operaciones administrativas de backend sin restricciones de RLS
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+// El servidor entra a la base con SUPABASE_SERVICE_ROLE_KEY. Las tablas tienen candados (RLS y sin permisos
+// para la llave pública), así que con SUPABASE_KEY (la pública) todas las consultas fallarían.
+// En producción es obligatoria; fuera de producción se acepta la pública como respaldo, con aviso.
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+if (esProduccion && !supabaseServiceKey && (supabaseUrl || '').trim()) {
+  throw new Error('Configuración incompleta: falta SUPABASE_SERVICE_ROLE_KEY. En producción (Vercel, Render o NODE_ENV=production) el servidor no arranca solo con la llave pública (SUPABASE_KEY): la base la rechaza y los pedidos, pagos y cuentas fallarían. Agrega SUPABASE_SERVICE_ROLE_KEY en las variables de entorno del proyecto y vuelve a publicar.');
+}
+if (!supabaseServiceKey && process.env.SUPABASE_KEY) {
+  console.warn('⚠️ Falta SUPABASE_SERVICE_ROLE_KEY: se usa SUPABASE_KEY (solo desarrollo). Con los candados de la base, casi todo fallará.');
+}
+const supabaseKey = supabaseServiceKey || process.env.SUPABASE_KEY;
 
 // ─── AWS Rekognition Config ─────────────────────────────────────
 const rekognitionRegion = process.env.AWS_REGION || 'us-east-2';
@@ -465,7 +474,7 @@ const isSupabaseConfigured = supabaseUrl &&
 if (isSupabaseConfigured) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
-    const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Service Role Key (Bypass RLS)' : 'Anon Key';
+    const keyType = supabaseServiceKey ? 'Service Role Key (Bypass RLS)' : 'Anon Key';
     console.log(`✅ Cliente Supabase inicializado correctamente con ${keyType}.`);
 
     // Auto-crear tabla admin_face_rekognition si no existe
@@ -500,10 +509,11 @@ if (isSupabaseConfigured) {
   }
 }
 
-// En producción (o en Render) el modo simulado aprobaría pagos sin guardarlos: mejor no arrancar.
-// Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje.
-if (!supabase && (process.env.NODE_ENV === 'production' || process.env.RENDER)) {
-  throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_KEY). En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
+// En producción (NODE_ENV, Render o Vercel) el modo simulado aprobaría pagos sin guardarlos: mejor no arrancar.
+// Se lanza al cargar el módulo (así se puede probar); `node server.js` termina con este mensaje y, en
+// Vercel, cada invocación falla mostrándolo en el registro (Logs) de la función.
+if (!supabase && esProduccion) {
+  throw new Error('Configuración incompleta: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY. En producción el servidor no arranca sin base de datos, para no aprobar pagos que no se guardan.');
 }
 
 // ─── Secreto de las sesiones (JWT) ──────────────────────────
@@ -569,11 +579,11 @@ if (!supabase) {
 }
 
 const app = express();
-// Detrás del proxy de Render (el frontend apunta a *.onrender.com) la IP real llega en X-Forwarded-For;
-// sin esto el límite de intentos vería a todos los clientes como una sola IP. Solo se confía en 1 salto
-// (el proxy de Render) y solo si estamos en Render o se pide con TRUST_PROXY=1: en local, confiar en esa
-// cabecera dejaría a cualquiera falsificar su IP para esquivar el límite.
-if (process.env.RENDER || process.env.TRUST_PROXY === '1') {
+// Detrás del proxy de Render o de Vercel la IP real llega en X-Forwarded-For; sin esto el límite de
+// intentos vería a todos los clientes como una sola IP. Solo se confía en 1 salto (el proxy de la
+// plataforma, que agrega la IP real al final de la cabecera) y solo en Render, en Vercel o si se pide
+// con TRUST_PROXY=1: en local, confiar en esa cabecera dejaría a cualquiera falsificar su IP.
+if (process.env.RENDER || process.env.VERCEL || process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', 1);
 }
 app.use(compression());
@@ -1149,6 +1159,9 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) return res.status(400).json({ message: 'Campos obligatorios.' });
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length > 254 || password.length > 200) {
+    return res.status(400).json({ message: 'Email o contraseña con formato no válido.' });
+  }
 
   if (hasForbiddenChars(email)) {
     return res.status(400).json({ message: 'No se permiten caracteres especiales peligrosos (< > & " \' /).' });
@@ -1169,19 +1182,10 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
 
   if (error || !user) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
-  // COMPARAR HASH Y MIGRACIÓN LEGACY
-  const isMatch = await bcrypt.compare(password, user.password_hash);
-  
-  if (!isMatch) {
-    // Si no hace match con bcrypt, comprobamos si es una contraseña en texto plano antigua
-    if (password === user.password_hash) {
-      // MIGRACIÓN AUTOMÁTICA: Convertir texto plano a bcrypt hash
-      const newHash = await bcrypt.hash(password, saltRounds);
-      await supabase.from('usuario').update({ password_hash: newHash }).eq('id_usuario', user.id_usuario);
-    } else {
-      return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
-    }
-  }
+  // Solo bcrypt: todas las contraseñas guardadas están cifradas. Nunca se compara contra el texto
+  // guardado (si no, la contraseña cifrada serviría como contraseña).
+  const isMatch = typeof user.password_hash === 'string' && await bcrypt.compare(password, user.password_hash);
+  if (!isMatch) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
   // GENERAR TOKEN JWT FIRMADO (rol de la base: el registro con contraseña no verifica el correo,
   // así que aquí ADMIN_EMAILS no da permisos)
