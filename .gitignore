@@ -33,3 +33,8 @@ Thumbs.db
 .git/
 
 .cursor/
+
+# Estado local que el modo simulado podría recrear (la base es la única fuente de verdad)
+backend/featured_state.json
+backend/fallback_sales.json
+backend/tripo_models_state.json

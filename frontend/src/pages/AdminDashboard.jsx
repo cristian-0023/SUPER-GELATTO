@@ -10,6 +10,7 @@ import {
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
+import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
 import { soloVentasCobradas } from '../utils/ingresos';
 import { useCart } from '../context/CartContext';
 
@@ -258,11 +259,12 @@ const AdminDashboard = ({ user, onLogout }) => {
       products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, categoria: newCategory } : p)
     }));
     try {
-      await apiFetch(`/api/admin/products/${productId}/category`, {
+      const res = await apiFetch(`/api/admin/products/${productId}/category`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoria: newCategory })
       });
+      if (res.ok) avisarProductosActualizados();
     } catch (err) {
       console.error('Error actualizando categoría:', err);
     } finally {
@@ -301,6 +303,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stock: numStock })
       });
+      if (res.ok) avisarProductosActualizados();
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         if (showToast) showToast(data.message || 'Error al actualizar el stock disponible.', 'error');
@@ -361,11 +364,12 @@ const AdminDashboard = ({ user, onLogout }) => {
     }));
     setEditingPrice(null);
     try {
-      await apiFetch(`/api/admin/products/${productId}/price`, {
+      const res = await apiFetch(`/api/admin/products/${productId}/price`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ precio: newPrice })
       });
+      if (res.ok) avisarProductosActualizados();
     } catch (err) {
       console.error('Error actualizando precio:', err);
     } finally {
@@ -389,6 +393,7 @@ const AdminDashboard = ({ user, onLogout }) => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Error al crear el producto.');
+      avisarProductosActualizados();
 
       setDashboardData(prev => ({
         ...prev,
@@ -450,6 +455,7 @@ const AdminDashboard = ({ user, onLogout }) => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Error al actualizar la imagen.');
+      avisarProductosActualizados();
 
       setDashboardData(prev => ({
         ...prev,
@@ -492,15 +498,13 @@ const AdminDashboard = ({ user, onLogout }) => {
       products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, destacado: nextStatus } : p)
     }));
     try {
-      localStorage.setItem('supergelatto_products_updated', Date.now().toString());
-    } catch (e) {}
-
-    try {
       const res = await apiFetch(`/api/admin/products/${productId}/featured`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ destacado: nextStatus })
       });
+      // Avisar a las otras pestañas solo cuando la base ya guardó el cambio.
+      if (res.ok) avisarProductosActualizados();
       if (!res.ok) {
         // Revertir si el servidor reporta error
         setDashboardData(prev => ({
@@ -529,15 +533,19 @@ const AdminDashboard = ({ user, onLogout }) => {
       return;
     }
     
-    fetchDashboardData(false);
-
-    // Auto-polling para ventas y métricas en TIEMPO REAL cada 3 segundos
-    const realTimeInterval = setInterval(() => {
-      fetchDashboardData(true);
-    }, 3000);
+    // Ventas y métricas: la primera carga muestra "cargando"; después, refresco silencioso cada 30 s,
+    // en pausa con la pestaña oculta y refresco al volver, sin dos pedidos iguales a la vez (utils/sondeo).
+    // El botón "Sincronizar" sigue pidiendo al instante.
+    let primeraCarga = true;
+    const sondeo = crearSondeo(() => {
+      const silencioso = !primeraCarga;
+      primeraCarga = false;
+      return fetchDashboardData(silencioso);
+    });
+    sondeo.iniciar();
 
     return () => {
-      clearInterval(realTimeInterval);
+      sondeo.detener();
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [user, navigate]);
@@ -579,8 +587,8 @@ const AdminDashboard = ({ user, onLogout }) => {
       if (!res.ok) throw new Error('Error al obtener datos');
       const data = await res.json();
       
-      // Obtener productos
-      const prodRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
+      // Obtener productos saltándose la caché del CDN (30 s): el admin ve sus cambios al instante
+      const prodRes = await fetch(urlSinCache(`${import.meta.env.VITE_API_URL || ''}/api/products`), { cache: 'no-store' });
       const products = await prodRes.json();
       
       setDashboardData({ ...data, products });
@@ -665,6 +673,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         method: 'DELETE'
       });
       if (res.ok) {
+        avisarProductosActualizados();
         setDashboardData(prev => ({
           ...prev,
           products: prev.products.filter(p => p.id !== id)
@@ -711,6 +720,7 @@ const AdminDashboard = ({ user, onLogout }) => {
       const data = await res.json();
 
       if (res.ok) {
+        avisarProductosActualizados();
         setGeneratingProduct(data.product);
         
         if (data.model) {
@@ -874,6 +884,7 @@ const AdminDashboard = ({ user, onLogout }) => {
       });
 
       if (!res.ok) throw new Error('Error al actualizar stock');
+      avisarProductosActualizados();
       window.dispatchEvent(new CustomEvent('products-updated'));
     } catch (err) {
       console.error('Error al guardar stock en Supabase:', err);
@@ -910,6 +921,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         } : p)
       }));
 
+      avisarProductosActualizados();
       window.dispatchEvent(new CustomEvent('products-updated'));
 
       setSaveSuccess(true);

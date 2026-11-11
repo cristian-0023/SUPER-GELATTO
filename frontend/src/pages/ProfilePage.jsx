@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, Navigate } from 'react-router-dom';
 import { getToken } from '../utils/api';
+import { crearSondeo } from '../utils/sondeo';
 import SuperPointsCard from '../components/SuperPointsCard';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 
@@ -112,19 +113,20 @@ const ProfilePage = ({ user, onUpdateUser }) => {
       }
     };
 
-    fetchOrders();
+    // Refresco cada 30 s, en pausa con la pestaña oculta y sin dos pedidos iguales a la vez (utils/sondeo).
+    const sondeo = crearSondeo(fetchOrders);
+    sondeo.iniciar();
 
-    // Sincronización en tiempo real ultra-rápida (cada 2 segundos)
-    const interval = setInterval(fetchOrders, 2000);
-
-    const handleFocus = () => fetchOrders();
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('superGelatto_order_updated', fetchOrders);
+    const refrescar = () => { sondeo.refrescar().catch(() => {}); };
+    // Un pedido cambió: si hay una consulta en vuelo puede traer datos viejos, así que se encadena una nueva.
+    const alCambiarPedido = () => { sondeo.refrescar({ forzar: true }).catch(() => {}); };
+    window.addEventListener('focus', refrescar);
+    window.addEventListener('superGelatto_order_updated', alCambiarPedido);
 
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('superGelatto_order_updated', fetchOrders);
+      sondeo.detener();
+      window.removeEventListener('focus', refrescar);
+      window.removeEventListener('superGelatto_order_updated', alCambiarPedido);
     };
   }, [user]);
 

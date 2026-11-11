@@ -151,22 +151,29 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  // La tarea ahora vive en la base (producto.model_3d_*): el fake no guarda nada, así que la lectura de la
+  // fila se simula con la tarea "generando" que dejó la creación.
   async function productoConTarea3D() {
     const res = await post('/api/admin/products', { name: 'Con 3D', price: 4000, prompt3d: 'cono de helado' });
     expect(res.status).toBe(201);
+    const id = res.body.product.id;
     fake.llamadas.length = 0;
     fake.errores.length = 0; // los errores de la creación no cuentan para esta prueba
-    return res.body.product.id;
+    fake.responder('producto', 'select', {
+      data: { id_producto: id, model_3d_task_id: 'T-1', model_3d_estado: 'generando', model_3d_url: null, model_3d_prompt: 'cono de helado' },
+      error: null,
+    });
+    return id;
   }
 
-  it('guarda { model_3d_url } en producto', async () => {
+  it('guarda { model_3d_url, model_3d_estado: listo } en producto', async () => {
     const id = await productoConTarea3D();
 
     const res = await request(app).get(`/api/admin/products/${id}/model-3d`).set(authAdmin());
 
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ model_3d_url: MODELO });
+    expect(ups[0].payload).toEqual({ model_3d_url: MODELO, model_3d_estado: 'listo' });
     expect(fake.errores).toEqual([]);
     expect(res.body.estado).toBe('listo');
   });

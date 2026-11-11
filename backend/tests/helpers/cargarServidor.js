@@ -34,6 +34,7 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - groq: async (parametros) => respuesta. Reemplaza a groq-sdk (chat.completions.create): las pruebas
 //    NUNCA llaman a Groq de verdad. Sin esta opción, cualquier llamada al modelo lanza un error.
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
+//  - limiteTripo: tope de generaciones 3D por admin y por hora (crear con prompt y regenerate-3d; por defecto muy alto).
 //  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
 //    rekognition-login (por defecto muy alto).
 //  - esperaEnlaceMs / maxEnlacesDia: límites por correo de /api/forgot-password (RECUPERACION_ESPERA_MS y
@@ -47,7 +48,7 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //    llaman a Tripo de verdad: las que llegan a fetch lo reemplazan por uno falso.
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
-  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000,
+  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000, limiteTripo = 100000,
   tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false,
   frontendUrl = '', smtp = false, esperaEnlaceMs = 0, maxEnlacesDia = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
@@ -56,6 +57,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   process.env.SUPABASE_KEY = soloLlavePublica ? 'llave-publica-falsa' : '';
   process.env.PAYMENT_RATE_LIMIT_MAX = String(limitePagos);
   process.env.CHATBOT_RATE_LIMIT_MAX = String(limiteChatbot);
+  process.env.TRIPO_RATE_LIMIT_MAX = String(limiteTripo);
   process.env.LOGIN_RATE_LIMIT_MAX = String(limiteLogin);
   process.env.RECUPERACION_ESPERA_MS = String(esperaEnlaceMs);
   process.env.RECUPERACION_MAX_DIA = String(maxEnlacesDia);
@@ -78,7 +80,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   if (vercel) process.env.VERCEL = '1';
   else delete process.env.VERCEL;
 
-  // Ninguna prueba debe tocar featured_state.json, fallback_sales.json ni tripo_models_state.json.
+  // Ninguna prueba debe escribir archivos (el servidor ya no guarda estado en JSON; se vigila por si acaso).
   const escrituras = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
 
   // server.js es muy hablador; se silencia para leer la salida de las pruebas.
