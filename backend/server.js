@@ -2364,58 +2364,136 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
 });
 
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
-  const { id } = req.params;
+  const prodId = idVentaValido(req.params.id);
+  if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   try {
-    const prodId = parseInt(id, 10);
-    const { error } = await supabase.from('producto').delete().eq('id_producto', prodId);
-    if (error) throw error;
-    // Fallback local
-    const fbIdx = FALLBACK_PRODUCTS.findIndex(p => p.id_producto === prodId);
-    if (fbIdx !== -1) FALLBACK_PRODUCTS.splice(fbIdx, 1);
-    return res.status(200).json({ message: 'Producto eliminado correctamente.' });
+    const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).select('id_producto');
+    // 23503 = clave foránea: el producto tiene ventas y la base no deja borrarlo.
+    if (error && error.code === '23503') {
+      return res.status(409).json({ ok: false, message: 'El producto tiene ventas registradas; desactívalo en vez de borrarlo.' });
+    }
+    if (falloSupabase(res, error, 'Error al eliminar el producto.')) return;
+    if (!data || data.length === 0) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    return res.status(200).json({ ok: true, message: 'Producto eliminado correctamente.' });
   } catch (error) {
-    return res.status(500).json({ message: 'Error al eliminar producto.' });
+    console.error('Error al eliminar producto:', error);
+    return res.status(500).json({ ok: false, message: 'Error al eliminar el producto.' });
+  }
+});
+
+// Columnas públicas del producto que devuelven las rutas de edición (nunca model_3d_prompt ni task_id).
+const COLUMNAS_PRODUCTO_ADMIN = 'id_producto, nombre, precio, stock, descripcion, imagen, categoria, estado, destacado';
+
+// Valida el cuerpo del editor. Devuelve { datos } con las columnas de la base, o { error } en español.
+function validarEdicionProducto(cuerpo) {
+  const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
+  const datos = {};
+  const numero = (v) => (v === null || (typeof v === 'string' && v.trim() === '') ? NaN : Number(v));
+  if (c.name !== undefined) {
+    const nombre = typeof c.name === 'string' ? c.name.trim() : '';
+    if (nombre.length < 1 || nombre.length > 120) return { error: 'El nombre debe tener entre 1 y 120 caracteres.' };
+    datos.nombre = nombre;
+  }
+  if (c.precio !== undefined) {
+    const precio = numero(c.precio);
+    if (!Number.isFinite(precio) || precio < 0) return { error: 'El precio debe ser un número mayor o igual a 0.' };
+    datos.precio = precio;
+  }
+  if (c.stock !== undefined) {
+    const stock = numero(c.stock);
+    if (!Number.isSafeInteger(stock) || stock < 0) return { error: 'El stock debe ser un número entero mayor o igual a 0.' };
+    datos.stock = stock;
+  }
+  if (c.descripcion !== undefined) {
+    if (typeof c.descripcion !== 'string' || c.descripcion.length > 2000) return { error: 'La descripción no puede superar 2000 caracteres.' };
+    datos.descripcion = c.descripcion;
+  }
+  if (c.categoria !== undefined) {
+    if (typeof c.categoria !== 'string' || c.categoria.length > 60) return { error: 'La categoría no puede superar 60 caracteres.' };
+    datos.categoria = c.categoria;
+  }
+  if (c.estado !== undefined) {
+    if (typeof c.estado !== 'boolean') return { error: 'El estado debe ser verdadero o falso.' };
+    datos.estado = c.estado;
+  }
+  if (Object.keys(datos).length === 0) return { error: 'No hay ningún dato válido para actualizar.' };
+  return { datos };
+}
+
+// Imagen del producto: URL https:// o ruta local que empieza con una sola "/" y sin "..".
+function imagenProductoValida(valor) {
+  if (typeof valor !== 'string') return null;
+  const img = valor.trim();
+  if (img.length < 1 || img.length > 2048) return null;
+  if (/[\s\\\u0000-\u001f]/.test(img)) return null;
+  if (img.startsWith('/')) {
+    return img.startsWith('//') || img.split('/').includes('..') ? null : img;
+  }
+  try {
+    return new URL(img).protocol === 'https:' ? img : null;
+  } catch {
+    return null;
+  }
+}
+
+// Cambiar la imagen del producto (Admin)
+app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
+  const prodId = idVentaValido(req.params.id);
+  if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
+  const imagen = imagenProductoValida(req.body && req.body.image);
+  if (!imagen) {
+    return res.status(400).json({ ok: false, message: 'La imagen debe ser una URL https:// o una ruta que empiece con "/" (máximo 2048 caracteres).' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('producto')
+      .update({ imagen })
+      .eq('id_producto', prodId)
+      .select('id_producto')
+      .maybeSingle();
+    if (falloSupabase(res, error, 'Error al guardar la imagen.')) return;
+    if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    return res.status(200).json({ ok: true, message: 'Imagen actualizada con éxito.', id: prodId, image: imagen });
+  } catch (error) {
+    console.error('Error al guardar imagen:', error);
+    return res.status(500).json({ ok: false, message: 'Error al guardar la imagen.' });
   }
 });
 
 // Actualizar producto y stock (Admin)
 app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { name, precio, descripcion, categoria, stock, estado } = req.body;
+  const prodId = idVentaValido(req.params.id);
+  if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
+  const { datos, error: errorValidacion } = validarEdicionProducto(req.body);
+  if (errorValidacion) return res.status(400).json({ ok: false, message: errorValidacion });
 
   try {
-    const updateData = {};
-    if (name !== undefined) updateData.nombre = name;
-    if (precio !== undefined) updateData.precio = Number(precio);
-    if (descripcion !== undefined) updateData.descripcion = descripcion;
-    if (categoria !== undefined) updateData.categoria = categoria;
-    if (stock !== undefined) updateData.stock = Math.max(0, parseInt(stock, 10) || 0);
-    if (estado !== undefined) updateData.estado = Boolean(estado);
-
     const { data: updatedProduct, error } = await supabase
       .from('producto')
-      .update(updateData)
-      .eq('id_producto', id)
-      .select()
-      .single();
+      .update(datos)
+      .eq('id_producto', prodId)
+      .select(COLUMNAS_PRODUCTO_ADMIN)
+      .maybeSingle();
+    if (falloSupabase(res, error, 'Error al actualizar el producto o stock.')) return;
+    if (!updatedProduct) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
 
-    if (error) throw error;
-
-    // Sincronizar en tabla inventario si se actualizó el stock
-    if (stock !== undefined) {
-      await supabase
+    // Sincronizar en tabla inventario si se actualizó el stock (el producto ya se guardó: solo se registra el fallo)
+    if (datos.stock !== undefined) {
+      const { error: errInv } = await supabase
         .from('inventario')
-        .update({ stock_disponible: updateData.stock, fecha_actualizacion: new Date().toISOString() })
-        .eq('id_producto', id);
+        .update({ stock_disponible: datos.stock, fecha_actualizacion: new Date().toISOString() })
+        .eq('id_producto', prodId);
+      if (errInv) console.error('No se pudo sincronizar inventario:', errInv);
     }
 
     return res.status(200).json({
+      ok: true,
       message: 'Producto y stock actualizados correctamente.',
       product: updatedProduct
     });
   } catch (error) {
     console.error('Error al actualizar producto:', error);
-    return res.status(500).json({ message: 'Error al actualizar el producto o stock.' });
+    return res.status(500).json({ ok: false, message: 'Error al actualizar el producto o stock.' });
   }
 });
 
