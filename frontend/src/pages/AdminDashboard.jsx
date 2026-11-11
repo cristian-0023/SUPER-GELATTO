@@ -12,6 +12,7 @@ import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
 import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
 import { soloVentasCobradas } from '../utils/ingresos';
+import { armarCuerpoProducto, revertirStock } from '../utils/editorProductos';
 import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
@@ -681,6 +682,9 @@ const AdminDashboard = ({ user, onLogout }) => {
         if (showToast) showToast('Producto eliminado exitosamente', 'success');
       } else if (res.status === 401) {
         setIsQrVerified(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        if (showToast) showToast(data.message || 'Error al eliminar producto', 'error');
       }
     } catch (err) {
       if (showToast) showToast('Error al eliminar producto', 'error');
@@ -866,6 +870,7 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   const handleQuickStockChange = async (productId, newStockVal) => {
     const stockNum = Math.max(0, parseInt(newStockVal, 10) || 0);
+    const stockAnterior = dashboardData.products.find(p => p.id === productId)?.stock;
 
     // Actualización optimista instantánea en interfaz
     setDashboardData(prev => ({
@@ -874,20 +879,26 @@ const AdminDashboard = ({ user, onLogout }) => {
     }));
 
     try {
-      const res = await fetch(`/api/admin/products/${productId}`, {
+      const res = await apiFetch(`/api/admin/products/${productId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': user?.rol || ''
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stock: stockNum })
       });
 
-      if (!res.ok) throw new Error('Error al actualizar stock');
+      if (res.status === 401) {
+        sessionStorage.removeItem('superGelatto_face_verified');
+        setIsQrVerified(false);
+      }
+      if (!res.ok) throw new Error('No se pudo guardar el stock.');
       avisarProductosActualizados();
       window.dispatchEvent(new CustomEvent('products-updated'));
     } catch (err) {
       console.error('Error al guardar stock en Supabase:', err);
+      // Deshacer la actualización optimista: la pantalla no debe mostrar un stock que no se guardó
+      if (stockAnterior !== undefined) {
+        setDashboardData(prev => ({ ...prev, products: revertirStock(prev.products, productId, stockAnterior) }));
+      }
+      if (showToast) showToast('No se pudo guardar el stock. Se restauró el valor anterior.', 'error');
     }
   };
 
@@ -897,16 +908,20 @@ const AdminDashboard = ({ user, onLogout }) => {
 
     setActionLoading(editingProduct.id);
     try {
-      const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
+      const res = await apiFetch(`/api/admin/products/${editingProduct.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': user?.rol || ''
-        },
-        body: JSON.stringify(editFormData)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(armarCuerpoProducto(editFormData))
       });
 
-      if (!res.ok) throw new Error('Error al actualizar el producto');
+      if (res.status === 401) {
+        sessionStorage.removeItem('superGelatto_face_verified');
+        setIsQrVerified(false);
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || 'Error al actualizar el producto');
+      }
 
       setDashboardData(prev => ({
         ...prev,
