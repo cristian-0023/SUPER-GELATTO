@@ -58,77 +58,6 @@ const rekognitionClient = new RekognitionClient({
   credentials: awsCredentials
 });
 
-// ─── Estado persistente de DESTACADOS ───────────────────────────
-// Guardamos el mapa {id_producto: boolean} en un archivo local para
-// que sobreviva reinicios del servidor y no dependa de Supabase.
-const fs = require('fs');
-const path = require('path');
-const FEATURED_STORE_PATH = path.join(__dirname, 'featured_state.json');
-
-function loadFeaturedState() {
-  try {
-    if (fs.existsSync(FEATURED_STORE_PATH)) {
-      return JSON.parse(fs.readFileSync(FEATURED_STORE_PATH, 'utf8'));
-    }
-  } catch (e) {}
-  return {};
-}
-
-function saveFeaturedState(state) {
-  try {
-    fs.writeFileSync(FEATURED_STORE_PATH, JSON.stringify(state), 'utf8');
-  } catch (e) {
-    console.warn('No se pudo guardar featured_state.json:', e.message);
-  }
-}
-
-// Mapa en memoria, cargado desde disco al arrancar
-let FEATURED_STATE = loadFeaturedState();
-
-// ─── Estado persistente de VENTAS (Real-Time Fallback) ────────────
-const FALLBACK_SALES_PATH = path.join(__dirname, 'fallback_sales.json');
-
-function loadFallbackSales() {
-  try {
-    if (fs.existsSync(FALLBACK_SALES_PATH)) {
-      return JSON.parse(fs.readFileSync(FALLBACK_SALES_PATH, 'utf8'));
-    }
-  } catch (e) {}
-  return [];
-}
-
-function saveFallbackSales(sales) {
-  try {
-    fs.writeFileSync(FALLBACK_SALES_PATH, JSON.stringify(sales), 'utf8');
-  } catch (e) {
-    console.warn('No se pudo guardar fallback_sales.json:', e.message);
-  }
-}
-
-let FALLBACK_SALES = loadFallbackSales();
-
-// ─── Estado persistente de MODELOS 3D (Tripo AI) ────────────────
-const TRIPO_STORE_PATH = path.join(__dirname, 'tripo_models_state.json');
-
-function loadTripoModelsState() {
-  try {
-    if (fs.existsSync(TRIPO_STORE_PATH)) {
-      return JSON.parse(fs.readFileSync(TRIPO_STORE_PATH, 'utf8'));
-    }
-  } catch (e) {}
-  return {};
-}
-
-function saveTripoModelsState(state) {
-  try {
-    fs.writeFileSync(TRIPO_STORE_PATH, JSON.stringify(state), 'utf8');
-  } catch (e) {
-    console.warn('No se pudo guardar tripo_models_state.json:', e.message);
-  }
-}
-
-let TRIPO_MODELS_STATE = loadTripoModelsState();
-
 // ─── Tripo 3D AI Helper Functions ─────────────────────────────
 // La llave solo vive en la variable de entorno: el repositorio es público. Sin ella no hay modelos 3D,
 // pero el resto de la tienda funciona igual.
@@ -166,6 +95,14 @@ async function startTripoTask(promptText) {
 
   console.log(`✅ Tarea Tripo3D creada con éxito. Task ID: ${data.data.task_id}`);
   return data.data.task_id;
+}
+
+// Guarda en la fila del producto una tarea 3D recién iniciada (y borra la URL del modelo anterior).
+// Devuelve { error } como supabase-js: quien llama decide qué responder.
+function guardarTareaModelo3D(idProducto, taskId, promptTexto) {
+  return supabase.from('producto')
+    .update({ model_3d_task_id: taskId, model_3d_estado: 'generando', model_3d_prompt: promptTexto, model_3d_url: null })
+    .eq('id_producto', idProducto);
 }
 
 async function getTripoTaskStatus(taskId) {
@@ -1917,34 +1854,14 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
 
     if (userError) throw userError;
 
-    // Obtener ventas combinando Supabase y FALLBACK_SALES en tiempo real
-    let rawSales = [];
-    try {
-      const { data: salesData, error: salesErr } = await supabase
-        .from('venta')
-        .select('id_venta, id_usuario, total, fecha, estado, puntos_usados, descuento_puntos')
-        .order('fecha', { ascending: false });
-      
-      if (salesErr) {
-        console.warn('Advertencia obteniendo ventas de Supabase:', salesErr.message);
-      } else if (salesData) {
-        rawSales = salesData;
-      }
-    } catch (e) {
-      console.warn('Error al obtener ventas:', e);
-    }
+    // Ventas: solo de la base (la única fuente de verdad)
+    const { data: salesData, error: salesErr } = await supabase
+      .from('venta')
+      .select('id_venta, id_usuario, total, fecha, estado, puntos_usados, descuento_puntos')
+      .order('fecha', { ascending: false });
+    if (falloSupabase(res, salesErr, 'Error al obtener las ventas del panel.')) return;
 
-    const salesMap = new Map();
-    rawSales.forEach(s => salesMap.set(String(s.id_venta), s));
-    FALLBACK_SALES.forEach(s => {
-      if (!salesMap.has(String(s.id_venta))) {
-        salesMap.set(String(s.id_venta), s);
-      }
-    });
-
-    const combinedRawSales = Array.from(salesMap.values()).sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-
-    const sales = combinedRawSales.map(s => {
+    const sales = (salesData || []).map(s => {
       const u = (users || []).find(usr => String(usr.id_usuario) === String(s.id_usuario));
       return {
         ...s,
@@ -1955,45 +1872,24 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
       };
     });
 
-    // Obtener productos combinando Supabase y FALLBACK_PRODUCTS en tiempo real
-    const prodMap = new Map();
-    try {
-      const { data: prodData } = await supabase.from('producto').select('*').order('id_producto', { ascending: true });
-      if (prodData && prodData.length > 0) {
-        prodData.forEach(p => {
-          prodMap.set(String(p.id_producto), {
-            id: p.id_producto,
-            name: p.nombre,
-            precio: p.precio,
-            desc: p.descripcion,
-            image: p.imagen || getProductImage(p.nombre),
-            categoria: p.categoria || 'Clásico',
-            destacado: Boolean(p.destacado !== undefined ? p.destacado : false),
-            stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : (p.stock_disponible !== undefined && p.stock_disponible !== null ? Number(p.stock_disponible) : 50)
-          });
-        });
-      }
-    } catch (e) {
-      console.warn('Advertencia obteniendo productos de Supabase:', e.message);
-    }
+    // Productos: solo de la base. Sin mezclar el catálogo local (así un producto borrado no reaparece).
+    // En modo simulado (sin Supabase) la base simulada ya sirve ese catálogo.
+    const { data: prodData, error: prodErr } = await supabase
+      .from('producto')
+      .select('id_producto, nombre, precio, descripcion, imagen, categoria, destacado, stock')
+      .order('id_producto', { ascending: true });
+    if (falloSupabase(res, prodErr, 'Error al obtener los productos del panel.')) return;
 
-    FALLBACK_PRODUCTS.forEach(p => {
-      const pId = String(p.id_producto || p.id);
-      if (!prodMap.has(pId)) {
-        prodMap.set(pId, {
-          id: p.id_producto || p.id,
-          name: p.nombre || p.name,
-          precio: p.precio || p.price,
-          desc: p.descripcion || p.desc,
-          image: p.imagen || p.image || getProductImage(p.nombre || p.name),
-          categoria: p.categoria || 'Clásico',
-          destacado: Boolean(p.destacado),
-          stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
-        });
-      }
-    });
-
-    const products = Array.from(prodMap.values());
+    const products = (prodData || []).map(p => ({
+      id: p.id_producto,
+      name: p.nombre,
+      precio: p.precio,
+      desc: p.descripcion,
+      image: p.imagen || getProductImage(p.nombre),
+      categoria: p.categoria || 'Clásico',
+      destacado: Boolean(p.destacado),
+      stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50
+    }));
 
     // Calcular estadísticas
     const totalRevenue = sales
@@ -2175,19 +2071,9 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
     let customerName = null;
     let totalValue = null;
 
-    // 2. Actualizar en FALLBACK_SALES (deuda técnica: archivo local paralelo a la base)
-    const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(idVenta));
-    if (fbSale) {
-      fbSale.estado = estado;
-      customerEmail = fbSale.email || fbSale.deliveryDetails?.email;
-      customerName = fbSale.nombre || fbSale.deliveryDetails?.fullName;
-      totalValue = fbSale.total;
-      saveFallbackSales(FALLBACK_SALES);
-    }
-
-    // 3. Datos del cliente desde la base si no estaban en memoria
-    if (!customerEmail && ventaBd) {
-      totalValue = totalValue || ventaBd.total;
+    // 2. Datos del cliente: solo de la base
+    if (ventaBd) {
+      totalValue = ventaBd.total;
       if (ventaBd.id_usuario) {
         const { data: userData, error: userErr } = await supabase
           .from('usuario')
@@ -2204,7 +2090,7 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
       }
     }
 
-    // 4. Disparar el envío de correo de notificación (asíncrono: no frena la respuesta)
+    // 3. Disparar el envío de correo de notificación (asíncrono: no frena la respuesta)
     if (customerEmail) {
       sendStatusUpdateEmail({
         saleId: idVenta,
@@ -2345,15 +2231,10 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => 
     if (tripoPrompt && tripoPrompt.trim()) {
       try {
         const taskId = await startTripoTask(tripoPrompt);
-        TRIPO_MODELS_STATE[nextId] = {
-          taskId,
-          prompt: tripoPrompt,
-          estado: 'generando',
-          url: null,
-          createdAt: new Date().toISOString()
-        };
-        saveTripoModelsState(TRIPO_MODELS_STATE);
-        modelObj = { taskId, estado: 'generando' };
+        // El producto ya quedó creado: si la base no guarda la tarea, se responde sin modelo (no se miente).
+        const { error: tareaErr } = await guardarTareaModelo3D(nextId, taskId, tripoPrompt);
+        if (tareaErr) console.error('No se pudo guardar la tarea 3D del producto nuevo:', tareaErr);
+        else modelObj = { taskId, estado: 'generando' };
       } catch (tripoErr) {
         console.warn('Advertencia al iniciar tarea en Tripo3D AI:', tripoErr.message);
       }
@@ -2451,17 +2332,15 @@ app.put('/api/admin/products/:id/featured', requireAdmin, async (req, res) => {
     const prodId = parseInt(id, 10);
     const isFeatured = Boolean(destacado);
 
-    // 1. Base primero: si falla, no se informa éxito y no se toca ni la memoria ni el disco
+    // Base primero (producto.destacado es la única fuente de verdad): si falla, no se informa éxito
+    // y la copia en memoria no cambia.
     const { error: dbErr } = await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
     if (falloSupabase(res, dbErr, 'Error al actualizar estado destacado.')) return;
 
-    // 2. Guardar en archivo persistente y en memoria del fallback
-    FEATURED_STATE[prodId] = isFeatured;
-    saveFeaturedState(FEATURED_STATE);
     const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
     if (fbItem) fbItem.destacado = isFeatured;
 
-    console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en disco.`);
+    console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en la base.`);
     return res.status(200).json({ ok: true, message: `Producto ${isFeatured ? 'destacado' : 'retirado de destacados'} con éxito.`, id: prodId, destacado: isFeatured });
   } catch (error) {
     console.error('Error al actualizar estado destacado:', error);
@@ -2634,10 +2513,7 @@ app.get('/api/products', async (req, res) => {
         longDesc:    p.long_desc || p.descripcion || '',
         image:       p.imagen || getProductImage(p.nombre),
         categoria:   cat,
-        // FEATURED_STATE tiene prioridad absoluta sobre Supabase y fallback
-        destacado:   FEATURED_STATE.hasOwnProperty(p.id_producto)
-                       ? FEATURED_STATE[p.id_producto]
-                       : Boolean(p.destacado !== undefined ? p.destacado : false),
+        destacado:   Boolean(p.destacado),
         badge:       cat,
         badgeColor:  badgeColor,
         accent:      accent,
@@ -3065,56 +2941,58 @@ app.post('/api/chatbot', limitadorChatbot, async (req, res) => {
 
 // ─── TRI PO 3D AI GENERATOR ENDPOINTS ─────────────────────────
 
+// La tarea 3D de cada producto vive en la base (producto.model_3d_*): en Vercel no hay disco donde guardarla.
+const COLUMNAS_MODELO_3D = 'id_producto, model_3d_task_id, model_3d_estado, model_3d_url, model_3d_prompt';
+const LARGO_MAXIMO_PROMPT_3D = 1000; // igual que el check producto_model_3d_prompt_largo
+
 // Consultar el estado o la URL del modelo 3D de un producto
 app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const prodId = parseInt(id, 10);
+  const prodId = idVentaValido(req.params.id); // mismo formato: entero positivo
+  if (!prodId) {
+    return res.status(400).json({ ok: false, message: 'El número de producto no es válido.' });
+  }
 
   try {
-    const modelState = TRIPO_MODELS_STATE[prodId];
+    const { data: fila, error: leerErr } = await supabase
+      .from('producto')
+      .select(COLUMNAS_MODELO_3D)
+      .eq('id_producto', prodId)
+      .maybeSingle();
+    if (falloSupabase(res, leerErr, 'Error interno al consultar modelo 3D.')) return;
 
-    if (!modelState) {
-      return res.status(200).json({ estado: 'idle', url: null, glb_url: null });
-    }
+    const estado = fila?.model_3d_estado || (fila?.model_3d_url ? 'listo' : null);
+    const url = fila?.model_3d_url || null;
 
     // Si ya está listo y tenemos la URL guardada
-    if (modelState.estado === 'listo' && modelState.url) {
-      return res.status(200).json({
-        estado: 'listo',
-        url: modelState.url,
-        glb_url: modelState.url,
-        prompt: modelState.prompt
-      });
+    if (estado === 'listo' && url) {
+      return res.status(200).json({ estado: 'listo', url, glb_url: url, prompt: fila.model_3d_prompt });
     }
 
     // Si hay una tarea activa en Tripo AI, consultar estado en tiempo real
-    if (modelState.taskId && (modelState.estado === 'generando' || modelState.estado === 'enviando')) {
+    if (estado === 'generando' && fila.model_3d_task_id) {
       // Sin llave no se le pregunta a Tripo; la tarea se conserva para retomarla cuando vuelva la llave.
       if (!TRIPO_API_KEY) {
         return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
       }
 
-      const taskInfo = await getTripoTaskStatus(modelState.taskId);
+      const taskInfo = await getTripoTaskStatus(fila.model_3d_task_id);
 
       if (taskInfo.status === 'success' && taskInfo.modelUrl) {
         // Primero se guarda en la base: si falla, el estado sigue "generando" y se reintenta en la próxima consulta.
-        const { error: dbErr } = await supabase.from('producto').update({ model_3d_url: taskInfo.modelUrl }).eq('id_producto', prodId);
+        const { error: dbErr } = await supabase.from('producto')
+          .update({ model_3d_url: taskInfo.modelUrl, model_3d_estado: 'listo' })
+          .eq('id_producto', prodId);
         if (falloSupabase(res, dbErr, 'No se pudo guardar el modelo 3D del producto.')) return;
-
-        TRIPO_MODELS_STATE[prodId].estado = 'listo';
-        TRIPO_MODELS_STATE[prodId].url = taskInfo.modelUrl;
-        TRIPO_MODELS_STATE[prodId].glb_url = taskInfo.modelUrl;
-        saveTripoModelsState(TRIPO_MODELS_STATE);
 
         return res.status(200).json({
           estado: 'listo',
           url: taskInfo.modelUrl,
           glb_url: taskInfo.modelUrl,
-          prompt: modelState.prompt
+          prompt: fila.model_3d_prompt
         });
       } else if (taskInfo.status === 'failed') {
-        TRIPO_MODELS_STATE[prodId].estado = 'error';
-        saveTripoModelsState(TRIPO_MODELS_STATE);
+        const { error: dbErr } = await supabase.from('producto').update({ model_3d_estado: 'error' }).eq('id_producto', prodId);
+        if (falloSupabase(res, dbErr, 'No se pudo guardar el estado del modelo 3D.')) return;
         return res.status(200).json({ estado: 'error', message: 'La generación 3D en Tripo AI falló.' });
       } else {
         return res.status(200).json({
@@ -3125,11 +3003,7 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
       }
     }
 
-    return res.status(200).json({
-      estado: modelState.estado || 'idle',
-      url: modelState.url || null,
-      glb_url: modelState.url || null
-    });
+    return res.status(200).json({ estado: estado || 'idle', url, glb_url: url });
   } catch (error) {
     console.error('Error al consultar modelo 3D:', error);
     return res.status(500).json({ message: 'Error interno al consultar modelo 3D.' });
@@ -3138,29 +3012,37 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
 
 // Regenerar o crear modelo 3D para un producto existente
 app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res) => {
-  const { id } = req.params;
   const { prompt } = req.body;
-  const prodId = parseInt(id, 10);
+  const prodId = idVentaValido(req.params.id); // mismo formato: entero positivo
+  if (!prodId) {
+    return res.status(400).json({ ok: false, message: 'El número de producto no es válido.' });
+  }
 
-  if (!prompt || !prompt.trim()) {
+  if (typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ message: 'El prompt descriptivo es obligatorio para generar el modelo 3D.' });
   }
+  if (prompt.trim().length > LARGO_MAXIMO_PROMPT_3D) {
+    return res.status(400).json({ ok: false, message: `El prompt no puede superar ${LARGO_MAXIMO_PROMPT_3D} caracteres.` });
+  }
+  const promptLimpio = prompt.trim();
 
   if (!TRIPO_API_KEY) {
     return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
   }
 
   try {
-    const taskId = await startTripoTask(prompt);
+    // El producto debe existir antes de gastar una generación en Tripo (un update sobre 0 filas no da error).
+    const { data: existe, error: leerErr } = await supabase
+      .from('producto').select('id_producto').eq('id_producto', prodId).maybeSingle();
+    if (falloSupabase(res, leerErr, 'Error al iniciar la generación del modelo 3D.')) return;
+    if (!existe) {
+      return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    }
 
-    TRIPO_MODELS_STATE[prodId] = {
-      taskId,
-      prompt,
-      estado: 'generando',
-      url: null,
-      updatedAt: new Date().toISOString()
-    };
-    saveTripoModelsState(TRIPO_MODELS_STATE);
+    const taskId = await startTripoTask(promptLimpio);
+
+    const { error: tareaErr } = await guardarTareaModelo3D(prodId, taskId, promptLimpio);
+    if (falloSupabase(res, tareaErr, 'No se pudo guardar la tarea del modelo 3D.')) return;
 
     return res.status(200).json({
       ok: true,

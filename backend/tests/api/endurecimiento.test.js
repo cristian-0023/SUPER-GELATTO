@@ -67,14 +67,16 @@ describe('7. rutas de producto: la base se actualiza primero; si falla, nada cam
     expect((await catalogo()).destacado).toBe(antes.destacado);
   });
 
-  it('featured: base OK -> guarda en disco y el catálogo cambia', async () => {
+  // Antes también se guardaba en featured_state.json; ahora la base es la única fuente de verdad y no se
+  // escribe ningún archivo (en Vercel no se puede).
+  it('featured: base OK -> no escribe archivos y el catálogo cambia', async () => {
     const antes = await catalogo();
     fake.responder('producto', 'update', { data: null, error: null });
 
     const res = await put('/api/admin/products/1/featured', { destacado: !antes.destacado });
 
     expect(res.status).toBe(200);
-    expect(escribioDestacados()).toBe(true);
+    expect(escribioDestacados()).toBe(false);
     expect((await catalogo()).destacado).toBe(!antes.destacado);
   });
 

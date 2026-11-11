@@ -52,27 +52,30 @@ describe.each([['vacía', ''], ['con solo espacios', '   ']])('rutas 3D con la l
   let escrituras;
   let fetchFalso;
 
-  const escriturasDeModelos = () => escrituras.mock.calls.filter(([ruta]) => String(ruta).endsWith(ARCHIVO_MODELOS));
+  // El estado de los modelos vive en la base (producto.model_3d_*), ya no en un archivo: "no dejar estado"
+  // significa que no se escribe nada en producto (ni archivos).
+  const escriturasDeModelos = () => [
+    ...escrituras.mock.calls.filter(([ruta]) => String(ruta).endsWith(ARCHIVO_MODELOS)),
+    ...fake.consultas('producto', 'update'),
+  ];
   const llamadasATripo = () => fetchFalso.mock.calls.filter(([url]) => String(url).includes('tripo3d'));
 
+  // La base ya trae una tarea a medias y un modelo terminado de cuando había llave.
+  const FILAS_GUARDADAS = {
+    [ID_GENERANDO]: { id_producto: ID_GENERANDO, model_3d_task_id: 'T-9', model_3d_prompt: 'cono', model_3d_estado: 'generando', model_3d_url: null },
+    [ID_LISTO]: { id_producto: ID_LISTO, model_3d_task_id: 'T-8', model_3d_prompt: 'copa', model_3d_estado: 'listo', model_3d_url: MODELO },
+  };
+
   beforeAll(() => {
-    // El archivo de modelos ya trae una tarea a medias y un modelo terminado de cuando había llave.
-    const guardado = JSON.stringify({
-      [ID_GENERANDO]: { taskId: 'T-9', prompt: 'cono', estado: 'generando', url: null },
-      [ID_LISTO]: { taskId: 'T-8', prompt: 'copa', estado: 'listo', url: MODELO },
-    });
-    const existe = fs.existsSync;
-    const leer = fs.readFileSync;
-    const espiaExiste = vi.spyOn(fs, 'existsSync').mockImplementation((r) => String(r).endsWith(ARCHIVO_MODELOS) || existe(r));
-    const espiaLeer = vi.spyOn(fs, 'readFileSync').mockImplementation((r, ...a) =>
-      (String(r).endsWith(ARCHIVO_MODELOS) ? guardado : leer(r, ...a)));
     ({ app, escrituras } = cargarServidor(fake, { tripoApiKey }));
-    espiaExiste.mockRestore();
-    espiaLeer.mockRestore();
   });
 
   beforeEach(() => {
     fake.reiniciar();
+    fake.responder('producto', 'select', (llamada) => {
+      const id = llamada.filtros.find(([op, col]) => op === 'eq' && col === 'id_producto')?.[2];
+      return { data: FILAS_GUARDADAS[id] ?? null, error: null };
+    });
     escrituras.mockClear();
     fetchFalso = vi.fn(async () => ({ ok: true, json: async () => ({ code: 0, data: { task_id: 'NO-DEBE-PASAR', status: 'running' } }) }));
     vi.stubGlobal('fetch', fetchFalso);

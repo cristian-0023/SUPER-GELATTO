@@ -78,7 +78,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   if (vercel) process.env.VERCEL = '1';
   else delete process.env.VERCEL;
 
-  // Ninguna prueba debe tocar featured_state.json, fallback_sales.json ni tripo_models_state.json.
+  // Ninguna prueba debe escribir archivos (el servidor ya no guarda estado en JSON; se vigila por si acaso).
   const escrituras = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
 
   // server.js es muy hablador; se silencia para leer la salida de las pruebas.
