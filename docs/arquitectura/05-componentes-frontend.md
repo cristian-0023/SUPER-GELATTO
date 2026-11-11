@@ -66,7 +66,7 @@ flowchart TB
 
 | Componente | Qué hace | Habla con | Referencia |
 |---|---|---|---|
-| `Navbar` + `CartDrawer` | Menú, botón de SuperPoints, cajón del carrito. Los SuperPoints son solo un cálculo en pantalla (total / 10); no se guardan | `CartContext` | `Navbar.jsx:6`, `CartDrawer.jsx:93` |
+| `Navbar` + `CartDrawer` | Menú, botón de SuperPoints, cajón del carrito. El botón de SuperPoints lleva a la sección de puntos de Home; el cajón muestra "Ganarás +N" con las reglas reales (`SuperPointsContext`, de `GET /api/points/rules`): $100 pagados = 1 punto, 1 punto = $5 de descuento, tope por nivel (Lover 5 %, Fan 10 %, Pro 15 %, Master 20 %) | `CartContext`, `SuperPointsContext` | `Navbar.jsx:6`, `CartDrawer.jsx:93` |
 | `Gelbot` | Ventana de chat; manda el token como `Bearer`; puede agregar al carrito y mostrar tablas | `POST /api/chatbot`, `CartContext` | `Gelbot.jsx:142-144`, `:220-221` |
 | `PaymentGateway` | Modal de pago simulado (PSE, Nequi, Bancolombia). Manda el carrito y los datos del pago | `POST /api/payments/process` | `PaymentGateway.jsx:127-150` |
 | `GelatoBuilder3D` | Constructor 3D del inicio (cono, copa, vaso) con modelos `.glb` fijos de `public/` | — | `GelatoBuilder3D.jsx:98-100` |
