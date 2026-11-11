@@ -5,6 +5,7 @@ import {
   Instagram, Facebook, Twitter, X, MapPin, ShoppingCart,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { crearSondeo } from '../utils/sondeo';
 import { useCart } from '../context/CartContext';
 import { useSuperPoints } from '../context/SuperPointsContext';
 import FlavorModal from '../components/FlavorModal';
@@ -71,15 +72,17 @@ const Home = ({ user }) => {
       }
     };
 
-    fetchHomeProducts();
-    const interval = setInterval(fetchHomeProducts, 2500);
-    window.addEventListener('focus', fetchHomeProducts);
-    window.addEventListener('storage', fetchHomeProducts);
+    // Refresco cada 30 s, en pausa con la pestaña oculta y sin dos pedidos iguales a la vez (utils/sondeo).
+    const sondeo = crearSondeo(fetchHomeProducts);
+    sondeo.iniciar();
+    const refrescar = () => { sondeo.refrescar().catch(() => {}); };
+    window.addEventListener('focus', refrescar);
+    window.addEventListener('storage', refrescar);
 
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', fetchHomeProducts);
-      window.removeEventListener('storage', fetchHomeProducts);
+      sondeo.detener();
+      window.removeEventListener('focus', refrescar);
+      window.removeEventListener('storage', refrescar);
     };
   }, []);
 

@@ -2485,6 +2485,12 @@ app.get('/api/products', async (req, res) => {
       data = FALLBACK_PRODUCTS;
     }
 
+    // Caché corta en el CDN solo para lo que vino de la base (los cambios del panel se ven en < 1 minuto).
+    // El catálogo local de emergencia no se cachea, para que la tienda vuelva a la base apenas responda.
+    res.setHeader('Cache-Control', data === FALLBACK_PRODUCTS
+      ? 'no-store'
+      : 'public, s-maxage=30, stale-while-revalidate=60');
+
     const mapped = data.map((p) => {
       const tags = p.tags ? (typeof p.tags === 'string' ? p.tags.split(',').map(t => t.trim()) : p.tags) : [];
       const cat = p.categoria || 'Clásico';

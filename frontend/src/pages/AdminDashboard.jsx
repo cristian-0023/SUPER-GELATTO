@@ -10,6 +10,7 @@ import {
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
+import { crearSondeo, urlSinCache } from '../utils/sondeo';
 import { soloVentasCobradas } from '../utils/ingresos';
 import { useCart } from '../context/CartContext';
 
@@ -529,15 +530,19 @@ const AdminDashboard = ({ user, onLogout }) => {
       return;
     }
     
-    fetchDashboardData(false);
-
-    // Auto-polling para ventas y métricas en TIEMPO REAL cada 3 segundos
-    const realTimeInterval = setInterval(() => {
-      fetchDashboardData(true);
-    }, 3000);
+    // Ventas y métricas: la primera carga muestra "cargando"; después, refresco silencioso cada 30 s,
+    // en pausa con la pestaña oculta y refresco al volver, sin dos pedidos iguales a la vez (utils/sondeo).
+    // El botón "Sincronizar" sigue pidiendo al instante.
+    let primeraCarga = true;
+    const sondeo = crearSondeo(() => {
+      const silencioso = !primeraCarga;
+      primeraCarga = false;
+      return fetchDashboardData(silencioso);
+    });
+    sondeo.iniciar();
 
     return () => {
-      clearInterval(realTimeInterval);
+      sondeo.detener();
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [user, navigate]);
@@ -579,8 +584,8 @@ const AdminDashboard = ({ user, onLogout }) => {
       if (!res.ok) throw new Error('Error al obtener datos');
       const data = await res.json();
       
-      // Obtener productos
-      const prodRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
+      // Obtener productos saltándose la caché del CDN (30 s): el admin ve sus cambios al instante
+      const prodRes = await fetch(urlSinCache(`${import.meta.env.VITE_API_URL || ''}/api/products`), { cache: 'no-store' });
       const products = await prodRes.json();
       
       setDashboardData({ ...data, products });
