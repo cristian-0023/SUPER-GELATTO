@@ -2,7 +2,7 @@
 //  - POST /api/payments/process acepta puntosUsar (entero 0..1000000; ausente = 0; null = inválido) y
 //    lo pasa a registrar_venta junto al usuario del TOKEN. Responde puntos:{usados,descuento,ganados,saldo}.
 //  - GET /api/me/points (con sesión): saldo, nivel e historial paginado (tope 50) del usuario del token.
-//  - GET /api/points/rules (público, caché 1 h): reglas desde la base (super_points_reglas).
+//  - GET /api/points/rules (público, caché 5 min en navegador y CDN): reglas desde la base (super_points_reglas).
 //  - PUT /api/admin/sales/:id/status usa cambiar_estado_venta (estado + puntos en una transacción).
 //  - Recibo, correo de estado y panel muestran el descuento.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
@@ -273,14 +273,14 @@ describe('GET /api/me/points', () => {
 });
 
 describe('GET /api/points/rules', () => {
-  it('es público, sale de la base y se puede guardar en caché 1 hora', async () => {
+  it('es público, sale de la base y se guarda en caché 5 minutos (navegador y CDN)', async () => {
     fake.responderRpc('super_points_reglas', { data: REGLAS, error: null });
 
     const res = await request(app).get('/api/points/rules');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, pesosPorPunto: 100, valorPunto: 5, niveles: REGLAS.niveles });
-    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['cache-control']).toBe('public, max-age=300, s-maxage=300');
     expect(fake.rpcs('super_points_reglas')).toHaveLength(1);
   });
 
@@ -291,7 +291,7 @@ describe('GET /api/points/rules', () => {
 
     expect(res.status).toBe(500);
     expect(res.body.ok).toBe(false);
-    expect(res.headers['cache-control'] || '').not.toMatch(/max-age=3600/);
+    expect(res.headers['cache-control'] || '').not.toMatch(/max-age/);
   });
 });
 

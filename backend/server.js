@@ -2981,7 +2981,7 @@ function enteroDeQuery(valor, porDefecto, minimo, maximo) {
 app.get('/api/points/rules', async (req, res) => {
   const { data: reglas, error } = await supabase.rpc('super_points_reglas');
   if (falloSupabase(res, error || (reglas ? null : { message: 'sin reglas' }), 'No pudimos cargar las reglas de Super Points.')) return;
-  res.set('Cache-Control', 'public, max-age=3600');
+  res.set('Cache-Control', 'public, max-age=300, s-maxage=300');
   return res.status(200).json({
     ok: true,
     pesosPorPunto: reglas.pesos_por_punto,
