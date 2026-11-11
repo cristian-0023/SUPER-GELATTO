@@ -5,6 +5,8 @@
 --   * public.super_points pasa a ser una LIBRETA de movimientos: tipo (ganado, canjeado,
 --     devuelto, revertido), puntos con signo, cliente y venta. El saldo es la suma.
 --   * public.venta: puntos_usados y descuento_puntos. venta.total = lo realmente pagado.
+--     cancelada_alguna_vez: marca permanente; una venta que estuvo en 'Cancelado' (antes o
+--     después de esta migración) nunca más gana puntos.
 --   * public.super_points_reglas(): ÚNICO lugar con los valores del programa.
 --   * public.super_points_resumen(id): saldo, nivel y lo que falta para el siguiente.
 --   * public.registrar_venta(...): nuevo parámetro opcional p_puntos_usar (default 0).
@@ -13,7 +15,8 @@
 --   * public.cambiar_estado_venta(id, estado): cambia el estado y mueve los puntos en la
 --     misma transacción.
 -- Es ADITIVA en tablas (no borra ni cambia columnas existentes) e IDEMPOTENTE (se puede
--- ejecutar 2 veces). La tabla super_points está vacía, así que no hay datos que migrar.
+-- ejecutar 2 veces). La tabla super_points está vacía, así que no hay datos que migrar; solo
+-- se marcan (cancelada_alguna_vez = true) las ventas que ya están en 'Cancelado'.
 -- id_points ya es identity en la base real: no se toca.
 -- Orden de publicación: PRIMERO esta migración, DESPUÉS el código del servidor.
 -- Deshacer en emergencia: supabase/rollbacks/20261111120000_super_points.rollback.sql
@@ -88,6 +91,12 @@ revoke all on public.super_points from anon, authenticated;
 -- -------------------------------------------------------------------------------------
 alter table public.venta add column if not exists puntos_usados integer not null default 0;
 alter table public.venta add column if not exists descuento_puntos numeric(10,2) not null default 0;
+alter table public.venta add column if not exists cancelada_alguna_vez boolean not null default false;
+
+-- Las ventas que YA están canceladas quedan marcadas: sacarlas de 'Cancelado' no les da puntos.
+update public.venta
+   set cancelada_alguna_vez = true
+ where estado = 'Cancelado' and not cancelada_alguna_vez;
 
 do $$
 begin
@@ -435,11 +444,14 @@ comment on function public.registrar_venta(bigint, jsonb, text, integer) is
 -- -------------------------------------------------------------------------------------
 -- 6. public.cambiar_estado_venta: estado + puntos en una sola transacción
 --   * A un estado cobrado desde 'Pendiente' o 'Fallido': otorga piso(total / pesos_por_punto)
---     si la venta tiene cliente y aún no tiene 'ganado' ni 'revertido'.
+--     si la venta tiene cliente, nunca estuvo en 'Cancelado' (cancelada_alguna_vez = false) y
+--     aún no tiene 'ganado' ni 'revertido'.
 --   * A 'Cancelado' (desde otro estado): devuelve lo canjeado y quita lo ganado sin dejar el
 --     saldo bajo cero. Si tenía 'ganado' escribe SIEMPRE 'revertido' (aunque quite 0): esa fila
 --     marca la venta como revertida y saca sus puntos del nivel.
---   * Salir de 'Cancelado' no mueve nada. Cada movimiento ocurre una sola vez por venta.
+--   * Entrar o salir de 'Cancelado' marca cancelada_alguna_vez para siempre (lo segundo cubre
+--     ventas canceladas por otro camino). Salir de 'Cancelado' no mueve nada.
+--     Cada movimiento ocurre una sola vez por venta.
 -- Errores (P0001): ESTADO_INVALIDO, VENTA_NO_EXISTE.
 -- Devuelve: {id_venta, id_usuario, total, estado, estado_anterior, puntos_usados, descuento_puntos}
 -- -------------------------------------------------------------------------------------
@@ -464,7 +476,8 @@ begin
   end if;
 
   -- Bloquear la venta (y después al cliente) para leer el estado anterior sin carreras.
-  select v.id_venta, v.id_usuario, v.total, v.estado, v.puntos_usados, v.descuento_puntos
+  select v.id_venta, v.id_usuario, v.total, v.estado, v.puntos_usados, v.descuento_puntos,
+         v.cancelada_alguna_vez
     into v_venta
   from public.venta v
   where v.id_venta = p_id_venta
@@ -474,14 +487,20 @@ begin
       detail = format('id_venta=%s', p_id_venta);
   end if;
 
-  update public.venta set estado = p_estado where id_venta = p_id_venta;
+  -- En el SET, "estado" es el valor anterior: entrar o salir de 'Cancelado' deja la marca.
+  update public.venta
+     set estado = p_estado,
+         cancelada_alguna_vez = cancelada_alguna_vez or p_estado = 'Cancelado' or estado = 'Cancelado'
+   where id_venta = p_id_venta;
 
   if v_venta.id_usuario is not null and v_venta.estado <> 'Cancelado' then
     perform 1 from public.usuario u where u.id_usuario = v_venta.id_usuario for no key update;
 
     -- Cobrar una venta que estaba Pendiente o Fallido: otorga sus puntos (una sola vez).
+    -- Una venta que alguna vez estuvo cancelada nunca gana (la cancelación es definitiva).
     if p_estado in ('Pagado', 'En proceso', 'En entrega', 'Enviado', 'Entregado', 'Completado')
        and v_venta.estado in ('Pendiente', 'Fallido')
+       and not v_venta.cancelada_alguna_vez
        and not exists (
          select 1 from public.super_points sp
          where sp.id_venta = p_id_venta and sp.tipo in ('ganado', 'revertido')

@@ -3,7 +3,8 @@
 -- ATENCIÓN:
 --   * Borra la libreta de Super Points: se pierden los saldos e historiales de los clientes
 --     (las filas de super_points creadas por esta migración y sus columnas tipo e id_usuario).
---   * Borra venta.puntos_usados y venta.descuento_puntos. venta.total sigue siendo lo pagado.
+--   * Borra venta.puntos_usados, venta.descuento_puntos y venta.cancelada_alguna_vez.
+--     venta.total sigue siendo lo pagado.
 --   * Quita super_points_reglas, super_points_resumen y cambiar_estado_venta, y vuelve a
 --     dejar registrar_venta con 3 parámetros (la versión de 20261025120000, sin puntos).
 --   * ANTES: volver a publicar el código del servidor anterior a Super Points. El código nuevo
@@ -42,6 +43,7 @@ alter table public.super_points drop column if exists id_usuario;
 alter table public.super_points drop column if exists tipo;
 
 alter table public.venta drop constraint if exists venta_puntos_no_negativos;
+alter table public.venta drop column if exists cancelada_alguna_vez;
 alter table public.venta drop column if exists descuento_puntos;
 alter table public.venta drop column if exists puntos_usados;
 

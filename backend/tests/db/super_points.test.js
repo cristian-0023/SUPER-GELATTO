@@ -334,6 +334,66 @@ describe('cambiar_estado_venta', () => {
     expect(await valor(db, 'select estado from public.venta where id_venta = 1786407836737')).toBe('Cancelado');
   });
 
+  it('Fallido -> Cancelado -> Fallido -> Pagado no gana (la cancelación es definitiva para los puntos)', async () => {
+    const v = await vender(db, 1, [{ id_producto: 5, cantidad: 2 }], 'Fallido', 0); // $5.000
+    await cambiar(db, v.id_venta, 'Cancelado');
+    await cambiar(db, v.id_venta, 'Fallido');
+    await cambiar(db, v.id_venta, 'Pagado');
+    expect(await movimientos(db, v.id_venta)).toEqual({});
+    expect((await resumen(db, 1)).saldo).toBe(0);
+  });
+
+  it('Fallido -> Cancelado -> Pendiente -> En proceso no gana', async () => {
+    const v = await vender(db, 1, [{ id_producto: 5, cantidad: 2 }], 'Fallido', 0);
+    await cambiar(db, v.id_venta, 'Cancelado');
+    await cambiar(db, v.id_venta, 'Pendiente');
+    await cambiar(db, v.id_venta, 'En proceso');
+    expect(await movimientos(db, v.id_venta)).toEqual({});
+  });
+
+  it('Fallido -> Cancelado -> Pagado no gana', async () => {
+    const v = await vender(db, 1, [{ id_producto: 5, cantidad: 2 }], 'Fallido', 0);
+    await cambiar(db, v.id_venta, 'Cancelado');
+    await cambiar(db, v.id_venta, 'Pagado');
+    expect(await movimientos(db, v.id_venta)).toEqual({});
+  });
+
+  it('venta nueva Pagado -> Cancelado -> Pendiente -> Pagado no vuelve a ganar', async () => {
+    const v = await vender(db, 1, VEINTE_MIL, 'Pagado', 0); // gana 200
+    await cambiar(db, v.id_venta, 'Cancelado');
+    await cambiar(db, v.id_venta, 'Pendiente');
+    await cambiar(db, v.id_venta, 'Pagado');
+    expect(await movimientos(db, v.id_venta)).toEqual({ ganado: 200, revertido: -200 });
+    expect(await resumen(db, 1)).toMatchObject({ saldo: 0, ganados: 0 });
+  });
+
+  it('cancelar marca la venta (cancelada_alguna_vez) y salir de Cancelado no la desmarca', async () => {
+    const v = await vender(db, 1, [{ id_producto: 5, cantidad: 2 }], 'Fallido', 0);
+    const marca = () => valor(db, 'select cancelada_alguna_vez from public.venta where id_venta = $1', [v.id_venta]);
+    expect(await marca()).toBe(false);
+    await cambiar(db, v.id_venta, 'Cancelado');
+    expect(await marca()).toBe(true);
+    await cambiar(db, v.id_venta, 'Pendiente');
+    expect(await marca()).toBe(true);
+  });
+
+  it('una venta cancelada por fuera de la función también queda marcada al salir de Cancelado', async () => {
+    await db.query("update public.venta set estado = 'Cancelado' where id_venta = 1786407836737");
+    await cambiar(db, '1786407836737', 'Pendiente');
+    await cambiar(db, '1786407836737', 'Pagado');
+    expect(await movimientos(db, '1786407836737')).toEqual({});
+  });
+
+  it('la marca no cambia el saldo ni el nivel de otras compras', async () => {
+    await darPuntos(db, 1, 150); // Fan
+    const v = await vender(db, 1, [{ id_producto: 5, cantidad: 2 }], 'Fallido', 0);
+    const antes = await resumen(db, 1);
+    await cambiar(db, v.id_venta, 'Cancelado');
+    await cambiar(db, v.id_venta, 'Pagado');
+    expect(await resumen(db, 1)).toEqual(antes);
+    expect(antes).toMatchObject({ saldo: 150, ganados: 150, nivel: 'Fan' });
+  });
+
   it('venta que no existe -> VENTA_NO_EXISTE', async () => {
     const e = await errorDe(() => cambiar(db, 999999, 'Pagado'));
     expect(e.message).toBe('VENTA_NO_EXISTE');
@@ -343,6 +403,40 @@ describe('cambiar_estado_venta', () => {
     const e = await errorDe(() => cambiar(db, 15, 'Reembolsado'));
     expect(e.message).toBe('ESTADO_INVALIDO');
     expect(await valor(db, 'select estado from public.venta where id_venta = 15')).toBe('Pagado');
+  });
+});
+
+// Ventas que ya estaban en 'Cancelado' ANTES de la migración (hoy, todas las de la base real):
+// la migración las marca y nunca más ganan puntos aunque un admin las saque de 'Cancelado'.
+describe('ventas canceladas antes de la migración', () => {
+  async function baseConVentaVieja() {
+    const db = await crearBase();
+    await db.exec(leer(RUTA_MIGRACION_RLS));
+    await db.exec("update public.venta set estado = 'Cancelado' where id_venta = 1786407836737"); // $2.500, cliente 1
+    await db.exec(leer(RUTA_PUNTOS));
+    return db;
+  }
+
+  it('la migración las marca como canceladas alguna vez (y a las demás no)', async () => {
+    const db = await baseConVentaVieja();
+    expect(await valor(db, 'select cancelada_alguna_vez from public.venta where id_venta = 1786407836737')).toBe(true);
+    expect(await valor(db, 'select cancelada_alguna_vez from public.venta where id_venta = 15')).toBe(false);
+  });
+
+  it('Cancelado -> Pendiente -> Pagado no regala puntos', async () => {
+    const db = await baseConVentaVieja();
+    await cambiar(db, '1786407836737', 'Pendiente');
+    await cambiar(db, '1786407836737', 'Pagado');
+    expect(await movimientos(db, '1786407836737')).toEqual({});
+    expect((await resumen(db, 1)).saldo).toBe(0);
+  });
+
+  it('aplicar la migración dos veces no la desmarca', async () => {
+    const db = await baseConVentaVieja();
+    await cambiar(db, '1786407836737', 'Pendiente');
+    await db.exec(leer(RUTA_PUNTOS));
+    await cambiar(db, '1786407836737', 'Pagado');
+    expect(await movimientos(db, '1786407836737')).toEqual({});
   });
 });
 
@@ -409,6 +503,7 @@ describe('idempotencia y rollback', () => {
     expect(await columnas('super_points')).not.toContain('id_usuario');
     expect(await columnas('venta')).not.toContain('puntos_usados');
     expect(await columnas('venta')).not.toContain('descuento_puntos');
+    expect(await columnas('venta')).not.toContain('cancelada_alguna_vez');
     for (const f of ['super_points_reglas', 'super_points_resumen', 'cambiar_estado_venta']) {
       expect(Number(await valor(db, 'select count(*) from pg_proc where proname = $1', [f]))).toBe(0);
     }
