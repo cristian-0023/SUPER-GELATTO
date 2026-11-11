@@ -2561,30 +2561,28 @@ app.get('/api/products', async (req, res) => {
   try {
     let data;
     let error;
+    let vieneDeLaBase = false;
 
     try {
+      // Solo las columnas que se usan abajo (existen en la base real).
       const result = await supabase
         .from('producto')
-        .select('*')
+        .select('id_producto, nombre, precio, stock, descripcion, long_desc, imagen, categoria, destacado, tags, rating, reviews')
         .eq('estado', true)
         .order('id_producto', { ascending: true });
       data = result.data;
       error = result.error;
     } catch (dbErr) {
       console.warn('⚠️ Error consultando Supabase, usando fallback local:', dbErr.message);
-      data = FALLBACK_PRODUCTS;
+      data = null;
     }
 
     if (error || !data || data.length === 0) {
       console.warn('⚠️ No se obtuvieron datos de Supabase, usando fallback local.');
       data = FALLBACK_PRODUCTS;
+    } else {
+      vieneDeLaBase = true;
     }
-
-    // Caché corta en el CDN solo para lo que vino de la base (los cambios del panel se ven en < 1 minuto).
-    // El catálogo local de emergencia no se cachea, para que la tienda vuelva a la base apenas responda.
-    res.setHeader('Cache-Control', data === FALLBACK_PRODUCTS
-      ? 'no-store'
-      : 'public, s-maxage=30, stale-while-revalidate=60');
 
     const mapped = data.map((p) => {
       const tags = p.tags ? (typeof p.tags === 'string' ? p.tags.split(',').map(t => t.trim()) : p.tags) : [];
@@ -2637,6 +2635,10 @@ app.get('/api/products', async (req, res) => {
       };
     });
 
+    // Caché corta en el CDN solo para lo que vino de la base: 30 s, más hasta 30 s sirviendo la copia anterior
+    // mientras se renueva (los cambios del panel se ven en ~60 s como máximo). El catálogo local de
+    // emergencia no se cachea, para que la tienda vuelva a la base apenas responda.
+    res.setHeader('Cache-Control', vieneDeLaBase ? 'public, s-maxage=30, stale-while-revalidate=30' : 'no-store');
     res.json(mapped);
   } catch (error) {
     console.error('Error fetching products:', error);
