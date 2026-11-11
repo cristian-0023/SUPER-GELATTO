@@ -1,12 +1,17 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight } from 'lucide-react';
+import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, Star } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
+import { useSuperPoints } from '../context/SuperPointsContext';
+import { puntosAGanar } from '../utils/superPoints';
 import { Link } from 'react-router-dom';
 import FlavorImage from './FlavorImage';
 
 const CartDrawer = ({ isOpen, onClose }) => {
   const { cart, removeFromCart, updateQuantity, totalPrice } = useCart();
+  const { reglas } = useSuperPoints();
+  // Con las reglas del servidor; si no cargaron (null) o da 0, no se promete ningún número.
+  const puntosGanados = puntosAGanar(totalPrice, reglas?.pesosPorPunto);
 
   return (
     <AnimatePresence>
@@ -89,9 +94,11 @@ const CartDrawer = ({ isOpen, onClose }) => {
               >
                 Continuar al Pago <ArrowRight size={16} />
               </Link>
-              <p className="text-[9px] text-center text-white/30 font-bold uppercase tracking-tighter">
-                💰 +{(totalPrice / 10).toFixed(0)} SuperPoints
-              </p>
+              {puntosGanados > 0 && (
+                <p className="text-[10px] text-center text-white/50 font-bold uppercase tracking-wider flex items-center justify-center gap-1.5">
+                  <Star size={11} className="text-gold-premium fill-gold-premium" /> Ganarás +{puntosGanados} SuperPoints
+                </p>
+              )}
             </div>
           )}
         </motion.div>

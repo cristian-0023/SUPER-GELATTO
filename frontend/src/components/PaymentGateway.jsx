@@ -71,7 +71,7 @@ const PROCESSING_MESSAGES = [
   'Confirmando con el banco emisor...'
 ];
 
-const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, onPaymentSuccess }) => {
+const PaymentGateway = ({ isOpen, onClose, totalPrice, subtotal, puntosUsar = 0, cart, onPaymentSuccess, onSesionVencida, onPuntosRechazados }) => {
   const [step, setStep] = useState('method');    // method | details | processing | result
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [pseBank, setPseBank] = useState('');
@@ -132,6 +132,7 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, onPaymentSuccess })
     if (!token) {
       setResult(resultadoPago(401));
       setStep('result');
+      if (onSesionVencida) onSesionVencida();
       return;
     }
 
@@ -151,15 +152,20 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, onPaymentSuccess })
           cart,
           totalPrice,
           referencia: orderRef,
-          forzarRechazo: pseBank.toLowerCase().includes('pruebas')
+          forzarRechazo: pseBank.toLowerCase().includes('pruebas'),
+          puntosUsar
         })
       });
 
-      const data = resultadoPago(response.status, await response.json());
+      const data = resultadoPago(response.status, await response.json(), puntosUsar);
       setResult(data);
       setStep('result');
       if (data.ok && onPaymentSuccess) {
-        onPaymentSuccess(data.transaction);
+        onPaymentSuccess(data.transaction, data);
+      } else if (data.sesionVencida && onSesionVencida) {
+        onSesionVencida();
+      } else if (data.recargarPuntos && onPuntosRechazados) {
+        onPuntosRechazados();
       }
     } catch (error) {
       console.error('Error en pasarela de pago simulada:', error);
@@ -224,6 +230,12 @@ const PaymentGateway = ({ isOpen, onClose, totalPrice, cart, onPaymentSuccess })
             <span className="text-xs text-white/60 font-bold uppercase tracking-wider">Total a pagar</span>
             <span className="text-2xl font-bold text-gold-premium">{formatPrice(totalPrice)}</span>
           </div>
+          {puntosUsar > 0 && (
+            <div className="px-6 py-2 border-b border-white/10 flex justify-between items-center gap-3 text-xs text-white/50">
+              <span>Incluye {puntosUsar} Super Points ({formatPrice(subtotal - totalPrice)} de descuento)</span>
+              <span className="tabular-nums whitespace-nowrap">Subtotal {formatPrice(subtotal)}</span>
+            </div>
+          )}
 
           {/* Body Content */}
           <div className="p-6">

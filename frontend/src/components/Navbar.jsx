@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingCart, LogOut, User, Menu, X, Star, RotateCcw } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useSuperPoints } from '../context/SuperPointsContext';
 import CartDrawer from './CartDrawer';
 import '../styles/Navbar.css';
 
@@ -11,6 +12,9 @@ const Navbar = ({ user, onLogout }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const { totalItems } = useCart();
+  const { puntos } = useSuperPoints();
+  // Solo con sesión iniciada y el saldo cargado hay número; si no, un guion (nunca un valor inventado).
+  const saldoTexto = user && puntos ? new Intl.NumberFormat('es-CO').format(puntos.saldo) : '—';
   const location = useLocation();
 
   useEffect(() => {
@@ -109,7 +113,7 @@ const Navbar = ({ user, onLogout }) => {
             {/* SuperPoints Badge */}
             <div className="flex items-center gap-2 px-3 lg:px-4 py-1.5 bg-gold-premium/5 border border-gold-premium/10 rounded-full group hover:border-gold-premium/30 transition-all">
               <Star size={13} className="text-gold-premium fill-gold-premium animate-pulse" />
-              <span className="text-xs font-bold text-gold-premium/90 tracking-tighter">120 PTS</span>
+              <span className="text-xs font-bold text-gold-premium/90 tracking-tighter tabular-nums" title="Tu saldo de SuperPoints">{saldoTexto} PTS</span>
             </div>
 
             {/* Cart Icon */}
@@ -243,7 +247,7 @@ const Navbar = ({ user, onLogout }) => {
                     </div>
                     <div className="text-left">
                       <p className="text-white font-medium text-sm">{user?.name || 'Invitado'}</p>
-                      <p className="text-gold-premium text-xs font-bold">⭐ 120 pts</p>
+                      <p className="text-gold-premium text-xs font-bold tabular-nums flex items-center gap-1"><Star size={12} className="fill-gold-premium" /> {saldoTexto} pts</p>
                     </div>
                   </div>
                   <button 

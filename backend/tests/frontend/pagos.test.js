@@ -41,6 +41,38 @@ describe('armarPago', () => {
   });
 });
 
+describe('armarPago con Super Points', () => {
+  it('manda puntosUsar solo cuando el cliente canjea', () => {
+    expect(JSON.parse(armarPago(datos({ puntosUsar: 120 })).body).puntosUsar).toBe(120);
+    expect(JSON.parse(armarPago(datos({ puntosUsar: 0 })).body)).not.toHaveProperty('puntosUsar');
+    expect(JSON.parse(armarPago(datos()).body)).not.toHaveProperty('puntosUsar');
+  });
+
+  it('nunca manda puntosUsar inválido (null, negativo, decimal o texto)', () => {
+    for (const malo of [null, -3, 2.5, 'abc', NaN]) {
+      expect(JSON.parse(armarPago(datos({ puntosUsar: malo })).body)).not.toHaveProperty('puntosUsar');
+    }
+  });
+});
+
+describe('resultadoPago con Super Points', () => {
+  it('400 con puntos enviados: avisa que hay que volver a pedir el saldo', () => {
+    const r = resultadoPago(400, { ok: false, message: 'No tienes puntos suficientes.' }, 120);
+
+    expect(r).toMatchObject({ ok: false, message: 'No tienes puntos suficientes.', recargarPuntos: true });
+  });
+
+  it('400 sin puntos enviados, o un pago aprobado, no piden recargar', () => {
+    expect(resultadoPago(400, { ok: false, message: 'x' }, 0)).not.toHaveProperty('recargarPuntos');
+    expect(resultadoPago(400, { ok: false, message: 'x' })).not.toHaveProperty('recargarPuntos');
+    expect(resultadoPago(200, { ok: true, transaction: {} }, 120)).not.toHaveProperty('recargarPuntos');
+  });
+
+  it('401 con puntos enviados sigue siendo sesión vencida', () => {
+    expect(resultadoPago(401, {}, 120)).toMatchObject({ sesionVencida: true });
+  });
+});
+
 describe('resultadoPago', () => {
   it('401 -> pide iniciar sesión de nuevo, avisa que el carrito sigue y no es un pago exitoso', () => {
     const r = resultadoPago(401, { ok: false, message: 'texto del servidor' });

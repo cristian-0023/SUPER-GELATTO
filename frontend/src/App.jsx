@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
+import { SuperPointsProvider } from './context/SuperPointsContext';
 import './index.css';
 
 // Lazy loading de páginas y componentes pesados
@@ -88,6 +89,7 @@ function App() {
 
   return (
     <CartProvider user={user}>
+      <SuperPointsProvider user={user}>
       <Router>
         <Suspense fallback={<PageLoader />}>
           <Routes>
@@ -156,6 +158,7 @@ function App() {
           </Routes>
         </Suspense>
       </Router>
+      </SuperPointsProvider>
     </CartProvider>
   );
 }

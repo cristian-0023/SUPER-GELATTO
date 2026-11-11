@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import { useSuperPoints } from '../context/SuperPointsContext';
 import FlavorModal from '../components/FlavorModal';
 import FrameAnimation from '../components/FrameAnimation';
 import GelatoBuilder3D from '../components/GelatoBuilder3D';
@@ -49,6 +50,7 @@ const Home = ({ user }) => {
   const [selectedFlavor, setSelectedFlavor] = useState(null);
   const [storyOpen, setStoryOpen] = useState(false);
   const { addToCart, showToast } = useCart();
+  const { reglas } = useSuperPoints();
   const navigate = useNavigate();
 
   const [allProducts, setAllProducts] = useState([]);
@@ -100,8 +102,6 @@ const Home = ({ user }) => {
   const tiers = [
     {
       name: 'Lover',
-      points: '0 – 100',
-      rawPoints: 100,
       icon: '🍨',
       emoji: '💗',
       gradient: 'from-pink-500/30 via-rose-500/10 to-transparent',
@@ -111,15 +111,13 @@ const Home = ({ user }) => {
       bar: 'from-pink-400 to-rose-500',
       progress: 25,
       features: [
-        { icon: '🎁', text: '5% Descuento en cada compra' },
+        { icon: '🎁', pagaConPuntos: true },
         { icon: '🆕', text: 'Acceso anticipado a sabores nuevos' },
         { icon: '📱', text: 'Newsletter exclusivo de temporada' },
       ],
     },
     {
       name: 'Fan',
-      points: '101 – 500',
-      rawPoints: 500,
       icon: '🍦',
       emoji: '💙',
       gradient: 'from-blue-500/30 via-cyan-500/10 to-transparent',
@@ -129,15 +127,13 @@ const Home = ({ user }) => {
       bar: 'from-blue-400 to-cyan-500',
       progress: 50,
       features: [
-        { icon: '💸', text: '10% Descuento permanente' },
+        { icon: '💸', pagaConPuntos: true },
         { icon: '🚚', text: 'Envíos gratis los fines de semana' },
         { icon: '🎨', text: 'Acceso a ediciones limitadas' },
       ],
     },
     {
       name: 'Pro',
-      points: '501 – 1000',
-      rawPoints: 1000,
       icon: '🍨',
       emoji: '💚',
       gradient: 'from-emerald-500/30 via-green-500/10 to-transparent',
@@ -147,15 +143,13 @@ const Home = ({ user }) => {
       bar: 'from-emerald-400 to-green-500',
       progress: 75,
       features: [
-        { icon: '💎', text: '15% Descuento exclusivo' },
+        { icon: '💎', pagaConPuntos: true },
         { icon: '🎂', text: 'Regalo sorpresa de cumpleaños' },
         { icon: '🏪', text: 'Prioridad en nuevas sucursales' },
       ],
     },
     {
       name: 'Master',
-      points: '1000+',
-      rawPoints: null,
       icon: '👑',
       emoji: '✨',
       gradient: 'from-yellow-500/40 via-amber-400/15 to-transparent',
@@ -165,12 +159,20 @@ const Home = ({ user }) => {
       bar: 'from-yellow-400 to-amber-500',
       progress: 100,
       features: [
-        { icon: '👑', text: '20% Descuento VIP permanente' },
+        { icon: '👑', pagaConPuntos: true },
         { icon: '🧁', text: 'Muestras gratis cada mes' },
         { icon: '🌟', text: 'Invitaciones a eventos privados' },
       ],
     },
   ];
+
+  // Rango, tope de descuento y textos salen de /api/points/rules; mientras cargan (o si fallan) no se muestra
+  // ningún número, solo el beneficio sin porcentaje.
+  const formatoNumero = new Intl.NumberFormat('es-CO');
+  const nivelDelServidor = (nombre) => reglas?.niveles.find((n) => n.nombre === nombre);
+  const textoRango = (n) => (!n ? '—' : n.max === null ? `${formatoNumero.format(n.min)}+` : `${formatoNumero.format(n.min)} – ${formatoNumero.format(n.max)}`);
+  const textoPagaConPuntos = (n) => (n ? `Paga hasta ${n.pct} % con tus puntos` : 'Paga con tus puntos');
+  const descuentoMaximo = reglas ? Math.max(...reglas.niveles.map((n) => n.pct)) : null;
 
   const benefits = [
     { icon: <ShieldCheck className="text-pastel-green" />, title: 'Ingredientes Premium', desc: 'Solo usamos las mejores frutas y cremas locales.' },
@@ -493,7 +495,7 @@ const Home = ({ user }) => {
             {[
               { val: '12K+', label: 'Miembros activos' },
               { val: '4.9★', label: 'Satisfacción' },
-              { val: '20%', label: 'Desc. máximo' },
+              { val: descuentoMaximo === null ? '—' : `${descuentoMaximo} %`, label: 'Desc. máximo' },
             ].map((s, i) => (
               <div key={i} className="flex flex-col items-center p-4 rounded-2xl bg-white/[0.03] border border-white/8">
                 <span className="text-2xl font-playfair font-bold text-gold-premium">{s.val}</span>
@@ -532,7 +534,7 @@ const Home = ({ user }) => {
 
                   {/* Points range */}
                   <p className="text-white/40 text-[11px] font-bold uppercase tracking-widest mb-1">Rango</p>
-                  <p className="text-white text-lg font-playfair font-bold mb-5">{t.points} <span className="text-xs text-white/40">pts</span></p>
+                  <p className="text-white text-lg font-playfair font-bold mb-5 tabular-nums">{textoRango(nivelDelServidor(t.name))} <span className="text-xs text-white/40">pts</span></p>
 
                   {/* Progress bar */}
                   <div className="w-full h-1.5 rounded-full bg-white/10 mb-6 overflow-hidden">
@@ -550,7 +552,7 @@ const Home = ({ user }) => {
                     {t.features.map((f, i) => (
                       <li key={i} className="flex items-start gap-3 text-sm text-white/70">
                         <span className="text-base leading-none mt-0.5">{f.icon}</span>
-                        <span className="leading-tight">{f.text}</span>
+                        <span className="leading-tight">{f.pagaConPuntos ? textoPagaConPuntos(nivelDelServidor(t.name)) : f.text}</span>
                       </li>
                     ))}
                   </ul>
