@@ -24,6 +24,15 @@ describe('GET /api/products: caché corta en el CDN', () => {
     expect(res.headers['cache-control']).toBe('public, s-maxage=30, stale-while-revalidate=60');
   });
 
+  it('la respuesta cacheada varía según el Origin (el CDN no mezcla la copia de un sitio con la de otro)', async () => {
+    fake.responder('producto', 'select', { data: [{ id_producto: 5, nombre: 'Fresa', precio: 2500, estado: true, stock: 3 }], error: null });
+
+    const res = await request(app).get('/api/products').set('Origin', 'https://tienda.vercel.app');
+
+    expect(res.headers['access-control-allow-origin']).toBe('https://tienda.vercel.app');
+    expect(res.headers.vary).toMatch(/origin/i);
+  });
+
   it('si la base falla y se usa el catálogo local -> no-store (no se cachea el respaldo)', async () => {
     fake.responder('producto', 'select', { data: null, error: { code: '57014', message: 'timeout' } });
 
