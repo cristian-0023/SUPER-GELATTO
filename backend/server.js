@@ -2364,13 +2364,13 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
 });
 
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
-  const prodId = idVentaValido(req.params.id);
+  const prodId = idPositivoValido(req.params.id);
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   try {
     const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).select('id_producto');
     // 23503 = clave foránea: el producto tiene ventas y la base no deja borrarlo.
     if (error && error.code === '23503') {
-      return res.status(409).json({ ok: false, message: 'El producto tiene ventas registradas; desactívalo en vez de borrarlo.' });
+      return res.status(409).json({ ok: false, message: 'Este producto tiene ventas registradas y no se puede borrar.' });
     }
     if (falloSupabase(res, error, 'Error al eliminar el producto.')) return;
     if (!data || data.length === 0) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
@@ -2381,6 +2381,17 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// Id de producto de la URL: entero positivo que cabe en un integer de Postgres.
+const ID_PRODUCTO_MAX = 2147483647;
+function idPositivoValido(texto) {
+  const id = idVentaValido(texto);
+  return id !== null && id <= ID_PRODUCTO_MAX ? id : null;
+}
+
+// Categorías permitidas para un producto (única fuente: editor y ruta /category).
+const CATEGORIAS_VALIDAS = ['Clásico', 'Vegano', 'Temporada', 'Gourmet'];
+const PRECIO_MAX = 99999999;
+
 // Columnas públicas del producto que devuelven las rutas de edición (nunca model_3d_prompt ni task_id).
 const COLUMNAS_PRODUCTO_ADMIN = 'id_producto, nombre, precio, stock, descripcion, imagen, categoria, estado, destacado';
 
@@ -2388,7 +2399,8 @@ const COLUMNAS_PRODUCTO_ADMIN = 'id_producto, nombre, precio, stock, descripcion
 function validarEdicionProducto(cuerpo) {
   const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
   const datos = {};
-  const numero = (v) => (v === null || (typeof v === 'string' && v.trim() === '') ? NaN : Number(v));
+  // Solo number o string numérico (true, [5], null y '' no valen).
+  const numero = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
   if (c.name !== undefined) {
     const nombre = typeof c.name === 'string' ? c.name.trim() : '';
     if (nombre.length < 1 || nombre.length > 120) return { error: 'El nombre debe tener entre 1 y 120 caracteres.' };
@@ -2396,12 +2408,12 @@ function validarEdicionProducto(cuerpo) {
   }
   if (c.precio !== undefined) {
     const precio = numero(c.precio);
-    if (!Number.isFinite(precio) || precio < 0) return { error: 'El precio debe ser un número mayor o igual a 0.' };
+    if (!Number.isInteger(precio) || precio < 1 || precio > PRECIO_MAX) return { error: 'El precio debe ser un número entero mayor que 0.' };
     datos.precio = precio;
   }
   if (c.stock !== undefined) {
     const stock = numero(c.stock);
-    if (!Number.isSafeInteger(stock) || stock < 0) return { error: 'El stock debe ser un número entero mayor o igual a 0.' };
+    if (!Number.isInteger(stock) || stock < 0 || stock > ID_PRODUCTO_MAX) return { error: 'El stock debe ser un número entero mayor o igual a 0.' };
     datos.stock = stock;
   }
   if (c.descripcion !== undefined) {
@@ -2409,7 +2421,7 @@ function validarEdicionProducto(cuerpo) {
     datos.descripcion = c.descripcion;
   }
   if (c.categoria !== undefined) {
-    if (typeof c.categoria !== 'string' || c.categoria.length > 60) return { error: 'La categoría no puede superar 60 caracteres.' };
+    if (!CATEGORIAS_VALIDAS.includes(c.categoria)) return { error: 'Categoría inválida. Opciones: ' + CATEGORIAS_VALIDAS.join(', ') };
     datos.categoria = c.categoria;
   }
   if (c.estado !== undefined) {
@@ -2425,12 +2437,14 @@ function imagenProductoValida(valor) {
   if (typeof valor !== 'string') return null;
   const img = valor.trim();
   if (img.length < 1 || img.length > 2048) return null;
-  if (/[\s\\\u0000-\u001f]/.test(img)) return null;
+  // Los espacios normales sí valen (hay imágenes como "caramelo salado.png"); no los controles ni "\".
+  if (/[\\\u0000-\u001f\u007f]/.test(img)) return null;
   if (img.startsWith('/')) {
-    return img.startsWith('//') || img.split('/').includes('..') ? null : img;
+    return img.startsWith('//') || img.includes('..') ? null : img;
   }
   try {
-    return new URL(img).protocol === 'https:' ? img : null;
+    const url = new URL(img);
+    return url.protocol === 'https:' ? url.href : null;
   } catch {
     return null;
   }
@@ -2438,7 +2452,7 @@ function imagenProductoValida(valor) {
 
 // Cambiar la imagen del producto (Admin)
 app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
-  const prodId = idVentaValido(req.params.id);
+  const prodId = idPositivoValido(req.params.id);
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   const imagen = imagenProductoValida(req.body && req.body.image);
   if (!imagen) {
@@ -2462,7 +2476,7 @@ app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
 
 // Actualizar producto y stock (Admin)
 app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
-  const prodId = idVentaValido(req.params.id);
+  const prodId = idPositivoValido(req.params.id);
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   const { datos, error: errorValidacion } = validarEdicionProducto(req.body);
   if (errorValidacion) return res.status(400).json({ ok: false, message: errorValidacion });
@@ -2554,10 +2568,9 @@ app.put('/api/admin/products/:id/price', requireAdmin, async (req, res) => {
 app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { categoria } = req.body;
-  const VALID_CATS = ['Clásico', 'Vegano', 'Temporada', 'Gourmet'];
 
-  if (!categoria || !VALID_CATS.includes(categoria)) {
-    return res.status(400).json({ message: 'Categoría inválida. Opciones: ' + VALID_CATS.join(', ') });
+  if (!categoria || !CATEGORIAS_VALIDAS.includes(categoria)) {
+    return res.status(400).json({ message: 'Categoría inválida. Opciones: ' + CATEGORIAS_VALIDAS.join(', ') });
   }
 
   try {
@@ -3128,7 +3141,7 @@ const COLUMNAS_MODELO_3D = 'id_producto, model_3d_task_id, model_3d_estado, mode
 
 // Consultar el estado o la URL del modelo 3D de un producto
 app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
-  const prodId = idVentaValido(req.params.id); // mismo formato: entero positivo
+  const prodId = idPositivoValido(req.params.id); // mismo formato: entero positivo
   if (!prodId) {
     return res.status(400).json({ ok: false, message: 'El número de producto no es válido.' });
   }
@@ -3204,7 +3217,7 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
 
 // Regenerar o crear modelo 3D para un producto existente
 app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, limitadorTripo, async (req, res) => {
-  const prodId = idVentaValido(req.params.id); // mismo formato: entero positivo
+  const prodId = idPositivoValido(req.params.id); // mismo formato: entero positivo
   if (!prodId) {
     return res.status(400).json({ ok: false, message: 'El número de producto no es válido.' });
   }

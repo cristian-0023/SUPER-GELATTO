@@ -1,17 +1,28 @@
 // Utilidades del editor de productos del panel de admin.
 
-// Cuerpo que espera PUT /api/admin/products/:id (el modal usa "desc"; el servidor lee "descripcion").
-export function armarCuerpoProducto(form) {
-  return {
-    name: form.name,
-    precio: Number(form.precio),
-    stock: Number(form.stock),
-    categoria: form.categoria,
-    descripcion: form.desc || ''
-  };
+// Cuerpo de PUT /api/admin/products/:id con SOLO los campos que cambiaron respecto de los valores
+// con que se abrió el modal (el servidor lee "descripcion"; el modal usa "desc").
+// Un precio o stock vacío se manda vacío (no 0) para que el servidor lo rechace.
+export function armarCuerpoProducto(form, original) {
+  const cuerpo = {};
+  const numero = (v) => (v === '' || v === null || v === undefined ? '' : Number(v));
+  if (form.name !== original.name) cuerpo.name = form.name;
+  if (numero(form.precio) !== numero(original.precio)) cuerpo.precio = numero(form.precio);
+  if (numero(form.stock) !== numero(original.stock)) cuerpo.stock = numero(form.stock);
+  if (form.categoria !== original.categoria) cuerpo.categoria = form.categoria;
+  if ((form.desc || '') !== (original.desc || '')) cuerpo.descripcion = form.desc || '';
+  return cuerpo;
 }
 
-// Devuelve la lista con el stock anterior de un producto (para deshacer la actualización optimista).
-export function revertirStock(productos, productId, stockAnterior) {
-  return productos.map(p => (p.id === productId ? { ...p, stock: stockAnterior } : p));
+// Producto de la lista del panel a partir de la fila que devolvió el servidor al guardar.
+export function mapearProductoGuardado(fila) {
+  return {
+    name: fila.nombre,
+    precio: fila.precio,
+    price: fila.precio,
+    stock: fila.stock,
+    desc: fila.descripcion,
+    categoria: fila.categoria,
+    image: fila.imagen
+  };
 }
