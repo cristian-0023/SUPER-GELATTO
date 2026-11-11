@@ -6,7 +6,7 @@ import { useCart } from '../context/CartContext';
 import FlavorModal from '../components/FlavorModal';
 import { urlSinCache, esAvisoDeProductos } from '../utils/sondeo';
 
-const CATEGORIES = ['Todos', 'Clásico', 'Vegano', 'Temporada'];
+const CATEGORIES = ['Todos', 'Clásico', 'Vegano', 'Temporada', 'Gourmet'];
 
 const ProductsPage = ({ user }) => {
   const [searchTerm, setSearchTerm] = useState('');

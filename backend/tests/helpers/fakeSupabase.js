@@ -154,6 +154,7 @@ export function crearFakeSupabase() {
     // En una lectura se guardan las columnas pedidas (llamada.columnas) para poder comprobarlas.
     b.select = (cols) => {
       if (llamada.op === 'select') llamada.columnas = cols;
+      else llamada.columnasRetorno = cols;
       return b;
     };
     for (const op of ['insert', 'update', 'upsert', 'delete']) {

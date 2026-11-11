@@ -12,6 +12,7 @@ import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
 import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
 import { soloVentasCobradas } from '../utils/ingresos';
+import { armarCuerpoProducto, mapearProductoGuardado } from '../utils/editorProductos';
 import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
@@ -39,6 +40,7 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [actionLoading, setActionLoading] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editFormData, setEditFormData] = useState({ name: '', precio: 0, stock: 50, categoria: '', desc: '' });
+  const [editOriginalData, setEditOriginalData] = useState({ name: '', precio: 0, stock: 50, categoria: '', desc: '' });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const navigate = useNavigate();
 
@@ -473,20 +475,6 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      setImageMsg({ type: 'error', text: 'La imagen excede 4MB.' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImageUrlInput(reader.result);
-      setImageMsg({ type: '', text: '' });
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleToggleFeatured = async (productId, currentStatus) => {
     const nextStatus = !currentStatus;
@@ -681,6 +669,9 @@ const AdminDashboard = ({ user, onLogout }) => {
         if (showToast) showToast('Producto eliminado exitosamente', 'success');
       } else if (res.status === 401) {
         setIsQrVerified(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        if (showToast) showToast(data.message || 'Error al eliminar producto', 'error');
       }
     } catch (err) {
       if (showToast) showToast('Error al eliminar producto', 'error');
@@ -855,71 +846,54 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   const handleOpenEditProduct = (prod) => {
     setEditingProduct(prod);
-    setEditFormData({
+    const valores = {
       name: prod.name || '',
       precio: prod.precio || prod.price || 0,
       stock: prod.stock !== undefined ? prod.stock : 50,
       categoria: prod.categoria || 'Clásico',
       desc: prod.desc || ''
-    });
-  };
-
-  const handleQuickStockChange = async (productId, newStockVal) => {
-    const stockNum = Math.max(0, parseInt(newStockVal, 10) || 0);
-
-    // Actualización optimista instantánea en interfaz
-    setDashboardData(prev => ({
-      ...prev,
-      products: prev.products.map(p => p.id === productId ? { ...p, stock: stockNum } : p)
-    }));
-
-    try {
-      const res = await fetch(`/api/admin/products/${productId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': user?.rol || ''
-        },
-        body: JSON.stringify({ stock: stockNum })
-      });
-
-      if (!res.ok) throw new Error('Error al actualizar stock');
-      avisarProductosActualizados();
-      window.dispatchEvent(new CustomEvent('products-updated'));
-    } catch (err) {
-      console.error('Error al guardar stock en Supabase:', err);
-    }
+    };
+    setEditFormData(valores);
+    setEditOriginalData(valores); // para mandar solo lo que el admin cambie
   };
 
   const handleSaveProduct = async (e) => {
     e.preventDefault();
     if (!editingProduct) return;
 
+    const cuerpo = armarCuerpoProducto(editFormData, editOriginalData);
+    if (Object.keys(cuerpo).length === 0) {
+      // No cambió nada: no se molesta al servidor
+      setEditingProduct(null);
+      return;
+    }
+
     setActionLoading(editingProduct.id);
     try {
-      const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
+      const res = await apiFetch(`/api/admin/products/${editingProduct.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': user?.rol || ''
-        },
-        body: JSON.stringify(editFormData)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cuerpo)
       });
 
-      if (!res.ok) throw new Error('Error al actualizar el producto');
+      if (res.status === 401) {
+        sessionStorage.removeItem('superGelatto_face_verified');
+        setIsQrVerified(false);
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || 'Error al actualizar el producto');
+      }
 
-      setDashboardData(prev => ({
-        ...prev,
-        products: prev.products.map(p => p.id === editingProduct.id ? {
-          ...p,
-          name: editFormData.name,
-          precio: editFormData.precio,
-          price: editFormData.precio,
-          stock: editFormData.stock,
-          categoria: editFormData.categoria,
-          desc: editFormData.desc
-        } : p)
-      }));
+      // La pantalla muestra lo que realmente guardó el servidor, no lo que se escribió en el formulario
+      const data = await res.json().catch(() => ({}));
+      if (data.product) {
+        const guardado = mapearProductoGuardado(data.product);
+        setDashboardData(prev => ({
+          ...prev,
+          products: prev.products.map(p => p.id === editingProduct.id ? { ...p, ...guardado } : p)
+        }));
+      }
 
       avisarProductosActualizados();
       window.dispatchEvent(new CustomEvent('products-updated'));
@@ -2250,11 +2224,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <label className="block text-xs uppercase tracking-wider text-white/40 mb-2 font-bold">
                   Opción 2: Seleccionar Imagen desde tu equipo
                 </label>
-                <label className="flex items-center justify-center gap-2 w-full bg-white/5 hover:bg-white/10 border border-dashed border-white/20 hover:border-gold-premium/40 rounded-xl p-3 text-xs text-white/70 hover:text-white cursor-pointer transition-all">
-                  <Upload size={16} className="text-gold-premium" />
+                <div aria-disabled="true" className="flex items-center justify-center gap-2 w-full bg-white/5 border border-dashed border-white/10 rounded-xl p-3 text-xs text-white/30 cursor-not-allowed">
+                  <Upload size={16} className="text-white/30" />
                   <span>Subir Archivo de Imagen Local</span>
-                  <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                </label>
+                </div>
+                <p className="mt-2 text-[11px] text-white/40">Pronto: subir fotos. Por ahora pegá un enlace https o elegí una predeterminada.</p>
               </div>
 
               <div>
@@ -2561,9 +2535,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-white/50 mb-1">Precio (COP)</label>
                   <input 
-                    type="number" 
-                    value={editFormData.precio} 
-                    onChange={(e) => setEditFormData({ ...editFormData, precio: Number(e.target.value) })}
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={editFormData.precio}
+                    onChange={(e) => setEditFormData({ ...editFormData, precio: e.target.value })}
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-gold-premium"
                     required
                   />
@@ -2575,7 +2551,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                     type="number" 
                     min="0"
                     value={editFormData.stock} 
-                    onChange={(e) => setEditFormData({ ...editFormData, stock: Number(e.target.value) })}
+                    onChange={(e) => setEditFormData({ ...editFormData, stock: e.target.value })}
                     className="w-full px-4 py-3 bg-gold-premium/10 border border-gold-premium/40 rounded-xl text-white font-bold focus:outline-none focus:border-gold-premium"
                     required
                   />
@@ -2592,6 +2568,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <option value="Clásico">Clásico</option>
                   <option value="Vegano">Vegano</option>
                   <option value="Temporada">Temporada</option>
+                  <option value="Gourmet">Gourmet</option>
                 </select>
               </div>
 
