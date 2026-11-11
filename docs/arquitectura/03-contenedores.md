@@ -4,7 +4,7 @@
 
 Ahora entramos a la heladería y vemos sus tres espacios grandes.
 El **mostrador** (la Tienda web) es lo que ve el cliente en su navegador; está en un local alquilado a Vercel.
-La **cocina** (la API Express; una API es la puerta por la que los programas se piden cosas entre sí) recibe cada pedido del mostrador, revisa el carnet del cliente y habla con la bodega y los proveedores; está en un local alquilado a Render.
+La **cocina** (la API Express; una API es la puerta por la que los programas se piden cosas entre sí) recibe cada pedido del mostrador, revisa el carnet del cliente y habla con la bodega y los proveedores; está en un local alquilado a Vercel.
 La **bodega con su libreta** (la base de datos Postgres, un programa muy usado para guardar tablas de datos) guarda todo de forma permanente; está en Supabase.
 El mostrador nunca entra a la bodega: siempre le pide las cosas a la cocina.
 Las llaves de los proveedores (contraseñas, claves) deben ir en **variables de entorno**: papelitos que se le entregan a la cocina al abrir, no pegados en la pared.
@@ -20,7 +20,7 @@ Estos nombres se usan **igual** en todos los diagramas y figuras de esta carpeta
 | **Cliente** | Persona que compra (visitante o cliente con sesión) | Cliente de la heladería | Su navegador | — |
 | **Administrador** | Admin o super admin | Encargado / dueño | Su navegador | — |
 | **Tienda web** | Página de una sola página (SPA) | Mostrador | Vercel | React 19, Vite 8, Tailwind 4, React Router 7, Three.js / @react-three, @react-oauth/google |
-| **API Express** | Servidor con las 26 rutas | Cocina | Render | Node.js, Express 4 (CommonJS), `backend/server.js` |
+| **API Express** | Servidor con las 26 rutas | Cocina | Vercel | Node.js, Express 4 (CommonJS), `backend/server.js` |
 | **Gelbot** | Asistente con IA (módulo de la API) | Ayudante de la cocina que atiende por chat | Dentro de la API Express | `backend/chatbot.js`, groq-sdk |
 | **Base de datos** | Postgres con las tablas del negocio | Bodega con su libreta | Supabase | Postgres, supabase-js con llave `service_role` |
 | **registrar_venta** | Función de la base que cobra y anota la venta | Caja registradora | Dentro de la Base de datos | PL/pgSQL, `security invoker` |
@@ -48,7 +48,7 @@ flowchart LR
     W["Tienda web<br/>SPA React + Vite"]:::contenedor
   end
 
-  subgraph RENDER["Render"]
+  subgraph RENDER["Vercel (API)"]
     API["API Express<br/>server.js"]:::contenedor
     GB["Gelbot<br/>chatbot.js"]:::contenedor
     JS["Archivos JSON locales"]:::datos
@@ -86,14 +86,14 @@ flowchart LR
 | Pieza | Dónde | Qué hay que saber |
 |---|---|---|
 | Tienda web | Vercel | `npm run build` (Vite). `vercel.json` reescribe toda ruta a `index.html` para que React Router funcione al recargar. Variables: `VITE_API_URL`, `VITE_GOOGLE_CLIENT_ID`. |
-| API Express | Render | `npm start` (`node server.js`). En Render el código se considera **producción** (`server.js:4`) y: no arranca sin Supabase (`server.js:495-499`), no arranca sin `JWT_SECRET` de 32+ caracteres (`server.js:504-514`), confía en 1 proxy para leer la IP real (`server.js:568-570`). |
+| API Express | Vercel | `npm start` (`node server.js`). En Vercel el código se considera **producción** (`server.js:4`) y: no arranca sin Supabase (`server.js:495-499`), no arranca sin `JWT_SECRET` de 32+ caracteres (`server.js:504-514`), confía en 1 proxy para leer la IP real (`server.js:568-570`). |
 | Base de datos | Supabase | Esquema base en `supabase/schema_base_2026-10-25.sql` y cambios en `supabase/migrations/` (con su `rollbacks/`). Las migraciones se ejecutan a mano en el editor SQL de Supabase. |
 
-> **Ojo: estado que no está en la base.** La API Express guarda tres cosas en **Archivos JSON locales** del disco: productos destacados (`server.js:57`), ventas de respaldo (`server.js:80`) y tareas de Tripo 3D (`server.js:102`). En Render el disco se borra en cada despliegue, así que ese estado se pierde. Además, los códigos para recuperar contraseña viven solo en memoria (`server.js:624`) y se pierden al reiniciar.
+> **Ojo: estado que no está en la base.** La API Express guarda tres cosas en **Archivos JSON locales** del disco: productos destacados (`server.js:57`), ventas de respaldo (`server.js:80`) y tareas de Tripo 3D (`server.js:102`). En Vercel el disco no es permanente (se borra en cada despliegue), así que ese estado se pierde. Además, los códigos para recuperar contraseña viven solo en memoria (`server.js:624`) y se pierden al reiniciar.
 
 ### Variables de entorno (solo nombres)
 
-Los valores reales van en `backend/.env` y `frontend/.env` (nunca en git) o en el panel de Render/Vercel.
+Los valores reales van en `backend/.env` y `frontend/.env` (nunca en git) o en el panel de Vercel.
 
 | Variable | Pieza | Para qué | ¿Obligatoria? | ¿En `.env.example`? | Referencia |
 |---|---|---|---|---|---|
@@ -113,8 +113,8 @@ Los valores reales van en `backend/.env` y `frontend/.env` (nunca en git) o en e
 | `LOGIN_RATE_LIMIT_MAX`, `LOGIN_RATE_LIMIT_WINDOW_MS` | API Express | Límite de las rutas de cuenta (10 / 15 min por defecto) | No | **No** | `server.js:883-887` |
 | `PAYMENT_RATE_LIMIT_MAX`, `PAYMENT_RATE_LIMIT_WINDOW_MS` | API Express | Límite de pagos (10 / 1 min) | No | **No** | `server.js:2507-2510` |
 | `CHATBOT_RATE_LIMIT_MAX`, `CHATBOT_RATE_LIMIT_WINDOW_MS` | API Express | Límite de Gelbot (20 / 1 min) | No | **No** | `server.js:2692-2695` |
-| `TRUST_PROXY` | API Express | `1` = confiar en el proxy fuera de Render | No | **No** | `server.js:568` |
-| `RENDER`, `NODE_ENV`, `PORT` | API Express | Detectar producción y puerto (los pone Render) | No | **No** | `server.js:4`, `server.js:572` |
+| `TRUST_PROXY` | API Express | `1` = confiar en el proxy fuera de Vercel | No | **No** | `server.js:568` |
+| `VERCEL`, `NODE_ENV`, `PORT` | API Express | Detectar producción y puerto (los pone Vercel) | No | **No** | `server.js:4`, `server.js:572` |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGIN` | — | **Sin uso**: están en el ejemplo, pero ningún código las lee | No | Sí | — |
 | `VITE_API_URL` | Tienda web | Dirección de la API Express | Sí en producción | Sí | `frontend/src/utils/api.js:9` |
 | `VITE_GOOGLE_CLIENT_ID` | Tienda web | Botón de Google | Para entrar con Google | Sí | `frontend/src/index.jsx:8` |

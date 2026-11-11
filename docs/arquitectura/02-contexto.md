@@ -5,7 +5,7 @@
 Aquí miramos la heladería desde la calle, sin entrar.
 Vemos quién llega (clientes, administradores) y con qué proveedores de afuera trabaja.
 Igual que una heladería compra leche a un proveedor y contrata un transporte, SUPER-GELATTO usa servicios de otras empresas: Google para el carnet de entrada, Groq para que el asistente Gelbot "piense", AWS (Amazon Web Services, los servicios en la nube de Amazon) para reconocer la cara de los administradores, Tripo para fabricar modelos 3D de los helados y un servicio de correo para mandar avisos.
-También alquila dos locales: Vercel para el mostrador (la página) y Render para la cocina (el servidor).
+También alquila dos locales: Vercel para el mostrador (la página) y Vercel (otro proyecto, solo API) para la cocina (el servidor).
 La bodega (la base de datos) está en Supabase.
 
 ## Detalle técnico
@@ -27,7 +27,7 @@ flowchart TB
   T["Tripo 3D<br/>(modelos 3D)"]:::externo
   M["Servidor de correo SMTP<br/>(nodemailer)"]:::externo
   S["Supabase<br/>(aloja la base Postgres)"]:::externo
-  H["Vercel y Render<br/>(alojan página y servidor)"]:::externo
+  H["Vercel<br/>(aloja página y servidor)"]:::externo
 
   V -->|"mira, compra, chatea"| SG
   A -->|"administra"| SG
@@ -50,7 +50,7 @@ flowchart TB
 | **AWS Rekognition** | Login facial de administradores: guardar rostro (`IndexFaces`) y buscarlo (`SearchFacesByImage`) | Servidor (`@aws-sdk/client-rekognition`) | `server.js:25-50`, `server.js:1193-1355` | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `REKOGNITION_COLLECTION_ID` |
 | **Tripo 3D** | Generar un modelo 3D (`text_to_model`) a partir de un texto y consultar su avance | Servidor (`fetch` a su API) | `server.js:123-182` | `TRIPO_API_KEY` |
 | **Correo SMTP** | Confirmación de pago, cambio de estado, recuperar contraseña. Sin SMTP configurado usa una cuenta de prueba Ethereal | Servidor (`nodemailer`) | `server.js:626-654` | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` |
-| **Render** | Aloja el servidor. El código detecta Render con la variable `RENDER` (modo producción, `trust proxy`) | — | `server.js:4`, `server.js:568-570` | `RENDER`, `PORT` |
+| **Vercel (API)** | Aloja el servidor (proyecto aparte, solo API). El código detecta Vercel con la variable `VERCEL` (modo producción, `trust proxy`) | — | `server.js:4`, `server.js:568-570` | `VERCEL`, `PORT` |
 | **Vercel** | Aloja la página. Todas las rutas se reescriben a `index.html` (SPA) | — | `frontend/vercel.json`; CORS acepta `*.vercel.app` (`server.js:583`) | `VITE_API_URL` |
 
 > La página **no** habla directamente con Supabase, Groq, AWS ni Tripo: todo pasa por el servidor. La única excepción es Google, cuyo botón vive en la página.
