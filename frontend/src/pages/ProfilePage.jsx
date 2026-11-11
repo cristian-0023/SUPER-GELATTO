@@ -118,13 +118,15 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     sondeo.iniciar();
 
     const refrescar = () => { sondeo.refrescar().catch(() => {}); };
+    // Un pedido cambió: si hay una consulta en vuelo puede traer datos viejos, así que se encadena una nueva.
+    const alCambiarPedido = () => { sondeo.refrescar({ forzar: true }).catch(() => {}); };
     window.addEventListener('focus', refrescar);
-    window.addEventListener('superGelatto_order_updated', refrescar);
+    window.addEventListener('superGelatto_order_updated', alCambiarPedido);
 
     return () => {
       sondeo.detener();
       window.removeEventListener('focus', refrescar);
-      window.removeEventListener('superGelatto_order_updated', refrescar);
+      window.removeEventListener('superGelatto_order_updated', alCambiarPedido);
     };
   }, [user]);
 

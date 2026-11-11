@@ -5,7 +5,7 @@ import {
   Instagram, Facebook, Twitter, X, MapPin, ShoppingCart,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { crearSondeo } from '../utils/sondeo';
+import { crearSondeo, urlSinCache, esAvisoDeProductos } from '../utils/sondeo';
 import { useCart } from '../context/CartContext';
 import { useSuperPoints } from '../context/SuperPointsContext';
 import FlavorModal from '../components/FlavorModal';
@@ -58,9 +58,10 @@ const Home = ({ user }) => {
   const [loadingProducts, setLoadingProducts] = useState(true);
 
   useEffect(() => {
-    const fetchHomeProducts = async () => {
+    const fetchHomeProducts = async ({ sinCache = false } = {}) => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
+        const url = `${import.meta.env.VITE_API_URL || ''}/api/products`;
+        const res = await fetch(sinCache ? urlSinCache(url) : url);
         if (res.ok) {
           const data = await res.json();
           setAllProducts(data);
@@ -76,13 +77,17 @@ const Home = ({ user }) => {
     const sondeo = crearSondeo(fetchHomeProducts);
     sondeo.iniciar();
     const refrescar = () => { sondeo.refrescar().catch(() => {}); };
+    // El panel de admin (en otra pestaña) avisó que cambió productos: pedido nuevo y sin caché del CDN.
+    const alAvisoDeOtraPestana = (evento) => {
+      if (esAvisoDeProductos(evento)) sondeo.refrescar({ forzar: true, sinCache: true }).catch(() => {});
+    };
     window.addEventListener('focus', refrescar);
-    window.addEventListener('storage', refrescar);
+    window.addEventListener('storage', alAvisoDeOtraPestana);
 
     return () => {
       sondeo.detener();
       window.removeEventListener('focus', refrescar);
-      window.removeEventListener('storage', refrescar);
+      window.removeEventListener('storage', alAvisoDeOtraPestana);
     };
   }, []);
 

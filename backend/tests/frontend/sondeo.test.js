@@ -4,7 +4,10 @@
 //  - Nunca dos peticiones iguales a la vez (si una está en curso, se reutiliza).
 //  - urlSinCache: el panel de admin pide la lista saltándose la caché del CDN para ver sus cambios al instante.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { crearSondeo, unaALaVez, urlSinCache, INTERVALO_SONDEO_MS } from '../../../frontend/src/utils/sondeo.js';
+import {
+  crearSondeo, unaALaVez, urlSinCache, INTERVALO_SONDEO_MS,
+  avisarProductosActualizados, esAvisoDeProductos, CLAVE_PRODUCTOS_ACTUALIZADOS,
+} from '../../../frontend/src/utils/sondeo.js';
 
 // Documento falso: solo lo que usa el sondeo (visibilityState y el evento visibilitychange).
 function documentoFalso() {
@@ -170,6 +173,102 @@ describe('crearSondeo', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(tarea).toHaveBeenCalledTimes(2);
     sondeo.detener();
+  });
+});
+
+describe('refrescar({ forzar: true }): un aviso de cambio nunca se pierde', () => {
+  it('si hay un pedido en vuelo, encadena uno nuevo al terminar (los datos en vuelo pueden ser viejos)', async () => {
+    const lenta = diferida();
+    const tarea = vi.fn().mockImplementationOnce(() => lenta.promesa).mockResolvedValue('nuevo');
+    const sondeo = crearSondeo(tarea, { documento: documentoFalso() });
+    sondeo.iniciar();
+
+    const forzado = sondeo.refrescar({ forzar: true });
+    expect(tarea).toHaveBeenCalledTimes(1);
+    lenta.resolver('viejo');
+    expect(await forzado).toBe('nuevo');
+    expect(tarea).toHaveBeenCalledTimes(2);
+    sondeo.detener();
+  });
+
+  it('varios avisos seguidos mientras hay uno en vuelo -> un solo pedido extra', async () => {
+    const lenta = diferida();
+    const tarea = vi.fn().mockImplementationOnce(() => lenta.promesa).mockResolvedValue('nuevo');
+    const sondeo = crearSondeo(tarea, { documento: documentoFalso() });
+    sondeo.iniciar();
+
+    const a = sondeo.refrescar({ forzar: true });
+    const b = sondeo.refrescar({ forzar: true });
+    lenta.resolver('viejo');
+    await Promise.all([a, b]);
+    expect(tarea).toHaveBeenCalledTimes(2);
+    sondeo.detener();
+  });
+
+  it('también encadena aunque el pedido en vuelo falle', async () => {
+    const lenta = diferida();
+    let fallar;
+    const enVuelo = new Promise((_, rechazar) => { fallar = rechazar; });
+    const tarea = vi.fn().mockImplementationOnce(() => enVuelo).mockResolvedValue('nuevo');
+    const sondeo = crearSondeo(tarea, { documento: documentoFalso() });
+    sondeo.iniciar();
+
+    const forzado = sondeo.refrescar({ forzar: true });
+    fallar(new Error('sin red'));
+    expect(await forzado).toBe('nuevo');
+    lenta.resolver();
+    sondeo.detener();
+  });
+
+  it('sin pedido en vuelo, pide en el acto una sola vez', async () => {
+    const tarea = vi.fn(async () => 'x');
+    const sondeo = crearSondeo(tarea, { documento: documentoFalso() });
+    sondeo.iniciar();
+    await vi.advanceTimersByTimeAsync(0);
+    tarea.mockClear();
+
+    expect(await sondeo.refrescar({ forzar: true })).toBe('x');
+    expect(tarea).toHaveBeenCalledTimes(1);
+    sondeo.detener();
+  });
+
+  it('pasa las opciones a la tarea (p. ej. { sinCache: true }); los tics automáticos no', async () => {
+    const tarea = vi.fn(async () => {});
+    const sondeo = crearSondeo(tarea, { intervaloMs: 1000, documento: documentoFalso() });
+    sondeo.iniciar();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await sondeo.refrescar({ forzar: true, sinCache: true });
+    expect(tarea).toHaveBeenLastCalledWith({ sinCache: true });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(tarea).toHaveBeenLastCalledWith({});
+    sondeo.detener();
+  });
+});
+
+describe('aviso entre pestañas de productos actualizados', () => {
+  const almacenFalso = () => {
+    const datos = new Map();
+    return { setItem: vi.fn((k, v) => datos.set(k, String(v))), getItem: (k) => datos.get(k) ?? null };
+  };
+
+  it('avisarProductosActualizados escribe la marca en localStorage con la hora', () => {
+    const almacen = almacenFalso();
+    avisarProductosActualizados(almacen, 1234);
+    expect(almacen.setItem).toHaveBeenCalledWith(CLAVE_PRODUCTOS_ACTUALIZADOS, '1234');
+    expect(CLAVE_PRODUCTOS_ACTUALIZADOS).toBe('supergelatto_products_updated');
+  });
+
+  it('si localStorage no está disponible (modo privado), no rompe', () => {
+    const almacen = { setItem: () => { throw new Error('bloqueado'); } };
+    expect(() => avisarProductosActualizados(almacen)).not.toThrow();
+    expect(() => avisarProductosActualizados(null)).not.toThrow();
+  });
+
+  it('esAvisoDeProductos reconoce solo el evento storage con esa clave', () => {
+    expect(esAvisoDeProductos({ key: 'supergelatto_products_updated', newValue: '1' })).toBe(true);
+    expect(esAvisoDeProductos({ key: 'otra_cosa', newValue: '1' })).toBe(false);
+    expect(esAvisoDeProductos({ key: null })).toBe(false); // localStorage.clear()
   });
 });
 

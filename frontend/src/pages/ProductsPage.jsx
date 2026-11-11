@@ -4,6 +4,7 @@ import { Search, Star, SlidersHorizontal, ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import FlavorModal from '../components/FlavorModal';
+import { urlSinCache, esAvisoDeProductos } from '../utils/sondeo';
 
 const CATEGORIES = ['Todos', 'Clásico', 'Vegano', 'Temporada'];
 
@@ -20,9 +21,10 @@ const ProductsPage = ({ user }) => {
   const [error, setError] = useState(null);
 
   React.useEffect(() => {
-    const fetchProducts = async () => {
+    const fetchProducts = async ({ sinCache = false } = {}) => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/products`);
+        const url = `${import.meta.env.VITE_API_URL || ''}/api/products`;
+        const res = await fetch(sinCache ? urlSinCache(url) : url);
         if (!res.ok) throw new Error('Error al conectar con la heladería');
         const data = await res.json();
         setFlavors(data);
@@ -35,13 +37,19 @@ const ProductsPage = ({ user }) => {
 
     fetchProducts();
 
+    // Hubo cambios en el panel (esta pestaña u otra): se pide sin la caché del CDN para verlos ya.
     const handleProductsUpdated = () => {
-      fetchProducts();
+      fetchProducts({ sinCache: true });
+    };
+    const alAvisoDeOtraPestana = (evento) => {
+      if (esAvisoDeProductos(evento)) fetchProducts({ sinCache: true });
     };
 
     window.addEventListener('products-updated', handleProductsUpdated);
+    window.addEventListener('storage', alAvisoDeOtraPestana);
     return () => {
       window.removeEventListener('products-updated', handleProductsUpdated);
+      window.removeEventListener('storage', alAvisoDeOtraPestana);
     };
   }, []);
 
