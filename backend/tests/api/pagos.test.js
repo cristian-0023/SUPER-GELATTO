@@ -72,6 +72,7 @@ describe('POST /api/payments/process - pago aprobado', () => {
       p_id_usuario: 3,
       p_items: [{ id_producto: 5, cantidad: 2 }],
       p_estado: 'Pagado',
+      p_puntos_usar: 0,
     });
     expect(fake.consultas('venta', 'insert')).toHaveLength(0);
     expect(fake.consultas('detalle_venta')).toHaveLength(0);
@@ -98,7 +99,7 @@ describe('POST /api/payments/process - pago aprobado', () => {
     });
 
     expect(rpcVenta()[0].args.p_items).toEqual([{ id_producto: 5, cantidad: 2 }]);
-    expect(Object.keys(rpcVenta()[0].args).sort()).toEqual(['p_estado', 'p_id_usuario', 'p_items']);
+    expect(Object.keys(rpcVenta()[0].args).sort()).toEqual(['p_estado', 'p_id_usuario', 'p_items', 'p_puntos_usar']);
     expect(res.body.total).toBe(27500);
     expect(res.body.transaction.amount).toBe(27500);
   });

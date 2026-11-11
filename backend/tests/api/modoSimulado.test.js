@@ -63,3 +63,45 @@ describe('modo simulado (sin Supabase): registrar_venta', () => {
     expect(res.body.transaction.status).toBe('DECLINED');
   });
 });
+
+// Super Points en modo simulado: la página debe poder probarse sin base real (sin datos reales).
+describe('modo simulado (sin Supabase): Super Points', () => {
+  const sesionDe = (id) => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: id, email: `u${id}@example.com`, rol: 'cliente' })}` });
+  const authAdminSim = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 1, rol: 'admin' })}` });
+
+  it('las reglas responden con niveles', async () => {
+    const res = await request(app).get('/api/points/rules');
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.niveles.length).toBeGreaterThan(0);
+    expect(res.body.pesosPorPunto).toBeGreaterThan(0);
+    expect(res.body.valorPunto).toBeGreaterThan(0);
+  });
+
+  it('una compra suma puntos al saldo del cliente y se ven en /api/me/points', async () => {
+    const res = await request(app).post('/api/payments/process').set(sesionDe(55))
+      .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 2 }] }); // 25000 -> 250 puntos
+    expect(res.body.ok).toBe(true);
+    expect(res.body.puntos).toMatchObject({ usados: 0, ganados: 250, saldo: 250 });
+
+    const mios = await request(app).get('/api/me/points').set(sesionDe(55));
+    expect(mios.status).toBe(200);
+    expect(mios.body).toMatchObject({ ok: true, saldo: 250, ganados: 250, nivel: 'Fan' });
+    expect(mios.body.movimientos[0]).toMatchObject({ tipo: 'ganado', puntos: 250 });
+  });
+
+  it('canjear más puntos de los que tiene -> 400 sin aprobar', async () => {
+    const res = await request(app).post('/api/payments/process').set(sesionDe(56))
+      .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 1 }], puntosUsar: 10 });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('el admin puede cambiar el estado de una venta simulada', async () => {
+    const pago = await request(app).post('/api/payments/process').set(sesionDe(57))
+      .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 1 }] });
+    const res = await request(app).put(`/api/admin/sales/${pago.body.id_venta}/status`).set(authAdminSim()).send({ estado: 'Enviado' });
+    expect(res.status).toBe(200);
+  });
+});

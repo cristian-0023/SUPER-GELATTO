@@ -38,9 +38,10 @@ export function cargarColumnas() {
   return columnas;
 }
 
-// Firmas de las funciones SQL: { nombre: Set(parámetros) }, leídas de los
-// `create or replace function public.<nombre>(...)` de las migraciones. Así el fake rechaza
+// Firmas de las funciones SQL: { nombre: { todos: Set(parámetros), obligatorios: Set(sin default) } },
+// leídas de los `create or replace function public.<nombre>(...)` de las migraciones. Así el fake rechaza
 // (PGRST202, como PostgREST) un rpc a una función que no existe o con argumentos que no coinciden.
+// Como en PostgREST, los parámetros con `default` se pueden omitir.
 export function cargarFunciones() {
   const funciones = {};
   const dirMig = resolve(raizSupabase, 'migrations');
@@ -49,8 +50,14 @@ export function cargarFunciones() {
     const re = /create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)\s*\(([^)]*)\)/gi;
     let m;
     while ((m = re.exec(sql))) {
-      const params = m[2].split(',').map((p) => p.trim().split(/\s+/)[0]).filter(Boolean);
-      funciones[m[1]] = new Set(params);
+      const todos = new Set();
+      const obligatorios = new Set();
+      for (const param of m[2].split(',').map((p) => p.trim()).filter(Boolean)) {
+        const nombre = param.split(/\s+/)[0];
+        todos.add(nombre);
+        if (!/\sdefault\s/i.test(` ${param} `)) obligatorios.add(nombre);
+      }
+      funciones[m[1]] = { todos, obligatorios };
     }
   }
   return funciones;
@@ -168,7 +175,9 @@ export function crearFakeSupabase() {
       fake.llamadas.push({ tipo: 'rpc', nombre, args });
       const firma = funciones[nombre];
       const pasados = Object.keys(args || {}).filter((k) => args[k] !== undefined);
-      if (!firma || pasados.length !== firma.size || !pasados.every((k) => firma.has(k))) {
+      const coincide = firma && pasados.every((k) => firma.todos.has(k))
+        && [...firma.obligatorios].every((k) => pasados.includes(k));
+      if (!coincide) {
         return Promise.resolve({
           data: null,
           error: {

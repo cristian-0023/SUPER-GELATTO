@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useCart, formatPrice } from '../context/CartContext';
-import { MapPin, CheckCircle, ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
+import { MapPin, CheckCircle, ArrowLeft, Loader2, ShieldCheck, Star } from 'lucide-react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import FlavorImage from '../components/FlavorImage';
 import PaymentGateway from '../components/PaymentGateway';
+import PuntosSelector from '../components/PuntosSelector';
+import { useSuperPoints } from '../context/SuperPointsContext';
+import { calcularCanje, puntosAGanar } from '../utils/superPoints';
 
 const CheckoutPage = ({ user }) => {
   const { cart, totalPrice, clearCart } = useCart();
   const navigate = useNavigate();
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentResult, setPaymentResult] = useState(null);
+  const { reglas, puntos: resumen, refrescar } = useSuperPoints();
+  // Texto del campo (puede estar vacío mientras escribe); las cuentas siempre salen de calcularCanje.
+  const [puntosElegidos, setPuntosElegidos] = useState('0');
   const [formData, setFormData] = useState({
     fullName: '',
     phone: '',
@@ -40,7 +46,18 @@ const CheckoutPage = ({ user }) => {
     validateField(name, value);
   };
 
-  const isFormValid = 
+  // Sin reglas o sin saldo (no cargaron) no hay selector y el pago funciona igual, sin puntos.
+  const hayPuntos = Boolean(reglas && resumen);
+  const calculo = calcularCanje({
+    subtotal: totalPrice,
+    saldo: resumen?.saldo,
+    pctMax: resumen?.pctMax,
+    valorPunto: reglas?.valorPunto,
+    puntosElegidos: hayPuntos ? puntosElegidos : 0,
+  });
+  const puntosPorGanar = puntosAGanar(calculo.total, reglas?.pesosPorPunto);
+
+  const isFormValid =
     formData.fullName.trim().length >= 3 && 
     !/^\s/.test(formData.fullName) &&
     formData.fullName === formData.fullName.trim() &&
@@ -59,10 +76,22 @@ const CheckoutPage = ({ user }) => {
     setIsPaymentOpen(true);
   };
 
-  const handlePaymentSuccess = (transaction) => {
-    setPaymentResult(transaction);
+  const handlePaymentSuccess = (transaction, respuesta = {}) => {
+    // El total y los puntos que cuentan son los que devuelve el servidor, no las cuentas de la pantalla.
+    setPaymentResult({ ...transaction, subtotal: respuesta.subtotal, puntos: respuesta.puntos });
     clearCart();
+    setPuntosElegidos('0');
     setIsPaymentOpen(false);
+    refrescar();
+  };
+
+  // Sesión vencida: se suelta la selección de puntos (el carrito se conserva).
+  const handleSesionVencida = () => setPuntosElegidos('0');
+
+  // El servidor rechazó los puntos (saldo o tope): se suelta la selección y se vuelve a pedir el saldo real.
+  const handlePuntosRechazados = () => {
+    setPuntosElegidos('0');
+    refrescar();
   };
 
   const handleClosePayment = () => {
@@ -98,11 +127,32 @@ const CheckoutPage = ({ user }) => {
               <span className="text-white/40">Autorización</span>
               <span className="font-bold font-mono text-xs text-green-400">{paymentResult.authCode}</span>
             </div>
+            {paymentResult.puntos?.usados > 0 && (
+              <>
+                <div className="flex justify-between border-t border-white/10 pt-2 mt-2">
+                  <span className="text-white/40">Subtotal</span>
+                  <span className="text-white tabular-nums">{formatPrice(paymentResult.subtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/40">Descuento ({paymentResult.puntos.usados} pts)</span>
+                  <span className="text-green-400 font-bold tabular-nums">−{formatPrice(paymentResult.puntos.descuento)}</span>
+                </div>
+              </>
+            )}
             <div className="flex justify-between border-t border-white/10 pt-2 mt-2">
               <span className="text-white/40">Total pagado</span>
               <span className="font-bold text-gold-premium">{formatPrice(paymentResult.amount)}</span>
             </div>
           </div>
+          {paymentResult.puntos && (
+            <p className="text-sm text-white/60 mb-8 flex items-center justify-center gap-2 flex-wrap">
+              <Star size={14} className="text-gold-premium fill-gold-premium" />
+              Ganaste <strong className="text-white tabular-nums">+{paymentResult.puntos.ganados}</strong> SuperPoints
+              {paymentResult.puntos.saldo !== null && paymentResult.puntos.saldo !== undefined && (
+                <span className="text-white/40">· Tu saldo: <span className="tabular-nums">{paymentResult.puntos.saldo}</span> pts</span>
+              )}
+            </p>
+          )}
           <Link to="/" className="w-full py-4 rounded-full font-bold text-sm bg-gold-premium text-background-dark hover:scale-[1.02] transition-all inline-block shadow-lg shadow-gold-premium/20">
             Volver al Inicio
           </Link>
@@ -198,7 +248,7 @@ const CheckoutPage = ({ user }) => {
                 disabled={cart.length === 0 || !isFormValid}
                 className={`w-full py-5 rounded-full font-bold text-lg transition-all flex items-center justify-center gap-3 shadow-lg ${!isFormValid ? 'opacity-40 cursor-not-allowed bg-white/10 text-white/30' : 'bg-gold-premium text-background-dark hover:scale-[1.02] shadow-gold-premium/20'}`}
               >
-                Continuar al Pago ({formatPrice(totalPrice)})
+                Continuar al Pago ({formatPrice(calculo.total)})
               </button>
             </form>
           </div>
@@ -227,18 +277,36 @@ const CheckoutPage = ({ user }) => {
                 ))}
               </div>
 
+              {hayPuntos && cart.length > 0 && (
+                <div className="mb-6">
+                  <PuntosSelector
+                    resumen={resumen}
+                    calculo={calculo}
+                    elegidos={puntosElegidos}
+                    onChange={setPuntosElegidos}
+                    puntosAGanar={puntosPorGanar}
+                  />
+                </div>
+              )}
+
               <div className="space-y-4 pt-6 border-t border-white/10">
                 <div className="flex justify-between text-sm">
                   <span className="text-white/40">Subtotal</span>
                   <span>{formatPrice(totalPrice)}</span>
                 </div>
+                {calculo.puntos > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-white/40">Descuento Super Points</span>
+                    <span className="text-green-400 font-bold tabular-nums">−{formatPrice(calculo.descuento)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-white/40">Envío</span>
                   <span className="text-green-400 font-bold uppercase text-[10px]">Gratis</span>
                 </div>
                 <div className="flex justify-between text-xl font-bold pt-4 border-t border-white/5">
                   <span>Total</span>
-                  <span className="text-gold-premium">{formatPrice(totalPrice)}</span>
+                  <span className="text-gold-premium">{formatPrice(calculo.total)}</span>
                 </div>
               </div>
             </div>
@@ -251,9 +319,13 @@ const CheckoutPage = ({ user }) => {
       <PaymentGateway
         isOpen={isPaymentOpen}
         onClose={handleClosePayment}
-        totalPrice={totalPrice}
+        totalPrice={calculo.total}
+        subtotal={totalPrice}
+        puntosUsar={calculo.puntos}
         cart={cart}
         onPaymentSuccess={handlePaymentSuccess}
+        onSesionVencida={handleSesionVencida}
+        onPuntosRechazados={handlePuntosRechazados}
       />
     </div>
   );

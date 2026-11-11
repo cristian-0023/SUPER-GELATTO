@@ -378,7 +378,8 @@ const mockDb = {
     { id_usuario: 3, nombre: 'Cliente', apellido: 'Prueba', email: 'cliente@supergelatto.com', password_hash: '$2a$10$.2ki7UXxL2rjAX8VqUIIEewGFKxfLiGpqLeXZLX6oN7elDoMDQJU6', rol: 'cliente' }
   ],
   rostros_admin: [],
-  venta: []
+  venta: [],
+  super_points: []
 };
 
 const makeQueryBuilder = (tableName) => {
@@ -403,6 +404,10 @@ const makeQueryBuilder = (tableName) => {
     },
     limit: (n) => {
       queryData = queryData.slice(0, n);
+      return builder;
+    },
+    range: (desde, hasta) => {
+      queryData = queryData.slice(desde, hasta + 1);
       return builder;
     },
     single: async () => {
@@ -540,10 +545,49 @@ if (!GOOGLE_CLIENT_ID && esProduccion) {
 
 if (!supabase) {
   console.warn('⚠️ Advertencia: Usando base de datos en memoria (Mock Supabase) debido a la falta de configuración válida.');
+  // Copia de public.super_points_reglas() SOLO para el modo simulado (sin base no hay de dónde leerlas).
+  // La fuente de verdad es la migración 20261111120000_super_points.sql: si cambian allá, cambiar aquí.
+  const MOCK_REGLAS_PUNTOS = {
+    pesos_por_punto: 100,
+    valor_punto: 5,
+    niveles: [
+      { nombre: 'Lover', min: 0, max: 100, pct: 5 },
+      { nombre: 'Fan', min: 101, max: 500, pct: 10 },
+      { nombre: 'Pro', min: 501, max: 1000, pct: 15 },
+      { nombre: 'Master', min: 1001, max: null, pct: 20 }
+    ]
+  };
+  // Versión simulada de super_points_resumen (misma forma de respuesta).
+  const mockResumenPuntos = ({ p_id_usuario }) => {
+    const movs = mockDb.super_points.filter((m) => m.id_usuario === p_id_usuario);
+    const revertidas = new Set(movs.filter((m) => m.tipo === 'revertido').map((m) => m.id_venta));
+    const saldo = movs.reduce((suma, m) => suma + m.puntos_generados, 0);
+    const ganados = movs.filter((m) => m.tipo === 'ganado' && !revertidas.has(m.id_venta))
+      .reduce((suma, m) => suma + m.puntos_generados, 0);
+    const niveles = MOCK_REGLAS_PUNTOS.niveles;
+    const nivel = [...niveles].reverse().find((n) => n.min <= ganados);
+    const siguiente = niveles.find((n) => n.min > ganados);
+    return {
+      saldo, ganados, nivel: nivel.nombre, pct_max: nivel.pct, valor_saldo: saldo * MOCK_REGLAS_PUNTOS.valor_punto,
+      puntos_para_siguiente: siguiente ? siguiente.min - ganados : 0, siguiente_nivel: siguiente ? siguiente.nombre : null
+    };
+  };
+  // Versión simulada de cambiar_estado_venta: solo cambia el estado (el modo simulado no mueve puntos aquí).
+  const mockCambiarEstadoVenta = ({ p_id_venta, p_estado }) => {
+    const venta = mockDb.venta.find((v) => v.id_venta === p_id_venta);
+    if (!venta) return { data: null, error: { code: 'P0001', message: 'VENTA_NO_EXISTE' } };
+    const estadoAnterior = venta.estado;
+    venta.estado = p_estado;
+    return {
+      data: { id_venta: venta.id_venta, id_usuario: venta.id_usuario, total: venta.total, estado: p_estado, estado_anterior: estadoAnterior, puntos_usados: venta.puntos_usados || 0, descuento_puntos: venta.descuento_puntos || 0 },
+      error: null
+    };
+  };
+
   // Versión simulada de la función registrar_venta de la base: misma forma de respuesta
-  // ({id_venta,total,estado,items}) y mismos errores de negocio, con el catálogo local.
+  // ({id_venta,total,subtotal,estado,items,puntos_*}) y mismos errores de negocio, con el catálogo local.
   // El precio sale del catálogo, nunca del cliente. (No descuenta stock: es solo para modo simulado.)
-  const mockRegistrarVenta = ({ p_id_usuario, p_items, p_estado }) => {
+  const mockRegistrarVenta = ({ p_id_usuario, p_items, p_estado, p_puntos_usar = 0 }) => {
     const falla = (message) => ({ data: null, error: { code: 'P0001', message } });
     if (!ESTADOS_VENTA.includes(p_estado)) return falla('ESTADO_INVALIDO');
     if (!Array.isArray(p_items) || p_items.length === 0) return falla('CARRITO_VACIO');
@@ -563,16 +607,38 @@ if (!supabase) {
         subtotal: prod.precio * cantidad
       });
     }
-    const total = items.reduce((suma, i) => suma + i.subtotal, 0);
+    const subtotal = items.reduce((suma, i) => suma + i.subtotal, 0);
+    // Super Points: mismas reglas que la base (saldo, tope por nivel, piso al ganar).
+    if (!Number.isInteger(p_puntos_usar) || p_puntos_usar < 0) return falla('PUNTOS_INVALIDOS');
+    const pagado = p_estado === 'Pagado';
+    const usados = pagado ? p_puntos_usar : 0;
+    const resumen = mockResumenPuntos({ p_id_usuario });
+    if (usados > 0) {
+      if (p_id_usuario == null || usados > resumen.saldo) return falla('PUNTOS_INSUFICIENTES');
+      const tope = Math.floor((subtotal * resumen.pct_max) / 100 / MOCK_REGLAS_PUNTOS.valor_punto);
+      if (usados > tope) return falla('PUNTOS_EXCEDEN_TOPE');
+    }
+    const descuento = usados * MOCK_REGLAS_PUNTOS.valor_punto;
+    const total = subtotal - descuento;
+    const ganados = pagado && p_id_usuario != null ? Math.floor(total / MOCK_REGLAS_PUNTOS.pesos_por_punto) : 0;
     const id_venta = mockDb.venta.length + 1;
-    mockDb.venta.push({ id_venta, id_usuario: p_id_usuario ?? null, total, estado: p_estado, fecha: new Date().toISOString() });
-    return { data: { id_venta, total, estado: p_estado, items }, error: null };
+    mockDb.venta.push({ id_venta, id_usuario: p_id_usuario ?? null, total, estado: p_estado, fecha: new Date().toISOString(), puntos_usados: usados, descuento_puntos: descuento });
+    const fecha_generacion = new Date().toISOString();
+    if (usados > 0) mockDb.super_points.push({ id_usuario: p_id_usuario, id_venta, tipo: 'canjeado', puntos_generados: -usados, fecha_generacion });
+    if (ganados > 0) mockDb.super_points.push({ id_usuario: p_id_usuario, id_venta, tipo: 'ganado', puntos_generados: ganados, fecha_generacion });
+    return {
+      data: { id_venta, total, subtotal, estado: p_estado, items, puntos_usados: usados, descuento, puntos_ganados: ganados, saldo: resumen.saldo - usados + ganados },
+      error: null
+    };
   };
 
   supabase = {
     from: (tableName) => makeQueryBuilder(tableName),
     rpc: (name, args) => {
       if (name === 'registrar_venta') return Promise.resolve(mockRegistrarVenta(args));
+      if (name === 'super_points_reglas') return Promise.resolve({ data: MOCK_REGLAS_PUNTOS, error: null });
+      if (name === 'super_points_resumen') return Promise.resolve({ data: mockResumenPuntos(args), error: null });
+      if (name === 'cambiar_estado_venta') return Promise.resolve(mockCambiarEstadoVenta(args));
       return Promise.resolve({ data: [], error: null });
     }
   };
@@ -702,7 +768,7 @@ function sanitizeInput(str) {
 }
 
 // ─── Envío de Correo Electrónico de Actualización de Estado ──────────────
-async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newStatus, total }) {
+async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newStatus, total, descuento }) {
   if (!customerEmail || typeof customerEmail !== 'string' || !customerEmail.includes('@')) {
     console.warn(`⚠️ No se pudo enviar correo para la orden #${saleId}: Dirección de correo no válida (${customerEmail}).`);
     return;
@@ -716,6 +782,8 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
     const safeName = escapeHtml(customerName || 'Cliente');
     const safeStatus = escapeHtml(newStatus);
     const formattedTotal = escapeHtml(typeof total === 'number' ? `$ ${total.toLocaleString('es-CO')}` : (total || ''));
+    // Descuento pagado con Super Points (solo si lo hubo).
+    const formattedDescuento = Number(descuento) > 0 ? escapeHtml(`$ ${Number(descuento).toLocaleString('es-CO')}`) : '';
 
     let statusBg = '#d4af37';
     let statusText = 'Actualización de Pedido';
@@ -774,6 +842,12 @@ async function sendStatusUpdateEmail({ saleId, customerEmail, customerName, newS
               <div>
                 <span style="font-size: 11px; color: #888888; display: block;">Valor Total</span>
                 <strong style="color: #ffffff; font-size: 14px;">${formattedTotal}</strong>
+              </div>
+              ` : ''}
+              ${formattedDescuento ? `
+              <div>
+                <span style="font-size: 11px; color: #888888; display: block;">Descuento con Super Points</span>
+                <strong style="color: #d4af37; font-size: 14px;">- ${formattedDescuento}</strong>
               </div>
               ` : ''}
             </div>
@@ -1848,7 +1922,7 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     try {
       const { data: salesData, error: salesErr } = await supabase
         .from('venta')
-        .select('id_venta, id_usuario, total, fecha, estado')
+        .select('id_venta, id_usuario, total, fecha, estado, puntos_usados, descuento_puntos')
         .order('fecha', { ascending: false });
       
       if (salesErr) {
@@ -2056,7 +2130,22 @@ function falloSupabase(res, error, mensaje) {
   return true;
 }
 
-// Endpoint para actualizar el estado de una venta (orden) y notificar al cliente por correo
+// Errores de negocio de la función cambiar_estado_venta -> respuesta HTTP.
+const ERRORES_ESTADO_VENTA = {
+  VENTA_NO_EXISTE: { status: 404, message: 'La venta no existe.' },
+  ESTADO_INVALIDO: { status: 400, message: 'Estado de venta no válido.' }
+};
+
+// Id de venta de la URL: entero positivo que cabe en un número seguro de JavaScript.
+function idVentaValido(texto) {
+  if (typeof texto !== 'string' || !/^[1-9]\d{0,15}$/.test(texto)) return null;
+  const id = Number(texto);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+// Endpoint para actualizar el estado de una venta (orden) y notificar al cliente por correo.
+// cambiar_estado_venta cambia el estado y mueve los Super Points en la misma transacción
+// (otorga al cobrar una venta Pendiente/Fallido; devuelve y quita al cancelar).
 app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
@@ -2064,16 +2153,22 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   if (!estado || !ESTADOS_VENTA.includes(estado)) {
     return res.status(400).json({ message: 'Estado de venta no válido.' });
   }
+  const idVenta = idVentaValido(id);
+  if (!idVenta) {
+    return res.status(400).json({ ok: false, message: 'El número de venta no es válido.' });
+  }
 
   try {
     // 1. Primero la base: si falla, no se dice que salió bien ni se avisa al cliente.
-    const { data: ventaBd, error } = await supabase
-      .from('venta')
-      .update({ estado })
-      .eq('id_venta', id)
-      .select('id_venta, id_usuario, total')
-      .maybeSingle();
+    const { data: ventaBd, error } = await supabase.rpc('cambiar_estado_venta', {
+      p_id_venta: idVenta,
+      p_estado: estado
+    });
 
+    if (error && ERRORES_ESTADO_VENTA[error.message]) {
+      const { status, message } = ERRORES_ESTADO_VENTA[error.message];
+      return res.status(status).json({ ok: false, message });
+    }
     if (falloSupabase(res, error, 'Error al actualizar el estado de la venta.')) return;
 
     let customerEmail = null;
@@ -2081,7 +2176,7 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
     let totalValue = null;
 
     // 2. Actualizar en FALLBACK_SALES (deuda técnica: archivo local paralelo a la base)
-    const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(id));
+    const fbSale = FALLBACK_SALES.find(s => String(s.id_venta) === String(idVenta));
     if (fbSale) {
       fbSale.estado = estado;
       customerEmail = fbSale.email || fbSale.deliveryDetails?.email;
@@ -2112,11 +2207,12 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
     // 4. Disparar el envío de correo de notificación (asíncrono: no frena la respuesta)
     if (customerEmail) {
       sendStatusUpdateEmail({
-        saleId: id,
+        saleId: idVenta,
         customerEmail,
         customerName: customerName || 'Cliente',
         newStatus: estado,
-        total: totalValue
+        total: totalValue,
+        descuento: ventaBd?.descuento_puntos
       });
     }
 
@@ -2602,7 +2698,10 @@ const ERRORES_VENTA = {
   CARRITO_VACIO: { status: 400, message: 'El carrito está vacío.' },
   CARRITO_DEMASIADO_GRANDE: { status: 400, message: 'El carrito tiene demasiados productos.' },
   ITEM_INVALIDO: { status: 400, message: 'Uno de los productos del carrito no es válido.' },
-  USUARIO_NO_EXISTE: { status: 400, message: 'Tu sesión ya no es válida, vuelve a iniciar sesión.' }
+  USUARIO_NO_EXISTE: { status: 400, message: 'Tu sesión ya no es válida, vuelve a iniciar sesión.' },
+  PUNTOS_INVALIDOS: { status: 400, message: 'La cantidad de puntos a usar no es válida.' },
+  PUNTOS_INSUFICIENTES: { status: 400, message: 'No tienes suficientes Super Points para ese canje. Actualiza la página e inténtalo de nuevo.' },
+  PUNTOS_EXCEDEN_TOPE: { status: 400, message: 'Tu nivel no permite pagar tanto de esta compra con puntos. Elige menos puntos.' }
 };
 const ERROR_VENTA_GENERICO = { status: 500, message: 'No pudimos registrar tu pedido. Intenta de nuevo más tarde.' };
 
@@ -2612,6 +2711,17 @@ function errorDeVenta(error) {
 
 const MAX_CANTIDAD_ITEM = 99;
 const MAX_ITEMS_CARRITO = 50;
+const MAX_PUNTOS_USAR = 1000000;
+
+// Puntos que el cliente quiere canjear. Ausente = 0. Debe ser un número entero entre 0 y MAX_PUNTOS_USAR
+// (null, texto, decimales o negativos no valen). El saldo, el nivel y el tope los revisa la base.
+function validarPuntosUsar(valor) {
+  if (valor === undefined) return { puntos: 0 };
+  if (!Number.isInteger(valor) || valor < 0 || valor > MAX_PUNTOS_USAR) {
+    return { error: `Los puntos a usar deben ser un número entero entre 0 y ${MAX_PUNTOS_USAR}.` };
+  }
+  return { puntos: valor };
+}
 
 // Valida el carrito del cliente. Devuelve { items:[{id_producto,cantidad}] } o { error:'mensaje' }.
 // Los precios que mande el cliente se ignoran: el precio real lo pone la base.
@@ -2659,7 +2769,7 @@ const MAX_LARGO_REFERENCIA = 64;
 // Primero la sesión y después el límite (igual que create-admin): verificar un token es barato y así un
 // visitante sin sesión no gasta los intentos de los clientes que comparten su IP.
 app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) => {
-  const { method, bank, items, reference, forceDecline } = req.body;
+  const { method, bank, items, reference, forceDecline, puntosUsar } = req.body;
 
   // El dueño de la venta y del recibo sale SOLO del token verificado, nunca del cuerpo.
   const idUsuario = req.user.id_usuario;
@@ -2690,6 +2800,11 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
   const carrito = validarCarrito(items);
   if (carrito.error) {
     return res.status(400).json({ ok: false, message: carrito.error });
+  }
+
+  const canje = validarPuntosUsar(puntosUsar);
+  if (canje.error) {
+    return res.status(400).json({ ok: false, message: canje.error });
   }
 
   // ── Referencia única de pedido y transacción ─────────────────
@@ -2724,7 +2839,8 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
   const { data: venta, error: ventaErr } = await supabase.rpc('registrar_venta', {
     p_id_usuario: idUsuario,
     p_items: carrito.items,
-    p_estado: estadoVenta
+    p_estado: estadoVenta,
+    p_puntos_usar: canje.puntos
   });
 
   if (ventaErr || !venta || venta.id_venta === undefined || venta.id_venta === null) {
@@ -2734,6 +2850,15 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
   }
 
   const serverTotal = venta.total;
+  // Subtotal con precios de la base y descuento por Super Points (total = subtotal - descuento).
+  const serverSubtotal = venta.subtotal ?? serverTotal;
+  const descuentoPuntos = Number(venta.descuento) || 0;
+  const puntos = {
+    usados: venta.puntos_usados ?? 0,
+    descuento: descuentoPuntos,
+    ganados: venta.puntos_ganados ?? 0,
+    saldo: venta.saldo ?? null
+  };
   const resolvedItems = (venta.items || []).map((i) => ({
     name: i.nombre,
     quantity: i.cantidad,
@@ -2793,6 +2918,9 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
               <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <h3 style="margin-top: 0; color: #705d00;">Resumen de tu pedido:</h3>
                 ${itemsHtml}
+                ${descuentoPuntos > 0 ? `
+                <p style="margin: 4px 0; border-top: 1px solid #ddd; padding-top: 10px;">Subtotal: $${Number(serverSubtotal).toLocaleString('es-CO')}</p>
+                <p style="margin: 4px 0; color: #ac2a5d;">Descuento con Super Points (${Number(puntos.usados)} puntos): -$${descuentoPuntos.toLocaleString('es-CO')}</p>` : ''}
                 <p style="font-size: 18px; border-top: 1px solid #ddd; padding-top: 10px;"><strong>Total: $${Number(serverTotal).toLocaleString('es-CO')}</strong></p>
               </div>
               
@@ -2826,10 +2954,92 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
     ok: status === 'APPROVED',
     id_venta: venta.id_venta,
     total: serverTotal,
+    subtotal: serverSubtotal,
+    puntos,
     transaction,
     message: status === 'APPROVED' 
       ? '¡Pago aprobado exitosamente!' 
       : declineReasons[Math.floor(Math.random() * declineReasons.length)]
+  });
+});
+
+// ─── Super Points ────────────────────────────────────────────
+// Las reglas (pesos por punto, valor del punto y niveles) viven SOLO en la base: super_points_reglas().
+const LIMITE_MOVIMIENTOS_DEFECTO = 20;
+const LIMITE_MOVIMIENTOS_MAX = 50;
+const OFFSET_MOVIMIENTOS_MAX = 100000;
+
+// Lee un entero de la query (?limit=, ?offset=). Ausente = porDefecto; inválido = null.
+function enteroDeQuery(valor, porDefecto, minimo, maximo) {
+  if (valor === undefined) return porDefecto;
+  if (typeof valor !== 'string' || !/^\d{1,7}$/.test(valor)) return null;
+  const n = Number(valor);
+  return n >= minimo && n <= maximo ? n : null;
+}
+
+// Reglas del programa: públicas y casi fijas, por eso se pueden guardar 1 hora en caché (navegador/CDN).
+app.get('/api/points/rules', async (req, res) => {
+  const { data: reglas, error } = await supabase.rpc('super_points_reglas');
+  if (falloSupabase(res, error || (reglas ? null : { message: 'sin reglas' }), 'No pudimos cargar las reglas de Super Points.')) return;
+  res.set('Cache-Control', 'public, max-age=300, s-maxage=300');
+  return res.status(200).json({
+    ok: true,
+    pesosPorPunto: reglas.pesos_por_punto,
+    valorPunto: reglas.valor_punto,
+    niveles: reglas.niveles
+  });
+});
+
+// Saldo, nivel e historial del cliente de la sesión (nunca de otro: el id sale solo del token).
+// Historial paginado: ?limit= (1..50, 20 por defecto; más de 50 se recorta) y ?offset= (0..100000).
+app.get('/api/me/points', requireAuth, async (req, res) => {
+  const idUsuario = req.user.id_usuario;
+  if (!Number.isSafeInteger(idUsuario) || idUsuario <= 0) {
+    return res.status(401).json({ ok: false, message: 'Debes iniciar sesión. Tu sesión no es válida o expiró.' });
+  }
+  const limitePedido = enteroDeQuery(req.query.limit, LIMITE_MOVIMIENTOS_DEFECTO, 1, 9999999);
+  const offset = enteroDeQuery(req.query.offset, 0, 0, OFFSET_MOVIMIENTOS_MAX);
+  if (limitePedido === null || offset === null) {
+    return res.status(400).json({ ok: false, message: `La paginación no es válida: limit entre 1 y ${LIMITE_MOVIMIENTOS_MAX}, offset entre 0 y ${OFFSET_MOVIMIENTOS_MAX}.` });
+  }
+  const limit = Math.min(limitePedido, LIMITE_MOVIMIENTOS_MAX);
+
+  // Las dos lecturas son independientes: van en paralelo. Se pide una fila de más para saber si hay más.
+  const [resumenRes, movimientosRes] = await Promise.all([
+    supabase.rpc('super_points_resumen', { p_id_usuario: idUsuario }),
+    supabase
+      .from('super_points')
+      .select('tipo, puntos_generados, fecha_generacion, id_venta')
+      .eq('id_usuario', idUsuario)
+      .order('fecha_generacion', { ascending: false })
+      .order('id_points', { ascending: false })
+      .range(offset, offset + limit)
+  ]);
+  const mensaje = 'No pudimos cargar tus Super Points. Intenta de nuevo más tarde.';
+  if (falloSupabase(res, resumenRes.error || (resumenRes.data ? null : { message: 'sin resumen' }), mensaje)) return;
+  if (falloSupabase(res, movimientosRes.error, mensaje)) return;
+
+  const r = resumenRes.data;
+  const filas = movimientosRes.data || [];
+  res.set('Cache-Control', 'private, no-store');
+  return res.status(200).json({
+    ok: true,
+    saldo: r.saldo,
+    ganados: r.ganados,
+    nivel: r.nivel,
+    pctMax: r.pct_max,
+    valorSaldo: r.valor_saldo,
+    puntosParaSiguiente: r.puntos_para_siguiente,
+    siguienteNivel: r.siguiente_nivel,
+    movimientos: filas.slice(0, limit).map((m) => ({
+      tipo: m.tipo,
+      puntos: m.puntos_generados,
+      fecha: m.fecha_generacion,
+      idVenta: m.id_venta
+    })),
+    limit,
+    offset,
+    hayMas: filas.length > limit
   });
 });
 

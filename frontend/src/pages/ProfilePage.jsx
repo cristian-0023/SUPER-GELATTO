@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, Navigate } from 'react-router-dom';
 import { getToken } from '../utils/api';
+import SuperPointsCard from '../components/SuperPointsCard';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 
 const ProfilePage = ({ user, onUpdateUser }) => {
@@ -90,9 +91,6 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                       !errors.name && 
                       !errors.email;
 
-  const superPoints = user?.points || 120;
-  const nextTierPoints = 500;
-  const progress = (superPoints / nextTierPoints) * 100;
 
   useEffect(() => {
     if (!user?.id) return;
@@ -326,73 +324,9 @@ const ProfilePage = ({ user, onUpdateUser }) => {
           {/* Main Content */}
           <div className="lg:col-span-8 space-y-6 sm:space-y-8">
             
-            {/* SuperPoints Progress - VIP Card Style */}
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5 }}
-              className="relative overflow-hidden rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 bg-gradient-to-br from-[#1a1c29] via-[#11121a] to-[#0a0b10] border border-white/5 shadow-2xl"
-            >
-              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-gold-premium/5 blur-[120px] rounded-full pointer-events-none" />
-              <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-pastel-pink/5 blur-[100px] rounded-full pointer-events-none" />
-              
-              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 sm:mb-10">
-                <div>
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-gold-premium/10 rounded-full border border-gold-premium/20 mb-4">
-                    <Crown size={14} className="text-gold-premium" />
-                    <span className="text-[10px] uppercase tracking-widest font-bold text-gold-premium">Membresía Elite</span>
-                  </div>
-                  <h3 className="text-3xl sm:text-4xl font-playfair font-bold text-white flex items-center gap-3 mb-2">
-                    SuperPoints <Sparkles className="text-pastel-pink animate-pulse" size={24} />
-                  </h3>
-                  <p className="text-white/40 text-sm">Nivel actual: <span className="text-white font-bold italic bg-white/5 px-3 py-1 rounded-lg ml-2 border border-white/5">Lover</span></p>
-                </div>
-                
-                <div className="bg-black/40 p-5 sm:p-6 rounded-[24px] backdrop-blur-xl border border-white/10 shadow-xl w-full md:w-auto">
-                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-bold mb-2">Balance Total</p>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-gold-premium via-white to-gold-premium text-transparent bg-clip-text drop-shadow-sm">{superPoints}</span>
-                    <span className="text-white/20 text-sm font-medium">/ 500 pts</span>
-                  </div>
-                </div>
-              </div>
+            {/* SuperPoints: saldo, nivel e historial reales */}
+            <SuperPointsCard />
 
-              {/* Progress Bar Container */}
-              <div className="relative mb-8 sm:mb-10 z-10">
-                <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold text-white/30 mb-3 ml-1 mr-1">
-                  <span>Lover</span>
-                  <span className="text-gold-premium/60">Fan</span>
-                </div>
-                <div className="h-5 w-full bg-black/50 rounded-full overflow-hidden p-1 border border-white/5 backdrop-blur-sm">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progress}%` }}
-                    transition={{ duration: 1.5, ease: "easeOut" }}
-                    className="h-full rounded-full bg-gradient-to-r from-pastel-pink via-gold-premium to-yellow-200 relative"
-                  >
-                     <div className="absolute top-0 right-0 bottom-0 w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-[shimmer_2s_infinite]" />
-                  </motion.div>
-                </div>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-4 text-[13px]">
-                  <p className="text-white/40 text-xs sm:text-sm">
-                    Siguiente nivel en <strong className="text-gold-premium">{nextTierPoints - superPoints} puntos</strong>
-                  </p>
-                  <button className="text-white/40 hover:text-white transition-colors flex items-center gap-1.5 font-bold uppercase text-[10px] tracking-widest border-b border-transparent hover:border-white/20 pb-0.5 min-h-[32px]">
-                    Historial de puntos <ChevronRight size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 z-10 relative">
-                <button className="flex items-center justify-center gap-2 py-3.5 sm:py-4 bg-white/5 hover:bg-white/10 transition-all rounded-[18px] border border-white/5 text-xs sm:text-sm font-bold group min-h-[48px]">
-                  <Gift size={18} className="text-pastel-pink group-hover:scale-110 transition-transform" /> Canjear Premios
-                </button>
-                <button className="flex items-center justify-center gap-2 py-3.5 sm:py-4 bg-gradient-to-r from-gold-premium to-yellow-500 text-background-dark hover:shadow-[0_0_25px_rgba(212,175,55,0.3)] transition-all rounded-[18px] text-xs sm:text-sm font-bold min-h-[48px]">
-                  Ver Catálogo <ChevronRight size={18} />
-                </button>
-              </div>
-            </motion.div>
 
             {/* Order History */}
             <div className="glass-card p-5 sm:p-10 overflow-hidden">

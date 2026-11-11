@@ -1401,7 +1401,14 @@ const AdminDashboard = ({ user, onLogout }) => {
                             </div>
                           </div>
                         </td>
-                        <td className="p-6 font-bold text-white tracking-tight">{formatCurrency(s.total)}</td>
+                        <td className="p-6 font-bold text-white tracking-tight">
+                          {formatCurrency(s.total)}
+                          {Number(s.descuento_puntos) > 0 && (
+                            <span className="block text-[10px] font-medium text-gold-premium/80 tracking-normal">
+                              Incluye -{formatCurrency(s.descuento_puntos)} por {s.puntos_usados} pts
+                            </span>
+                          )}
+                        </td>
                         <td className="p-6 text-white/40 text-sm">{formatDate(s.fecha)}</td>
                         <td className="p-6">
                           <div className="relative inline-block">
@@ -2766,6 +2773,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                           {/* MONTO */}
                           <td className="p-4 font-bold text-white text-sm">
                             {formatCurrency(s.total)}
+                            {Number(s.descuento_puntos) > 0 && (
+                              <span className="block text-[10px] font-medium text-gold-premium/80">
+                                Incluye -{formatCurrency(s.descuento_puntos)} por {s.puntos_usados} pts
+                              </span>
+                            )}
                           </td>
 
                           {/* ESTADO */}
