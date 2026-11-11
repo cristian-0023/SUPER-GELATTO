@@ -275,6 +275,15 @@ describe('los archivos JSON de estado ya no existen', () => {
     expect(fuente).not.toContain(archivo);
   });
 
+  it.each([
+    ['backend/nodemon.json'],
+    ['docs/arquitectura/03-contenedores.md'],
+  ])('%s ya no menciona los archivos JSON de estado', (ruta) => {
+    const texto = fs.readFileSync(new URL(ruta, raiz), 'utf8');
+    for (const archivo of Object.keys(ARCHIVOS_VIEJOS)) expect(texto).not.toContain(archivo);
+    expect(texto).not.toMatch(/Archivos JSON locales/);
+  });
+
   it.each(Object.keys(ARCHIVOS_VIEJOS))('%s no está en el repo y está en .gitignore', (archivo) => {
     expect(fs.existsSync(new URL(`backend/${archivo}`, raiz))).toBe(false);
     expect(fs.readFileSync(new URL('.gitignore', raiz), 'utf8')).toContain(`backend/${archivo}`);
