@@ -58,6 +58,7 @@ erDiagram
     bigint id_empleado FK
     integer puntos_usados "CHECK >= 0, default 0"
     numeric descuento_puntos "CHECK >= 0, default 0"
+    boolean cancelada_alguna_vez "default false; estuvo en Cancelado = no gana puntos"
   }
   detalle_venta {
     bigint id_detalle_venta PK
@@ -107,7 +108,7 @@ erDiagram
 |---|---|---|---|
 | `usuario` | Cuentas | `email` único; `password_hash` (bcrypt); `rol` texto (`cliente` / `admin`); `codigo_acceso` sin uso en el código | schema:4-16 |
 | `producto` | Catálogo | `precio` ≥ 0; `stock` entero ≥ 0, por defecto 50, **única fuente del stock**; `destacado` (por defecto `false`); `model_3d_url`; `estado` = activo | schema:39-55; migración:44-76 |
-| `venta` | Cabecera de cada venta | `estado` con CHECK de 9 valores (por defecto `Pendiente`); `total` ≥ 0 (desde Super Points: lo realmente pagado, después del descuento); `tipo_venta` `Presencial`/`Online`; `id_usuario` opcional (`on delete set null`); `puntos_usados` y `descuento_puntos` ≥ 0, por defecto 0 | schema:57-71; migración:20-42; `20261111120000_super_points.sql:89-103` |
+| `venta` | Cabecera de cada venta | `estado` con CHECK de 9 valores (por defecto `Pendiente`); `total` ≥ 0 (desde Super Points: lo realmente pagado, después del descuento); `tipo_venta` `Presencial`/`Online`; `id_usuario` opcional (`on delete set null`); `puntos_usados` y `descuento_puntos` ≥ 0, por defecto 0; `cancelada_alguna_vez` (por defecto false): si alguna vez estuvo en `Cancelado` nunca gana Super Points | schema:57-71; migración:20-42; `20261111120000_super_points.sql:91-111` |
 | `detalle_venta` | Líneas de una venta | `precio_unitario` copiado de `producto.precio` al vender; borrar la venta borra su detalle (`cascade`); no se puede borrar un producto con ventas (`restrict`) | schema:73-82 |
 | `inventario` | Stock por sucursal (heredado) | `stock_disponible` ≥ 0; el servidor solo lo copia al editar un producto | schema:84-95; `server.js:2219-2225` |
 | `sucursal`, `empleado` | Tiendas físicas y personal | Ningún código de la app las escribe | schema:18-37 |
