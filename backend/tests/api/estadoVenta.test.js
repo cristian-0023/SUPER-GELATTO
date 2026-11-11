@@ -1,5 +1,7 @@
 // l. PUT /api/admin/sales/:id/status debe aceptar exactamente los estados del CHECK de la base
 // (migración 20261025120000: venta_estado_check) y devolver 500 si la base falla.
+// Desde Super Points (migración 20261111120000) el cambio se hace con la función cambiar_estado_venta,
+// que actualiza venta.estado y mueve los puntos en la misma transacción.
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
@@ -17,17 +19,22 @@ const cambiar = (id, estado) => request(app).put(`/api/admin/sales/${id}/status`
 beforeAll(() => {
   ({ app } = cargarServidor(fake));
 });
-beforeEach(() => fake.reiniciar());
+beforeEach(() => {
+  fake.reiniciar();
+  fake.responderRpc('cambiar_estado_venta', ({ p_id_venta, p_estado }) => ({
+    data: { id_venta: p_id_venta, id_usuario: null, total: 5000, estado: p_estado, estado_anterior: 'Pagado', puntos_usados: 0, descuento_puntos: 0 },
+    error: null,
+  }));
+});
 
 describe('PUT /api/admin/sales/:id/status', () => {
   it.each(ESTADOS_BASE)('acepta el estado "%s" y actualiza venta.estado', async (estado) => {
     const res = await cambiar(15, estado);
 
     expect(res.status).toBe(200);
-    const ups = fake.consultas('venta', 'update');
+    const ups = fake.rpcs('cambiar_estado_venta');
     expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ estado });
-    expect(ups[0].filtros).toContainEqual(['eq', 'id_venta', '15']);
+    expect(ups[0].args).toEqual({ p_id_venta: 15, p_estado: estado });
   });
 
   it.each(['Reembolsado', 'pagado', 'ENTREGADO', '', 'Entregado; drop table venta'])(
@@ -36,12 +43,13 @@ describe('PUT /api/admin/sales/:id/status', () => {
       const res = await cambiar(15, estado);
 
       expect(res.status).toBe(400);
+      expect(fake.rpcs('cambiar_estado_venta')).toHaveLength(0);
       expect(fake.consultas('venta', 'update')).toHaveLength(0);
     },
   );
 
   it('si la base devuelve error -> 500 (no éxito)', async () => {
-    fake.responder('venta', 'update', {
+    fake.responderRpc('cambiar_estado_venta', {
       data: null,
       error: { code: '23514', message: 'new row violates check constraint "venta_estado_check"' },
     });
