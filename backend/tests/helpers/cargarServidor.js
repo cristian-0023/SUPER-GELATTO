@@ -36,6 +36,8 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
 //  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
 //    rekognition-login (por defecto muy alto).
+//  - esperaEnlaceMs / maxEnlacesDia: límites por correo de /api/forgot-password (RECUPERACION_ESPERA_MS y
+//    RECUPERACION_MAX_DIA). Por defecto sin espera y con tope muy alto, para no estorbar a otras pruebas.
 //  - vercel: true -> define VERCEL (como en Vercel, donde corre el backend): cuenta como producción.
 //  - soloLlavePublica: true -> SUPABASE_SERVICE_ROLE_KEY vacía y solo SUPABASE_KEY (la llave pública).
 //  - frontendUrl: valor de FRONTEND_URL ('' = sin configurar; así no se lee de un .env local).
@@ -47,7 +49,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
   simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000,
   tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false,
-  frontendUrl = '', smtp = false } = {}) {
+  frontendUrl = '', smtp = false, esperaEnlaceMs = 0, maxEnlacesDia = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
   process.env.SUPABASE_SERVICE_ROLE_KEY = sinSupabase || soloLlavePublica ? '' : 'service-role-key-falsa';
@@ -55,6 +57,8 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   process.env.PAYMENT_RATE_LIMIT_MAX = String(limitePagos);
   process.env.CHATBOT_RATE_LIMIT_MAX = String(limiteChatbot);
   process.env.LOGIN_RATE_LIMIT_MAX = String(limiteLogin);
+  process.env.RECUPERACION_ESPERA_MS = String(esperaEnlaceMs);
+  process.env.RECUPERACION_MAX_DIA = String(maxEnlacesDia);
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
   process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
   process.env.TRIPO_API_KEY = tripoApiKey;

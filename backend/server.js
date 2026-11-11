@@ -673,6 +673,18 @@ async function getTransporter() {
 // (tabla reset_tokens) guarda SOLO su sha256: quien lea la tabla no puede usar los enlaces.
 // Vive en la base y no en memoria: en Vercel cada petición puede caer en una instancia distinta.
 const VIGENCIA_TOKEN_RESET_MS = 30 * 60 * 1000;
+// Límite por CORREO (además del límite por IP): contra quien pide enlaces para la cuenta de otra persona
+// cambiando de IP. Espera mínima entre enlaces y tope diario. Configurables por entorno:
+// RECUPERACION_ESPERA_MS (2 minutos por defecto, 0 = sin espera) y RECUPERACION_MAX_DIA (5 por defecto).
+const numeroEntorno = (valor, porDefecto) => {
+  const n = valor === undefined || valor === '' ? NaN : Number(valor);
+  return Number.isFinite(n) && n >= 0 ? n : porDefecto;
+};
+const ESPERA_ENLACE_MS = numeroEntorno(process.env.RECUPERACION_ESPERA_MS, 2 * 60 * 1000);
+const MAX_ENLACES_DIA = numeroEntorno(process.env.RECUPERACION_MAX_DIA, 5);
+const DIA_MS = 24 * 60 * 60 * 1000;
+// Para el log: "ana@prueba.com" -> "a***@prueba.com" (nunca el correo completo).
+const enmascararCorreo = (correo) => String(correo).replace(/^(.).*(@.*)$/, '$1***$2');
 const FORMATO_TOKEN_RESET = /^[a-f0-9]{64}$/;
 function generateResetToken() { return crypto.randomBytes(32).toString('hex'); }
 const hashTokenReset = (token) => crypto.createHash('sha256').update(token).digest('hex');
@@ -1526,6 +1538,26 @@ app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
     .from('usuario').select('nombre, email').ilike('email', correoParaIlike(email.trim())).maybeSingle();
   if (falloSupabase(res, errorUsuario, errorRecuperacion)) return;
   if (!dbUser) return res.status(200).json({ ok: true, message: genericMessage });
+
+  // Límite por correo: la creación de un token es expires_at - vigencia. Se miran los de las últimas 24 h.
+  // Si se excede, misma respuesta de siempre: no se revela que existe la cuenta ni que hubo límite.
+  const ahora = Date.now();
+  const { data: recientes, error: errorRecientes } = await supabase
+    .from('reset_tokens').select('expires_at')
+    .eq('email', dbUser.email).gt('expires_at', ahora - DIA_MS + VIGENCIA_TOKEN_RESET_MS);
+  if (falloSupabase(res, errorRecientes, errorRecuperacion)) return;
+  const creaciones = (recientes || []).map((f) => Number(f.expires_at) - VIGENCIA_TOKEN_RESET_MS);
+  const ultimaCreacion = creaciones.length ? Math.max(...creaciones) : -Infinity;
+  if (creaciones.length >= MAX_ENLACES_DIA || ahora - ultimaCreacion < ESPERA_ENLACE_MS) {
+    console.warn(`Recuperación limitada por correo (${creaciones.length} enlaces en 24 h) para ${enmascararCorreo(dbUser.email)}.`);
+    return res.status(200).json({ ok: true, message: genericMessage });
+  }
+
+  // Limpieza: las filas de más de 24 h de este correo ya no cuentan para el tope; se borran para que
+  // la tabla no crezca sin fin. Si falla no importa (no cambia lo que se responde).
+  const { error: errorLimpiar } = await supabase
+    .from('reset_tokens').delete().eq('email', dbUser.email).lt('expires_at', ahora - DIA_MS + VIGENCIA_TOKEN_RESET_MS);
+  if (errorLimpiar) console.error('No se pudieron borrar enlaces viejos de recuperación:', errorLimpiar.message);
 
   // Un solo enlace vivo por cuenta: se anulan los anteriores antes de crear el nuevo.
   const { error: errorAnular } = await supabase
