@@ -2459,6 +2459,33 @@ app.put('/api/admin/products/:id/stock', requireAdmin, async (req, res) => {
   }
 });
 
+// ─── Despertador diario (Vercel Cron) ───────────────────────────
+// Una consulta mínima a la base evita que Supabase (plan gratis) se pause por falta de actividad.
+// Si existe CRON_SECRET, exige "Authorization: Bearer <CRON_SECRET>" (lo que manda Vercel Cron).
+function esSecretoCronValido(req) {
+  const secreto = process.env.CRON_SECRET;
+  if (!secreto) return true;
+  // Se comparan los hash para que ambas entradas midan lo mismo (comparación en tiempo constante).
+  const hash = (texto) => crypto.createHash('sha256').update(String(texto)).digest();
+  return crypto.timingSafeEqual(hash(req.headers.authorization || ''), hash(`Bearer ${secreto}`));
+}
+
+app.get('/api/health', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!esSecretoCronValido(req)) return res.status(401).json({ ok: false });
+  try {
+    const { error } = await supabase.from('producto').select('id_producto').limit(1);
+    if (error) {
+      console.error('❌ /api/health: la base no respondió:', error.message);
+      return res.status(503).json({ ok: false });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('❌ /api/health:', err.message);
+    return res.status(503).json({ ok: false });
+  }
+});
+
 // ─── Productos (desde Supabase con Fallback) ───────────────────
 app.get('/api/products', async (req, res) => {
   try {
