@@ -150,7 +150,8 @@ async function iniciarTareaModelo3D(idProducto, promptLimpio) {
       model_3d_actualizado: new Date(ahora).toISOString()
     })
     .eq('id_producto', idProducto)
-    .or(`model_3d_estado.is.null,model_3d_estado.neq.generando,model_3d_actualizado.lt.${vence}`)
+    // La fecha va entre comillas: "." y ":" son caracteres reservados de PostgREST dentro de or=().
+    .or(`model_3d_estado.is.null,model_3d_estado.neq.generando,model_3d_actualizado.lt."${vence}"`)
     .select('id_producto')
     .maybeSingle();
   if (reservaErr) return { resultado: 'error_base', error: reservaErr };

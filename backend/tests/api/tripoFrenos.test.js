@@ -93,7 +93,8 @@ describe('2. una generación por producto a la vez', () => {
     const condicion = reserva.filtros.find(([op]) => op === 'or')?.[1] || '';
     expect(condicion).toContain('model_3d_estado.is.null');
     expect(condicion).toContain('model_3d_estado.neq.generando');
-    expect(condicion).toMatch(/model_3d_actualizado\.lt\./);
+    // La fecha lleva "." y ":" (caracteres reservados de PostgREST dentro de or=()): va entre comillas.
+    expect(condicion).toMatch(/model_3d_actualizado\.lt\."\d{4}-\d{2}-\d{2}T[\d:.]+Z"/);
   });
 
   it('si ya está generando (la reserva no devuelve fila) -> 409 sin llamar a Tripo', async () => {
