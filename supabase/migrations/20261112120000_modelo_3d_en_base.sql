@@ -6,6 +6,9 @@
 --   * producto.model_3d_task_id: id de la tarea en Tripo.
 --   * producto.model_3d_estado:  'generando' | 'listo' | 'error' (vacío = sin modelo).
 --   * producto.model_3d_prompt:  descripción usada para generar el modelo.
+--   * producto.model_3d_actualizado: cuándo se reservó la generación. El servidor reserva con un
+--     update condicional (solo si no está 'generando', o si la reserva tiene más de 15 minutos):
+--     así dos clics a la vez no lanzan dos tareas pagadas en Tripo.
 --   * producto.model_3d_url ya existe (migración 20261025120000) y se reutiliza.
 -- Solo agrega columnas que aceptan vacío: no cambia datos ni permisos (RLS ya está activo y
 -- anon/authenticated no tienen permisos sobre producto).
@@ -26,6 +29,7 @@ set local statement_timeout = '60s';
 alter table public.producto add column if not exists model_3d_task_id text;
 alter table public.producto add column if not exists model_3d_estado text;
 alter table public.producto add column if not exists model_3d_prompt text;
+alter table public.producto add column if not exists model_3d_actualizado timestamptz;
 
 do $$
 begin

@@ -97,17 +97,91 @@ async function startTripoTask(promptText) {
   return data.data.task_id;
 }
 
-// Guarda en la fila del producto una tarea 3D recién iniciada (y borra la URL del modelo anterior).
-// Devuelve { error } como supabase-js: quien llama decide qué responder.
-function guardarTareaModelo3D(idProducto, taskId, promptTexto) {
-  return supabase.from('producto')
-    .update({ model_3d_task_id: taskId, model_3d_estado: 'generando', model_3d_prompt: promptTexto, model_3d_url: null })
-    .eq('id_producto', idProducto);
+// ─── Modelos 3D en la base (producto.model_3d_*) ───────────────
+const LARGO_MAXIMO_PROMPT_3D = 1000; // igual que el check producto_model_3d_prompt_largo
+const LARGO_MAXIMO_URL_MODELO = 2048;
+const FORMATO_ID_TAREA = /^[A-Za-z0-9_-]{1,200}$/; // cabe en el check producto_model_3d_task_id_largo
+// Una reserva "generando" más vieja que esto se puede retomar (por si la función se cortó a mitad de camino).
+const EXPIRA_RESERVA_3D_MS = 15 * 60 * 1000;
+// Estados de Tripo en los que la tarea sigue viva. 'sin_respuesta' es nuestro: Tripo no contestó (reintentar).
+const ESTADOS_TRIPO_EN_CURSO = ['queued', 'running', 'sin_respuesta'];
+const MENSAJE_TRIPO_FALLO = 'No se pudo iniciar la generación del modelo 3D. Inténtalo más tarde.';
+
+// Prompt 3D que llega del navegador: { prompt } (null si no se pidió modelo) o { error } para responder 400.
+function validarPrompt3D(valor, { obligatorio = false } = {}) {
+  const vacio = valor === undefined || valor === null || (typeof valor === 'string' && !valor.trim());
+  if (vacio) {
+    return obligatorio ? { error: 'El prompt descriptivo es obligatorio para generar el modelo 3D.' } : { prompt: null };
+  }
+  if (typeof valor !== 'string') return { error: 'El prompt del modelo 3D debe ser un texto.' };
+  const prompt = valor.trim();
+  if (prompt.length > LARGO_MAXIMO_PROMPT_3D) {
+    return { error: `El prompt no puede superar ${LARGO_MAXIMO_PROMPT_3D} caracteres.` };
+  }
+  return { prompt };
+}
+
+// Solo se guardan URLs https de largo razonable (no hay lista de dominios: no conocemos el CDN de Tripo).
+function urlModeloValida(url) {
+  if (typeof url !== 'string' || url.length > LARGO_MAXIMO_URL_MODELO) return false;
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// Inicia una tarea en Tripo para un producto, sin gastar dos tareas a la vez:
+//  1. Reserva con un update CONDICIONAL y atómico: solo pasa si el producto no está 'generando' (o si la
+//     reserva venció). Si dos clics llegan juntos, la base deja pasar a uno solo.
+//  2. Llama a Tripo. Si falla, libera la reserva (estado 'error') para poder reintentar.
+//  3. Guarda el id de tarea solo si la reserva sigue vigente.
+// Devuelve { resultado: 'ok', taskId } | { resultado: 'ocupado' } | { resultado: 'error_tripo' }
+//        | { resultado: 'error_base', error }.
+async function iniciarTareaModelo3D(idProducto, promptLimpio) {
+  const ahora = Date.now();
+  const vence = new Date(ahora - EXPIRA_RESERVA_3D_MS).toISOString();
+  const { data: reservado, error: reservaErr } = await supabase.from('producto')
+    .update({
+      model_3d_estado: 'generando',
+      model_3d_task_id: null,
+      model_3d_prompt: promptLimpio,
+      model_3d_url: null,
+      model_3d_actualizado: new Date(ahora).toISOString()
+    })
+    .eq('id_producto', idProducto)
+    .or(`model_3d_estado.is.null,model_3d_estado.neq.generando,model_3d_actualizado.lt.${vence}`)
+    .select('id_producto')
+    .maybeSingle();
+  if (reservaErr) return { resultado: 'error_base', error: reservaErr };
+  if (!reservado) return { resultado: 'ocupado' };
+
+  const reservaVigente = (consulta) => consulta
+    .eq('id_producto', idProducto)
+    .eq('model_3d_estado', 'generando')
+    .is('model_3d_task_id', null);
+
+  let taskId;
+  try {
+    taskId = await startTripoTask(promptLimpio);
+    if (typeof taskId !== 'string' || !FORMATO_ID_TAREA.test(taskId)) {
+      throw new Error('Tripo devolvió un id de tarea con formato inesperado.');
+    }
+  } catch (tripoErr) {
+    console.error('Error al iniciar la tarea en Tripo:', tripoErr.message);
+    const { error: liberarErr } = await reservaVigente(supabase.from('producto').update({ model_3d_estado: 'error' }));
+    if (liberarErr) console.error('No se pudo liberar la reserva del modelo 3D:', liberarErr);
+    return { resultado: 'error_tripo' };
+  }
+
+  const { error: guardarErr } = await reservaVigente(supabase.from('producto').update({ model_3d_task_id: taskId }));
+  if (guardarErr) return { resultado: 'error_base', error: guardarErr };
+  return { resultado: 'ok', taskId };
 }
 
 async function getTripoTaskStatus(taskId) {
   try {
-    const response = await fetch(`https://api.tripo3d.ai/v2/openapi/task/${taskId}`, {
+    const response = await fetch(`https://api.tripo3d.ai/v2/openapi/task/${encodeURIComponent(taskId)}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${TRIPO_API_KEY}`
@@ -120,8 +194,10 @@ async function getTripoTaskStatus(taskId) {
     }
 
     const task = data.data;
-    const status = task.status; // 'queued', 'running', 'success', 'failed'
-    const modelUrl = task.output?.model || task.output?.pbr_model || null;
+    // 'queued' y 'running' siguen; 'success' terminó; 'failed', 'cancelled', 'banned', 'expired', 'unknown'… = error.
+    const status = task.status;
+    // model_url es el nombre actual en la documentación de Tripo; model y pbr_model, los anteriores.
+    const modelUrl = task.output?.model_url || task.output?.model || task.output?.pbr_model || null;
 
     return {
       status,
@@ -131,7 +207,8 @@ async function getTripoTaskStatus(taskId) {
     };
   } catch (error) {
     console.error(`Error consultando tarea Tripo3D ${taskId}:`, error.message);
-    return { status: 'error', progress: 0, modelUrl: null };
+    // Falla de red o de Tripo: no es un estado terminal, se reintenta en la próxima consulta.
+    return { status: 'sin_respuesta', progress: 0, modelUrl: null };
   }
 }
 
@@ -936,6 +1013,23 @@ const limitadorValidarEnlace = crearLimitadorCuenta();
 const limitadorRestablecer = crearLimitadorCuenta();
 const limitadorLoginFacial = crearLimitadorCuenta();
 const limitadorCrearAdmin = crearLimitadorCuenta();
+
+// Límite de generaciones 3D por admin (cada tarea de Tripo cuesta dinero): TRIPO_RATE_LIMIT_MAX por hora
+// (5 por defecto). Va después de requireAdmin y cuenta por id de admin, no por IP. Ojo: en Vercel
+// (serverless) la cuenta vive en la memoria de cada instancia, así que es aproximado; el freno real
+// contra tareas repetidas es la reserva condicional en la base (iniciarTareaModelo3D).
+const VENTANA_TRIPO_MS = 60 * 60 * 1000;
+const limitadorTripo = rateLimit({
+  windowMs: VENTANA_TRIPO_MS,
+  limit: Number(process.env.TRIPO_RATE_LIMIT_MAX) || 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `admin:${req.user?.id_usuario}`,
+  // Sin llave no hay gasto (la ruta responde 503); crear un producto sin prompt tampoco gasta.
+  skip: (req) => !TRIPO_API_KEY || validarPrompt3D(req.body?.prompt_usado || req.body?.prompt3d || req.body?.prompt).prompt === null,
+  handler: (req, res) =>
+    res.status(429).json({ ok: false, message: 'Demasiadas generaciones de modelos 3D seguidas. Espera una hora e inténtalo de nuevo.' })
+});
 
 // Helper para asignar imágenes reales basadas en el nombre
 function getProductImage(name) {
@@ -2168,7 +2262,7 @@ app.post('/api/admin/create-admin', requireAdmin, limitadorCrearAdmin, async (re
 // Nota: La tabla de productos puede no estar completamente configurada en Supabase según los datos, 
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
-app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => {
+app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, async (req, res) => {
   let { name, description, price, category, image, featured, stock, nombre, descripcion, precio, categoria, prompt_usado, prompt3d, prompt } = req.body;
 
   name = name || nombre;
@@ -2183,6 +2277,12 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => 
   const numPrice = parseFloat(price);
   if (isNaN(numPrice) || numPrice <= 0) {
     return res.status(400).json({ message: 'El precio debe ser un número mayor a 0.' });
+  }
+
+  // El prompt 3D se valida ANTES de crear el producto: un prompt inválido no deja un producto a medias.
+  const prompt3dValidado = validarPrompt3D(prompt_usado || prompt3d || prompt);
+  if (prompt3dValidado.error) {
+    return res.status(400).json({ ok: false, message: prompt3dValidado.error });
   }
 
   const numStock = stock !== undefined && stock !== null && !isNaN(parseInt(stock, 10)) ? Math.max(0, parseInt(stock, 10)) : 50;
@@ -2226,18 +2326,13 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, async (req, res) => 
     FALLBACK_PRODUCTS.unshift({ ...newProdItem, id_producto: nextId });
 
     // Iniciar generación 3D con Tripo AI si se proporcionó un prompt
+    // (el prompt ya se validó arriba; sin llave no se intenta)
     let modelObj = null;
-    const tripoPrompt = prompt_usado || prompt3d || prompt;
-    if (tripoPrompt && tripoPrompt.trim()) {
-      try {
-        const taskId = await startTripoTask(tripoPrompt);
-        // El producto ya quedó creado: si la base no guarda la tarea, se responde sin modelo (no se miente).
-        const { error: tareaErr } = await guardarTareaModelo3D(nextId, taskId, tripoPrompt);
-        if (tareaErr) console.error('No se pudo guardar la tarea 3D del producto nuevo:', tareaErr);
-        else modelObj = { taskId, estado: 'generando' };
-      } catch (tripoErr) {
-        console.warn('Advertencia al iniciar tarea en Tripo3D AI:', tripoErr.message);
-      }
+    if (prompt3dValidado.prompt && TRIPO_API_KEY) {
+      // El producto ya quedó creado: si la tarea no se pudo iniciar o guardar, se responde sin modelo (no se miente).
+      const inicio = await iniciarTareaModelo3D(nextId, prompt3dValidado.prompt);
+      if (inicio.resultado === 'ok') modelObj = { taskId: inicio.taskId, estado: 'generando' };
+      else console.warn('No se inició el modelo 3D del producto nuevo:', inicio.resultado, inicio.error || '');
     }
 
     const createdProductObj = {
@@ -2949,7 +3044,6 @@ app.post('/api/chatbot', limitadorChatbot, async (req, res) => {
 
 // La tarea 3D de cada producto vive en la base (producto.model_3d_*): en Vercel no hay disco donde guardarla.
 const COLUMNAS_MODELO_3D = 'id_producto, model_3d_task_id, model_3d_estado, model_3d_url, model_3d_prompt';
-const LARGO_MAXIMO_PROMPT_3D = 1000; // igual que el check producto_model_3d_prompt_largo
 
 // Consultar el estado o la URL del modelo 3D de un producto
 app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
@@ -2981,13 +3075,25 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
         return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
       }
 
-      const taskInfo = await getTripoTaskStatus(fila.model_3d_task_id);
+      const tarea = fila.model_3d_task_id;
+      const taskInfo = await getTripoTaskStatus(tarea);
 
-      if (taskInfo.status === 'success' && taskInfo.modelUrl) {
+      if (ESTADOS_TRIPO_EN_CURSO.includes(taskInfo.status)) {
+        return res.status(200).json({
+          estado: 'generando',
+          progress: taskInfo.progress,
+          message: `Generando estructura 3D en Tripo AI (${taskInfo.progress}%)...`
+        });
+      }
+
+      // Los updates solo tocan la fila si sigue siendo ESTA tarea: si mientras tanto alguien regeneró,
+      // no se pisa la tarea nueva con el resultado de la vieja.
+      const mismaTarea = (consulta) => consulta.eq('id_producto', prodId).eq('model_3d_task_id', tarea);
+
+      if (taskInfo.status === 'success' && urlModeloValida(taskInfo.modelUrl)) {
         // Primero se guarda en la base: si falla, el estado sigue "generando" y se reintenta en la próxima consulta.
-        const { error: dbErr } = await supabase.from('producto')
-          .update({ model_3d_url: taskInfo.modelUrl, model_3d_estado: 'listo' })
-          .eq('id_producto', prodId);
+        const { error: dbErr } = await mismaTarea(supabase.from('producto')
+          .update({ model_3d_url: taskInfo.modelUrl, model_3d_estado: 'listo' }));
         if (falloSupabase(res, dbErr, 'No se pudo guardar el modelo 3D del producto.')) return;
 
         return res.status(200).json({
@@ -2996,17 +3102,16 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
           glb_url: taskInfo.modelUrl,
           prompt: fila.model_3d_prompt
         });
-      } else if (taskInfo.status === 'failed') {
-        const { error: dbErr } = await supabase.from('producto').update({ model_3d_estado: 'error' }).eq('id_producto', prodId);
-        if (falloSupabase(res, dbErr, 'No se pudo guardar el estado del modelo 3D.')) return;
-        return res.status(200).json({ estado: 'error', message: 'La generación 3D en Tripo AI falló.' });
-      } else {
-        return res.status(200).json({
-          estado: 'generando',
-          progress: taskInfo.progress,
-          message: `Generando estructura 3D en Tripo AI (${taskInfo.progress}%)...`
-        });
       }
+
+      // Cualquier otro final (failed, cancelled, banned, expired, unknown…, o success sin una URL https
+      // válida) es un error: así el producto no queda "generando" para siempre y se puede regenerar.
+      if (taskInfo.status === 'success') {
+        console.warn(`Tripo terminó la tarea ${tarea} sin una URL de modelo válida.`);
+      }
+      const { error: dbErr } = await mismaTarea(supabase.from('producto').update({ model_3d_estado: 'error' }));
+      if (falloSupabase(res, dbErr, 'No se pudo guardar el estado del modelo 3D.')) return;
+      return res.status(200).json({ estado: 'error', message: 'La generación 3D en Tripo AI falló.' });
     }
 
     return res.status(200).json({ estado: estado || 'idle', url, glb_url: url });
@@ -3017,27 +3122,23 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
 });
 
 // Regenerar o crear modelo 3D para un producto existente
-app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res) => {
-  const { prompt } = req.body;
+app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, limitadorTripo, async (req, res) => {
   const prodId = idVentaValido(req.params.id); // mismo formato: entero positivo
   if (!prodId) {
     return res.status(400).json({ ok: false, message: 'El número de producto no es válido.' });
   }
 
-  if (typeof prompt !== 'string' || !prompt.trim()) {
-    return res.status(400).json({ message: 'El prompt descriptivo es obligatorio para generar el modelo 3D.' });
+  const { prompt: promptLimpio, error: errorPrompt } = validarPrompt3D(req.body?.prompt, { obligatorio: true });
+  if (errorPrompt) {
+    return res.status(400).json({ ok: false, message: errorPrompt });
   }
-  if (prompt.trim().length > LARGO_MAXIMO_PROMPT_3D) {
-    return res.status(400).json({ ok: false, message: `El prompt no puede superar ${LARGO_MAXIMO_PROMPT_3D} caracteres.` });
-  }
-  const promptLimpio = prompt.trim();
 
   if (!TRIPO_API_KEY) {
     return res.status(503).json({ ok: false, message: MENSAJE_TRIPO_SIN_LLAVE });
   }
 
   try {
-    // El producto debe existir antes de gastar una generación en Tripo (un update sobre 0 filas no da error).
+    // El producto debe existir antes de gastar una generación en Tripo.
     const { data: existe, error: leerErr } = await supabase
       .from('producto').select('id_producto').eq('id_producto', prodId).maybeSingle();
     if (falloSupabase(res, leerErr, 'Error al iniciar la generación del modelo 3D.')) return;
@@ -3045,20 +3146,28 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, async (req, res)
       return res.status(404).json({ ok: false, message: 'El producto no existe.' });
     }
 
-    const taskId = await startTripoTask(promptLimpio);
-
-    const { error: tareaErr } = await guardarTareaModelo3D(prodId, taskId, promptLimpio);
-    if (falloSupabase(res, tareaErr, 'No se pudo guardar la tarea del modelo 3D.')) return;
+    const inicio = await iniciarTareaModelo3D(prodId, promptLimpio);
+    if (inicio.resultado === 'ocupado') {
+      return res.status(409).json({ ok: false, message: 'Este producto ya tiene un modelo 3D generándose. Espera a que termine.' });
+    }
+    if (inicio.resultado === 'error_base') {
+      falloSupabase(res, inicio.error, 'No se pudo guardar la tarea del modelo 3D.');
+      return;
+    }
+    if (inicio.resultado !== 'ok') {
+      return res.status(500).json({ ok: false, message: MENSAJE_TRIPO_FALLO });
+    }
 
     return res.status(200).json({
       ok: true,
       message: 'Tarea de modelado 3D iniciada en Tripo AI con éxito.',
-      taskId,
+      taskId: inicio.taskId,
       productId: prodId
     });
   } catch (error) {
+    // El detalle solo va al registro; el cliente recibe un texto fijo.
     console.error('Error al iniciar regeneración 3D:', error);
-    return res.status(500).json({ message: error.message || 'Error al conectar con la API de Tripo AI.' });
+    return res.status(500).json({ ok: false, message: MENSAJE_TRIPO_FALLO });
   }
 });
 

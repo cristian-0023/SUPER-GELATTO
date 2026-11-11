@@ -20,15 +20,33 @@ describe('migración modelo_3d_en_base', () => {
     db = await crearBase();
   });
 
-  it('agrega model_3d_task_id, model_3d_estado y model_3d_prompt (y conserva model_3d_url)', async () => {
+  it('agrega model_3d_task_id, model_3d_estado, model_3d_prompt y model_3d_actualizado (y conserva model_3d_url)', async () => {
     await db.exec(leer(RUTA_MIGRACION));
-    expect(await columnas(db)).toEqual(['model_3d_estado', 'model_3d_prompt', 'model_3d_task_id', 'model_3d_url']);
+    expect(await columnas(db)).toEqual(['model_3d_actualizado', 'model_3d_estado', 'model_3d_prompt', 'model_3d_task_id', 'model_3d_url']);
   });
 
   it('se puede aplicar dos veces sin fallar', async () => {
     await db.exec(leer(RUTA_MIGRACION));
     await db.exec(leer(RUTA_MIGRACION));
-    expect(await columnas(db)).toHaveLength(4);
+    expect(await columnas(db)).toHaveLength(5);
+  });
+
+  // Lo mismo que hace el servidor (PostgREST: .eq(id).or(estado.is.null, estado.neq.generando, actualizado.lt.<vence>)):
+  // dos clics a la vez -> solo uno "reserva" la generación; una reserva vieja (más de 15 min) se puede retomar.
+  const reservar = (db) => db.query(
+    `update public.producto set model_3d_estado = 'generando', model_3d_task_id = null, model_3d_actualizado = now()
+     where id_producto = 5
+       and (model_3d_estado is null or model_3d_estado <> 'generando' or model_3d_actualizado < now() - interval '15 minutes')
+     returning id_producto`);
+
+  it('la reserva condicional deja pasar solo a uno y retoma una reserva vieja', async () => {
+    await db.exec(leer(RUTA_MIGRACION));
+    expect((await reservar(db)).rows).toHaveLength(1);
+    expect((await reservar(db)).rows).toHaveLength(0); // segundo clic: ya está generando
+    await db.query(`update public.producto set model_3d_actualizado = now() - interval '16 minutes' where id_producto = 5`);
+    expect((await reservar(db)).rows).toHaveLength(1);
+    await db.query(`update public.producto set model_3d_estado = 'error' where id_producto = 5`);
+    expect((await reservar(db)).rows).toHaveLength(1);
   });
 
   it('no cambia los productos que ya existen (las columnas nuevas quedan vacías)', async () => {
@@ -64,7 +82,7 @@ describe('migración modelo_3d_en_base', () => {
     await db.query(`update public.producto set model_3d_url = 'https://tripo.test/m.glb' where id_producto = 5`);
     await db.exec(leer(RUTA_ROLLBACK));
     await db.exec(leer(RUTA_ROLLBACK));
-    expect(await columnas(db)).toEqual(['model_3d_url']);
+    expect(await columnas(db)).toEqual(['model_3d_url']); // también se va model_3d_actualizado
     expect(await valor(db, `select model_3d_url from public.producto where id_producto = 5`)).toBe('https://tripo.test/m.glb');
   });
 });

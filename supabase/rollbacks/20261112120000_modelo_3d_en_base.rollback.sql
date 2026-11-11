@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- ROLLBACK de 20261112120000_modelo_3d_en_base
--- Quita producto.model_3d_task_id, model_3d_estado y model_3d_prompt (y sus restricciones).
+-- Quita producto.model_3d_task_id, model_3d_estado, model_3d_prompt y model_3d_actualizado (y sus restricciones).
 -- Se pierden las tareas 3D en curso; model_3d_url NO se toca. Antes de ejecutarlo, volver al
 -- código anterior: el código nuevo usa estas columnas. Es idempotente (se puede ejecutar 2 veces).
 -- =====================================================================================
@@ -17,6 +17,7 @@ alter table public.producto drop constraint if exists producto_model_3d_prompt_l
 alter table public.producto drop column if exists model_3d_task_id;
 alter table public.producto drop column if exists model_3d_estado;
 alter table public.producto drop column if exists model_3d_prompt;
+alter table public.producto drop column if exists model_3d_actualizado;
 
 notify pgrst, 'reload schema';
 

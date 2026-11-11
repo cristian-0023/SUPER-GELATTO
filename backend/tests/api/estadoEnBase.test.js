@@ -135,15 +135,26 @@ describe('panel de admin: solo la base', () => {
 });
 
 describe('modelos 3D: tarea, estado y URL en la base', () => {
+  // La tarea se guarda en dos pasos: primero se reserva el producto ("generando", con el prompt; ver
+  // tripoFrenos.test.js) y, cuando Tripo devuelve el id, se guarda model_3d_task_id. La base simulada
+  // responde a la reserva con la fila, como haría la real si el producto no estaba generando.
+  const reservaGanada = (llamada) => ({
+    data: llamada.payload?.model_3d_estado === 'generando' ? { id_producto: llamada.filtros.find((f) => f[1] === 'id_producto')[2] } : null,
+    error: null,
+  });
+
   it('crear un producto con prompt guarda la tarea "generando" en la fila del producto', async () => {
+    fake.responder('producto', 'update', reservaGanada);
+
     const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: 'cono de helado' });
 
     expect(res.status).toBe(201);
     expect(res.body.model).toEqual({ taskId: 'T-NUEVA', estado: 'generando' });
     const ups = fake.consultas('producto', 'update');
-    expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ model_3d_task_id: 'T-NUEVA', model_3d_estado: 'generando', model_3d_prompt: 'cono de helado', model_3d_url: null });
-    expect(ups[0].filtros).toContainEqual(['eq', 'id_producto', res.body.product.id]);
+    expect(ups).toHaveLength(2);
+    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'cono de helado', model_3d_url: null });
+    expect(ups[1].payload).toEqual({ model_3d_task_id: 'T-NUEVA' });
+    for (const up of ups) expect(up.filtros).toContainEqual(['eq', 'id_producto', res.body.product.id]);
     expect(fake.errores).toEqual([]);
   });
 
@@ -164,15 +175,17 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
 
   it('regenerar guarda la tarea nueva en la base', async () => {
     fake.responder('producto', 'select', { data: { id_producto: 5 }, error: null });
+    fake.responder('producto', 'update', reservaGanada);
 
     const res = await admin('post', '/api/admin/products/5/regenerate-3d').send({ prompt: 'copa de chocolate' });
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, taskId: 'T-NUEVA', productId: 5 });
     const ups = fake.consultas('producto', 'update');
-    expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ model_3d_task_id: 'T-NUEVA', model_3d_estado: 'generando', model_3d_prompt: 'copa de chocolate', model_3d_url: null });
-    expect(ups[0].filtros).toContainEqual(['eq', 'id_producto', 5]);
+    expect(ups).toHaveLength(2);
+    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'copa de chocolate', model_3d_url: null });
+    expect(ups[1].payload).toEqual({ model_3d_task_id: 'T-NUEVA' });
+    for (const up of ups) expect(up.filtros).toContainEqual(['eq', 'id_producto', 5]);
   });
 
   it('regenerar: si la base no guarda la tarea -> 500', async () => {
