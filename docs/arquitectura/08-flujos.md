@@ -23,17 +23,18 @@ sequenceDiagram
   participant API as API Express
   participant RV as registrar_venta
   participant M as Servidor de correo SMTP
-  C->>W: Pagar en /checkout (PaymentGateway)
-  W->>API: POST /api/payments/process con token, método, banco e items
-  API->>API: Verifica la sesión, límite 10 por minuto, valida método y carrito
+  C->>W: Pagar en /checkout (PaymentGateway), elige cuántos Super Points usar
+  W->>API: POST /api/payments/process con token, método, banco, items y puntosUsar
+  API->>API: Verifica la sesión, límite 10 por minuto, valida método, carrito y puntosUsar
   API->>API: Simula la pasarela, 1 a 2 s, aprox. 90 por ciento aprobado
-  API->>RV: rpc registrar_venta(usuario del token, items, Pagado o Fallido)
+  API->>RV: rpc registrar_venta(usuario del token, items, Pagado o Fallido, p_puntos_usar)
+  Note over RV: Bloquea al cliente, revisa saldo y tope de su nivel, resta el descuento, anota canjeado y ganado si es Pagado
   alt Todo bien
-    RV-->>API: id_venta, total con precios de la base, items
+    RV-->>API: id_venta, total con descuento, puntos usados y ganados, saldo, items
     opt Aprobado
       API->>M: Correo de pago confirmado
     end
-    API-->>W: 200 ok, id_venta, total, transaction
+    API-->>W: 200 ok, id_venta, total, subtotal, puntos, transaction
     W->>W: Vacía el carrito si fue aprobado
   else Error de negocio, por ejemplo STOCK_INSUFICIENTE
     RV-->>API: Error P0001, no se guarda nada
@@ -44,11 +45,12 @@ sequenceDiagram
 | Paso | Referencia |
 |---|---|
 | Llamada de la página (sin token) | `PaymentGateway.jsx:127-150` |
-| Límite y validaciones | `server.js:2507-2546` |
-| Resultado simulado y espera | `server.js:2554-2573` |
-| `registrar_venta` | `server.js:2575-2587`; migración:121-287 |
-| Correo de confirmación | `server.js:2613-2668` |
-| Respuesta | `server.js:2678-2686` |
+| Límite y validaciones (incluye `puntosUsar`) | `server.js:2771-2807`; `validarPuntosUsar` en `server.js:2719-2723` |
+| Resultado simulado y espera | `server.js:2818-2834` |
+| `registrar_venta` con `p_puntos_usar` | `server.js:2839-2850`; migración `20261111120000_super_points.sql:202-430` |
+| Canje: saldo, tope y descuento | migración `20261111120000_super_points.sql:343-366` |
+| Correo de confirmación (muestra el descuento) | `server.js:2885-2941` |
+| Respuesta (total, descuento, puntos usados y ganados) | `server.js:2953-2960` |
 | Vaciar carrito | `CheckoutPage.jsx:62-66` |
 
 ### 2. Iniciar sesión
@@ -157,7 +159,7 @@ sequenceDiagram
   A->>W: Elige un estado nuevo en /admin
   W->>API: PUT /api/admin/sales/id/status con Bearer
   API->>API: requireAdmin y el estado debe ser uno de los 9
-  API->>DB: Actualiza venta.estado
+  API->>DB: rpc cambiar_estado_venta: cambia el estado y mueve los Super Points en una transacción
   alt La base falla
     API-->>W: 500, no se avisa al cliente
   else Guardado
@@ -167,7 +169,7 @@ sequenceDiagram
   end
 ```
 
-Referencias: `AdminDashboard.jsx:333`; `server.js:1948-2021`; plantilla de correo `server.js:679-781`.
+Referencias: `AdminDashboard.jsx:333`; `server.js:2149-2229` (ruta; la llamada a la base en `server.js:2163`); plantilla de correo `server.js:679-781`. Los puntos del cambio de estado (cobrar o cancelar) se describen en la sección 7.
 
 ### 5. Gelbot con confirmación
 
@@ -223,3 +225,34 @@ sequenceDiagram
 ```
 
 Referencias: `server.js:2077-2179` (crear e iniciar Tripo), `server.js:126-182` (llamadas a Tripo), `server.js:2712-2775` (consulta y guardado), `server.js:2778-2809` (regenerar); sondeo en la página `AdminDashboard.jsx:740-760`.
+
+### 7. Cancelar una venta y devolver Super Points
+
+Cuando un admin pasa una venta cobrada a "Cancelado", la base hace todo en una sola transacción: devuelve lo canjeado y quita lo ganado.
+
+```mermaid
+sequenceDiagram
+  actor A as Administrador
+  participant W as Tienda web
+  participant API as API Express
+  participant DB as Base de datos
+  A->>W: Pasa la venta a Cancelado
+  W->>API: PUT /api/admin/sales/id/status con Bearer
+  API->>DB: rpc cambiar_estado_venta(id, Cancelado)
+  alt Error de la base
+    DB-->>API: Error, no se cambia nada
+    API-->>W: Error, no se avisa al cliente
+  else Transacción correcta
+    Note over DB: Pasa una sola vez por venta
+    DB->>DB: Anota devuelto con los puntos canjeados
+    DB->>DB: Anota revertido y quita los ganados sin bajar el saldo de cero
+    DB-->>API: estado anterior, puntos usados y descuento
+    API-->>W: 200 y correo al cliente
+  end
+```
+
+- Si el cliente ya gastó los puntos ganados, se quita solo lo que tenga. El movimiento `revertido` anota lo que realmente se quitó, y el nivel deja de contar todos los puntos ganados en esa venta.
+- Si un admin saca la venta de "Cancelado", los puntos no se vuelven a mover.
+- Una venta sin movimientos (Fallido, Pendiente o anterior al programa) no mueve nada al cancelarse.
+
+Referencias: `server.js:2149-2229` (ruta; la llamada en `server.js:2163`); función `cambiar_estado_venta` en `supabase/migrations/20261111120000_super_points.sql:446-533` (reversa en las líneas 497-520).

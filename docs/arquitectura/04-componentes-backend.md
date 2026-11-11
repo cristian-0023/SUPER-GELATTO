@@ -57,7 +57,8 @@ flowchart TB
 | Usuarios y pedidos | Historial paginado y edición de perfil | `server.js:1564-1720` |
 | Panel admin | Dashboard, borrar usuarios, cambiar rol, estado de venta, crear admin | `server.js:1722-2071` |
 | Catálogo | Productos públicos y CRUD de admin; datos de sabor escritos en el código | `server.js:184-353`, `server.js:901-1059`, `server.js:2073-2433` |
-| Pagos | Valida carrito, simula la pasarela, llama a `registrar_venta`, manda correo | `server.js:2435-2687` |
+| Pagos | Valida carrito y `puntosUsar`, simula la pasarela, llama a `registrar_venta`, manda correo | `server.js:2771-2965` |
+| Super Points | Saldo, nivel, reglas e historial. El canje y el cambio de estado los resuelve la base en una sola transacción | `server.js:2719-2723` (`puntosUsar`), `server.js:2966-3044` |
 | Modelos 3D | Inicia y consulta tareas en Tripo 3D; guarda `model_3d_url` | `server.js:101-182`, `server.js:2709-2809` |
 | Correos | Transporte SMTP o Ethereal; correo de cambio de estado con datos escapados | `server.js:626-781` |
 | Gelbot | Chat con IA y herramientas por rol | `backend/chatbot.js`; ruta en `server.js:2703-2707` |
@@ -84,7 +85,7 @@ El permiso sale **solo** del rol firmado en el token, nunca de cabeceras como `x
 
 Al pasar el tope responden **429** con un mensaje en español.
 
-### Las 26 rutas
+### Las 28 rutas
 
 "Quién puede" describe lo que **hace el código**, no lo que debería hacer.
 
@@ -102,7 +103,7 @@ Al pasar el tope responden **429** con un mensaje en español.
 | 10 | GET | `/api/admin/dashboard` | `server.js:1723` | `requireAdmin` | Admin | — | Usuarios, ventas, productos y estadísticas (sin paginar) |
 | 11 | DELETE | `/api/admin/users/:id` | `server.js:1836` | `requireAdmin` | Admin borra clientes; solo super admin borra admins (`:1866-1872`); nadie borra al super admin (`:1855-1860`) | — | Borra la cuenta y desvincula sus ventas |
 | 12 | PUT | `/api/admin/users/:id/role` | `server.js:1896` | `requireAdmin` | Admin puede **subir** a admin; solo super admin **baja** a cliente (`:1919`); nadie cambia al super admin (`:1913`) | — | Cambia `rol` a `admin` o `cliente` |
-| 13 | PUT | `/api/admin/sales/:id/status` | `server.js:1948` | `requireAdmin` | Admin | — | Cambia el estado (uno de los 9) y avisa por correo |
+| 13 | PUT | `/api/admin/sales/:id/status` | `server.js:2149` | `requireAdmin` | Admin | — | Llama a `cambiar_estado_venta` (estado y puntos en una misma transacción; la base rechaza estados fuera de los 9); si falla, responde error y no avisa al cliente; si sale bien, avisa por correo |
 | 14 | POST | `/api/admin/create-admin` | `server.js:2030` | `requireAdmin` | Solo super admin (`:2031`) | `limitadorCrearAdmin` | Crea un admin; responde sin `password_hash` |
 | 15 | POST | `/api/admin/products` | `server.js:2077` | `requireAdmin` | Admin | — (cuerpo 8 MB) | Crea producto; si trae prompt, inicia modelo 3D |
 | 16 | DELETE | `/api/admin/products/:id` | `server.js:2181` | `requireAdmin` | Admin | — | Borra el producto |
@@ -112,10 +113,12 @@ Al pasar el tope responden **429** con un mensaje en español.
 | 20 | PUT | `/api/admin/products/:id/category` | `server.js:2293` | `requireAdmin` | Admin | — | Cambia la categoría (4 permitidas) |
 | 21 | PUT | `/api/admin/products/:id/stock` | `server.js:2321` | `requireAdmin` | Admin | — | Cambia el stock (entero ≥ 0) |
 | 22 | GET | `/api/products` | `server.js:2351` | público | Cualquiera | — | Catálogo activo con datos de sabor; si la base falla, catálogo del código |
-| 23 | POST | `/api/payments/process` | `server.js:2530` | sesión | `requireAuth` | `limitadorPagos` | Pago simulado + `registrar_venta` + correo |
+| 23 | POST | `/api/payments/process` | `server.js:2771` | sesión | `requireAuth` | `limitadorPagos` | Pago simulado + `registrar_venta` con `puntosUsar` (entero ≥ 0, opcional; `server.js:2805`, llamada en `:2839`) + correo |
 | 24 | POST | `/api/chatbot` | `server.js:2703` | público (token opcional) | Cualquiera; las herramientas dependen del rol del token | `limitadorChatbot` | Gelbot |
 | 25 | GET | `/api/admin/products/:id/model-3d` | `server.js:2712` | `requireAdmin` | Admin | — | Estado del modelo 3D; al terminar guarda `model_3d_url` |
 | 26 | POST | `/api/admin/products/:id/regenerate-3d` | `server.js:2778` | `requireAdmin` | Admin | — | Inicia una nueva tarea en Tripo 3D |
+| 27 | GET | `/api/points/rules` | `server.js:2981` | público | Cualquiera | — | Reglas de Super Points (`super_points_reglas()`: pesos por punto, valor del punto, niveles). Respuesta con `Cache-Control: public, max-age=3600` |
+| 28 | GET | `/api/me/points` | `server.js:2995` | `requireAuth` | Cualquier usuario con sesión; solo **sus** datos (el id sale del token) | — | Saldo, valor en pesos, nivel, puntos para el siguiente nivel, % máximo e historial paginado (`limit` 1–50, 20 por defecto; `offset`). Llama a `super_points_resumen`. Respuesta `private, no-store` |
 
 Rutas que **ya no existen**: `POST /api/orders` y `POST /api/sales` (`server.js:2023-2025`).
 
