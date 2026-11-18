@@ -36,12 +36,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const fileInputRef = useRef(null);
-  
-  // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE
-  if (!user?.id) {
-    return <Navigate to="/register" state={{ from: '/perfil' }} />;
-  }
-  
+
   // Edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user?.name || '');
@@ -207,6 +202,12 @@ const ProfilePage = ({ user, onUpdateUser }) => {
       setUpdating(false);
     }
   };
+
+  // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE.
+  // Va después de todos los hooks: React exige llamarlos siempre en el mismo orden.
+  if (!user?.id) {
+    return <Navigate to="/register" state={{ from: '/perfil' }} />;
+  }
 
   return (
     <div className="pt-[80px] pb-24 px-4 sm:px-6 min-h-screen">
