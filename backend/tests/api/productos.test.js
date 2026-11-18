@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, authAdmin } from '../helpers/cargarServidor.js';
+import { respuestaGlb, urlEnBucket } from '../helpers/modeloGlb.js';
 
 const fake = crearFakeSupabase();
 let app;
@@ -140,7 +141,8 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url) => ({
+      // El GLB se descarga de la URL de Tripo y se copia al bucket "modelos-3d".
+      vi.fn(async (url) => (String(url) === MODELO ? respuestaGlb() : {
         ok: true,
         json: async () =>
           String(url).endsWith('/task')
@@ -173,7 +175,8 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
 
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ model_3d_url: MODELO, model_3d_estado: 'listo' });
+    // Se guarda la URL permanente del bucket, nunca la de Tripo (vence).
+    expect(ups[0].payload).toEqual({ model_3d_url: urlEnBucket(id, 'T-1'), model_3d_estado: 'listo' });
     expect(fake.errores).toEqual([]);
     expect(res.body.estado).toBe('listo');
   });

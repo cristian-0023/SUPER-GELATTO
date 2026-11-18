@@ -107,13 +107,23 @@ erDiagram
 | Tabla | Para qué | Columnas clave y reglas | Referencia |
 |---|---|---|---|
 | `usuario` | Cuentas | `email` único; `password_hash` (bcrypt); `rol` texto (`cliente` / `admin`); `codigo_acceso` sin uso en el código | schema:4-16 |
-| `producto` | Catálogo | `precio` ≥ 0; `stock` entero ≥ 0, por defecto 50, **única fuente del stock**; `destacado` (por defecto `false`); `model_3d_url`; `estado` = activo | schema:39-55; migración:44-76 |
+| `producto` | Catálogo | `precio` ≥ 0; `stock` entero ≥ 0, por defecto 50, **única fuente del stock**; `destacado` (por defecto `false`); `model_3d_url` (URL del bucket `modelos-3d`); `estado` = activo | schema:39-55; migración:44-76 |
 | `venta` | Cabecera de cada venta | `estado` con CHECK de 9 valores (por defecto `Pendiente`); `total` ≥ 0 (desde Super Points: lo realmente pagado, después del descuento); `tipo_venta` `Presencial`/`Online`; `id_usuario` opcional (`on delete set null`); `puntos_usados` y `descuento_puntos` ≥ 0, por defecto 0; `cancelada_alguna_vez` (por defecto false): si alguna vez estuvo en `Cancelado` nunca gana Super Points | schema:57-71; migración:20-42; `20261111120000_super_points.sql:91-111` |
 | `detalle_venta` | Líneas de una venta | `precio_unitario` copiado de `producto.precio` al vender; borrar la venta borra su detalle (`cascade`); no se puede borrar un producto con ventas (`restrict`) | schema:73-82 |
 | `inventario` | Stock por sucursal (heredado) | `stock_disponible` ≥ 0; el servidor solo lo copia al editar un producto | schema:84-95; `server.js:2219-2225` |
 | `sucursal`, `empleado` | Tiendas físicas y personal | Ningún código de la app las escribe | schema:18-37 |
 | `super_points` | Libreta de Super Points | Solo la escribe la base (`registrar_venta`, `cambiar_estado_venta`); el saldo es la suma de `puntos_generados`. Ver la sección de abajo | schema:97-104; `20261111120000_super_points.sql:29-84` |
 | `admin_face_rekognition` | Enlace entre un rostro de AWS y un admin | `aws_face_id` único; borrar el usuario borra el enlace (`cascade`) | `backend/scripts/create-rekognition-table.sql:4-11` |
+
+### Storage: bucket `modelos-3d`
+
+Migración `20261118120000_bucket_modelos_3d.sql` (rollback en `supabase/rollbacks/`).
+
+- Público de lectura, `file_size_limit` 50 MB y solo `model/gltf-binary`.
+- Una sola política sobre `storage.objects`: `modelos_3d_lectura_publica` (SELECT). Sin INSERT, UPDATE ni DELETE para `anon` ni `authenticated`; el servidor sube y borra con `service_role`.
+- Ruta de cada archivo: `producto-<id>/<taskId>.glb` (inmutable: se sube con `cacheControl` de un año).
+- Regenerar no borra el modelo bueno: `model_3d_url` conserva el anterior mientras el estado es `generando` (la consulta lo devuelve como `urlAnterior`). Cuando el nuevo queda `listo`, el update reemplaza la URL y recién entonces se borra del bucket el archivo anterior de ese mismo producto.
+- Cuando Tripo termina, `producto.model_3d_estado` pasa a `listo` solo después de copiar el GLB. Si la copia falla por algo pasajero, sigue `generando` y se reintenta, hasta 10 minutos contados desde `model_3d_actualizado`. Pasa a `error` si el enlace de Tripo venció, si el modelo pesa más de 50 MB, si el enlace apunta a un host no permitido (solo https público, nunca IPs ni localhost; lista opcional `TRIPO_CDN_HOSTS`) o si se agotaron los 10 minutos.
 
 ### `super_points`: la libreta de puntos
 

@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const raizSupabase = resolve(aqui, '../../../supabase');
+// Misma URL que pone cargarServidor en SUPABASE_URL: las URLs públicas de Storage salen de ella.
+const URL_SUPABASE_FALSA = 'http://supabase.fake.local';
 
 export function cargarColumnas() {
   const columnas = {};
@@ -70,15 +72,19 @@ export function crearFakeSupabase() {
   const fake = {
     columnas,
     errores: [], // errores PGRST204 que el fake generó por columnas inexistentes
-    llamadas: [], // { tipo:'query', tabla, op, payload, filtros, modo } | { tipo:'rpc', nombre, args }
+    // { tipo:'query', tabla, op, payload, filtros, modo } | { tipo:'rpc', nombre, args }
+    // | { tipo:'storage', op:'upload', bucket, ruta, archivo, opciones } | { tipo:'storage', op:'remove', bucket, rutas }
+    llamadas: [],
     _respuestasQuery: [],
     _respuestasRpc: {},
+    _respuestasStorage: {},
 
     reiniciar() {
       fake.llamadas.length = 0;
       fake.errores.length = 0;
       fake._respuestasQuery.length = 0;
       fake._respuestasRpc = {};
+      fake._respuestasStorage = {};
     },
     // Respuesta fija (u función llamada => respuesta) para una operación:
     //   fake.responder('producto', 'update', { data: null, error: { message: '...' } })
@@ -94,6 +100,13 @@ export function crearFakeSupabase() {
     },
     rpcs(nombre) {
       return fake.llamadas.filter((l) => l.tipo === 'rpc' && (!nombre || l.nombre === nombre));
+    },
+    // Storage: respuesta fija (o función llamada => respuesta) para 'upload' o 'remove'.
+    responderStorage(op, respuesta) {
+      fake._respuestasStorage[op] = respuesta;
+    },
+    storage(op) {
+      return fake.llamadas.filter((l) => l.tipo === 'storage' && (!op || l.op === op));
     },
   };
 
@@ -170,7 +183,38 @@ export function crearFakeSupabase() {
     return b;
   }
 
+  // Storage falso con la forma de supabase-js v2: upload/remove devuelven { data, error } (sin lanzar);
+  // getPublicUrl devuelve { data: { publicUrl } } sin error. Por defecto todo sale bien.
+  function responderStorage(llamada, porDefecto) {
+    fake.llamadas.push(llamada);
+    const cfg = fake._respuestasStorage[llamada.op];
+    if (cfg === undefined) return Promise.resolve(porDefecto);
+    try {
+      return Promise.resolve(typeof cfg === 'function' ? cfg(llamada) : cfg);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+  const storage = {
+    from(bucket) {
+      return {
+        upload: (ruta, archivo, opciones) => responderStorage(
+          { tipo: 'storage', op: 'upload', bucket, ruta, archivo, opciones },
+          { data: { path: ruta }, error: null },
+        ),
+        remove: (rutas) => responderStorage(
+          { tipo: 'storage', op: 'remove', bucket, rutas },
+          { data: rutas.map((name) => ({ name })), error: null },
+        ),
+        getPublicUrl: (ruta) => ({
+          data: { publicUrl: encodeURI(`${URL_SUPABASE_FALSA}/storage/v1/object/public/${bucket}/${ruta.replace(/^\/+/, '')}`) },
+        }),
+      };
+    },
+  };
+
   fake.client = {
+    storage,
     from,
     rpc(nombre, args) {
       fake.llamadas.push({ tipo: 'rpc', nombre, args });

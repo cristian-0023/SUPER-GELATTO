@@ -46,10 +46,11 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //    El envío nunca sale a la red: con la opción `correo` nodemailer es falso.
 //  - tripoApiKey: valor de TRIPO_API_KEY (ficticio por defecto; '' = sin configurar). Las pruebas nunca
 //    llaman a Tripo de verdad: las que llegan a fetch lo reemplazan por uno falso.
+//  - tripoCdnHosts: valor de TRIPO_CDN_HOSTS (hosts de los que se descargan los modelos; '' = sin lista).
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
   simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000, limiteTripo = 100000,
-  tripoApiKey = 'tripo-llave-falsa-de-prueba', vercel = false, soloLlavePublica = false,
+  tripoApiKey = 'tripo-llave-falsa-de-prueba', tripoCdnHosts = '', vercel = false, soloLlavePublica = false,
   frontendUrl = '', smtp = false, esperaEnlaceMs = 0, maxEnlacesDia = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
   process.env.SUPABASE_URL = sinSupabase ? '' : 'http://supabase.fake.local';
@@ -64,6 +65,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
   process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
   process.env.TRIPO_API_KEY = tripoApiKey;
+  process.env.TRIPO_CDN_HOSTS = tripoCdnHosts;
   process.env.FRONTEND_URL = frontendUrl;
   process.env.SMTP_HOST = smtp ? 'smtp.prueba.local' : '';
   process.env.SMTP_USER = smtp ? 'tienda@prueba.local' : '';
