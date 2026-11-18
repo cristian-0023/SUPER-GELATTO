@@ -11,6 +11,7 @@ import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
 import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
+import { crearSondeoModelo3D } from '../utils/sondeoModelo3D';
 import { soloVentasCobradas } from '../utils/ingresos';
 import { armarCuerpoProducto, mapearProductoGuardado } from '../utils/editorProductos';
 import { useCart } from '../context/CartContext';
@@ -534,7 +535,7 @@ const AdminDashboard = ({ user, onLogout }) => {
 
     return () => {
       sondeo.detener();
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current?.detener();
     };
   }, [user, navigate]);
 
@@ -735,40 +736,25 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Polling para chequear si el modelo 3D está listo
-  const startPolling = (productId) => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    
-    let attempts = 0;
-    pollIntervalRef.current = setInterval(async () => {
-      attempts++;
-      if (attempts > 50) { // Timeout de 2.5 minutos
-        clearInterval(pollIntervalRef.current);
-        setGeneratingStatus('error');
-        return;
-      }
+  // Consulta del estado del modelo 3D de un producto (null si el servidor no respondió bien).
+  const consultarModelo3D = async (productId) => {
+    const res = await apiFetch(`/api/admin/products/${productId}/model-3d`);
+    return res.ok ? res.json() : null;
+  };
 
-      try {
-        const res = await apiFetch(`/api/admin/products/${productId}/model-3d`);
-        if (res.ok) {
-          const model = await res.json();
-          if (model) {
-            if (model.estado === 'listo') {
-              clearInterval(pollIntervalRef.current);
-              setGeneratedModel(model);
-              setGeneratingStatus('listo');
-              setNewProduct({ nombre: '', descripcion: '', precio: '', categoria: 'Clásico', prompt3d: '' });
-              fetchDashboardData();
-            } else if (model.estado === 'error') {
-              clearInterval(pollIntervalRef.current);
-              setGeneratingStatus('error');
-            }
-          }
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }, 3000);
+  // Sondeo para chequear si el modelo 3D está listo (3 s; 10 s mientras el servidor lo guarda)
+  const startPolling = (productId) => {
+    pollIntervalRef.current?.detener();
+    pollIntervalRef.current = crearSondeoModelo3D({
+      consultar: () => consultarModelo3D(productId),
+      alListo: (model) => {
+        setGeneratedModel(model);
+        setGeneratingStatus('listo');
+        setNewProduct({ nombre: '', descripcion: '', precio: '', categoria: 'Clásico', prompt3d: '' });
+        fetchDashboardData();
+      },
+      alError: () => setGeneratingStatus('error'),
+    });
   };
 
   // Abrir visor 3D para un producto del catálogo
@@ -810,30 +796,17 @@ const AdminDashboard = ({ user, onLogout }) => {
 
       const data = await res.json();
       if (res.ok) {
-        // Iniciar polling para este producto
-        let attempts = 0;
-        const interval = setInterval(async () => {
-          attempts++;
-          if (attempts > 50) {
-            clearInterval(interval);
-            setRegenStatus('error');
-            return;
-          }
-
-          const modelRes = await apiFetch(`/api/admin/products/${selectedProduct.id}/model-3d`);
-          if (modelRes.ok) {
-            const updatedModel = await modelRes.json();
-            if (updatedModel && updatedModel.estado === 'listo') {
-              clearInterval(interval);
-              setProductModel(updatedModel);
-              setRegenStatus('listo');
-              fetchDashboardData();
-            } else if (updatedModel && updatedModel.estado === 'error') {
-              clearInterval(interval);
-              setRegenStatus('error');
-            }
-          }
-        }, 3000);
+        // Iniciar sondeo para este producto
+        const productId = selectedProduct.id;
+        crearSondeoModelo3D({
+          consultar: () => consultarModelo3D(productId),
+          alListo: (updatedModel) => {
+            setProductModel(updatedModel);
+            setRegenStatus('listo');
+            fetchDashboardData();
+          },
+          alError: () => setRegenStatus('error'),
+        });
       } else {
         if (showToast) showToast(data.message || 'Error al iniciar regeneración.', 'error');
         setRegenStatus('error');
@@ -2101,9 +2074,13 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <Loader2 className="w-8 h-8 animate-spin text-gold-premium mb-2" />
                   <p className="text-xs uppercase tracking-widest font-light">Buscando archivo GLB...</p>
                 </div>
-              ) : productModel && productModel.estado === 'listo' ? (
+              ) : productModel && (productModel.estado === 'listo' || productModel.urlAnterior) ? (
                 <div className="space-y-6">
-                  <Model3DPreview url={productModel.glb_url} />
+                  {/* Mientras se genera uno nuevo (o si falló), se sigue mostrando el modelo anterior */}
+                  <Model3DPreview url={productModel.estado === 'listo' ? productModel.glb_url : productModel.urlAnterior} />
+                  {productModel.estado === 'generando' && (
+                    <p className="text-xs text-white/50">Se está generando un modelo nuevo; mientras tanto se muestra el anterior.</p>
+                  )}
 
                   {/* Regenerador Form */}
                   <div className="border-t border-white/5 pt-6">
