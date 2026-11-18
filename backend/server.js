@@ -949,6 +949,18 @@ function firmarToken(usuario, rol = usuario.rol) {
   );
 }
 
+// Columnas que bastan para armar una sesión (nunca password_hash).
+const COLUMNAS_SESION = 'id_usuario, nombre, email, rol';
+
+// Respuesta de sesión que comparten todos los inicios de sesión y el registro: token firmado y
+// datos públicos del usuario (nunca password_hash ni otras columnas internas).
+function sesionDe(usuario, rol = usuario.rol) {
+  return {
+    token: firmarToken(usuario, rol),
+    user: { id: usuario.id_usuario, id_usuario: usuario.id_usuario, name: usuario.nombre, email: usuario.email, rol }
+  };
+}
+
 // Verifica con el único secreto y solo HS256. Devuelve el contenido del token o null.
 function verifyTokenSafely(token) {
   if (typeof token !== 'string' || !token) return null;
@@ -1271,11 +1283,14 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
     const { data: newUser, error: registerError } = await supabase
       .from('usuario')
       .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'cliente' }])
-      .select().maybeSingle();
+      .select(COLUMNAS_SESION).maybeSingle();
 
     if (registerError) throw registerError;
 
-    return res.status(201).json({ message: 'Usuario registrado exitosamente.' });
+    // Queda con la sesión iniciada, igual que en el login (rol de la fila insertada: 'cliente').
+    // Si la base no devolvió la fila, se registra sin sesión y el frontend lo manda a /login.
+    const sesion = newUser ? sesionDe(newUser) : {};
+    return res.status(201).json({ message: 'Usuario registrado exitosamente.', ...sesion });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Error en el servidor.' });
@@ -1317,14 +1332,7 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
 
   // GENERAR TOKEN JWT FIRMADO (rol de la base: el registro con contraseña no verifica el correo,
   // así que aquí ADMIN_EMAILS no da permisos)
-  const token = firmarToken(user);
-
-  return res.status(200).json({
-    ok: true,
-    message: 'Inicio de sesión exitoso.',
-    token,
-    user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
-  });
+  return res.status(200).json({ ok: true, message: 'Inicio de sesión exitoso.', ...sesionDe(user) });
 });
 
 // ─── AWS Rekognition (Reconocimiento Facial Admin) ─────────────────
@@ -1455,14 +1463,7 @@ app.post('/api/admin/faceid/rekognition-login', limitadorLoginFacial, cuerpoGran
       return res.status(401).json(genericError);
     }
 
-    const token = firmarToken(user);
-
-    return res.status(200).json({
-      ok: true,
-      message: 'Inicio de sesión facial exitoso.',
-      token,
-      user: { id: user.id_usuario, id_usuario: user.id_usuario, name: user.nombre, email: user.email, rol: user.rol }
-    });
+    return res.status(200).json({ ok: true, message: 'Inicio de sesión facial exitoso.', ...sesionDe(user) });
   } catch (err) {
     console.error('❌ Error al autenticar por rostro en AWS Rekognition:', err);
     const errMessage = err.message || '';
@@ -1500,7 +1501,6 @@ app.post('/api/admin/faceid/rekognition-login', limitadorLoginFacial, cuerpoGran
 // El navegador manda el `credential` (ID token firmado por Google). Se verifica aquí con la librería
 // oficial; correo y nombre salen SOLO del token verificado (se ignora cualquier email/name/rol del cuerpo).
 const GOOGLE_CREDENTIAL_MAX = 8192;
-const COLUMNAS_SESION = 'id_usuario, nombre, email, rol';
 
 async function verificarCredencialGoogle(credential) {
   try {
@@ -1525,13 +1525,7 @@ async function buscarUsuarioPorEmail(email) {
 }
 
 function respuestaSesionGoogle(res, usuario, emailVerificado, mensaje) {
-  const rol = rolConCorreoVerificado(usuario, emailVerificado);
-  return res.status(200).json({
-    ok: true,
-    message: mensaje,
-    token: firmarToken(usuario, rol),
-    user: { id: usuario.id_usuario, id_usuario: usuario.id_usuario, name: usuario.nombre, email: usuario.email, rol }
-  });
+  return res.status(200).json({ ok: true, message: mensaje, ...sesionDe(usuario, rolConCorreoVerificado(usuario, emailVerificado)) });
 }
 
 app.post('/api/google-login', limitadorGoogleLogin, async (req, res) => {
