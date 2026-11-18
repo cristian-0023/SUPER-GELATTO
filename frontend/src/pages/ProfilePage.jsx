@@ -4,33 +4,9 @@ import { Link, Navigate } from 'react-router-dom';
 import { getToken } from '../utils/api';
 import { actualizarUsuarioGuardado } from '../utils/sesion';
 import { crearSondeo } from '../utils/sondeo';
-import { validarFotoPerfil, medidasAchicadas, CALIDAD_FOTO, TIPO_SALIDA_FOTO } from '../utils/fotoPerfil';
+import { validarFotoPerfil, achicarFoto } from '../utils/fotoPerfil';
 import SuperPointsCard from '../components/SuperPointsCard';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
-
-// Dibuja la foto en un canvas a 256x256 como máximo (misma proporción) y la devuelve como dataURL JPEG.
-// Fondo blanco: un PNG transparente no queda negro al pasarlo a JPEG.
-const achicarFoto = (file) => new Promise((resolve, reject) => {
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    URL.revokeObjectURL(url);
-    const medidas = medidasAchicadas(img.naturalWidth, img.naturalHeight);
-    const ctx = medidas && document.createElement('canvas').getContext('2d');
-    if (!ctx) return reject(new Error('No se pudo dibujar la imagen.'));
-    ctx.canvas.width = medidas.ancho;
-    ctx.canvas.height = medidas.alto;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, medidas.ancho, medidas.alto);
-    ctx.drawImage(img, 0, 0, medidas.ancho, medidas.alto);
-    resolve(ctx.canvas.toDataURL(TIPO_SALIDA_FOTO, CALIDAD_FOTO));
-  };
-  img.onerror = () => {
-    URL.revokeObjectURL(url);
-    reject(new Error('Imagen no válida.'));
-  };
-  img.src = url;
-});
 
 const ProfilePage = ({ user, onUpdateUser }) => {
   const [orders, setOrders] = useState([]);

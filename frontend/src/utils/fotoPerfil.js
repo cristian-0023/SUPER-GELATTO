@@ -30,3 +30,27 @@ export function medidasAchicadas(ancho, alto, ladoMaximo = LADO_MAXIMO_FOTO) {
     alto: Math.max(1, Math.round(alto * escala)),
   };
 }
+
+// Dibuja la foto en un canvas a 256x256 como máximo (misma proporción) y la devuelve como dataURL JPEG.
+// Fondo blanco: un PNG transparente no queda negro al pasarlo a JPEG. Solo funciona en el navegador.
+export const achicarFoto = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const medidas = medidasAchicadas(img.naturalWidth, img.naturalHeight);
+    const ctx = medidas && document.createElement('canvas').getContext('2d');
+    if (!ctx) return reject(new Error('No se pudo dibujar la imagen.'));
+    ctx.canvas.width = medidas.ancho;
+    ctx.canvas.height = medidas.alto;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, medidas.ancho, medidas.alto);
+    ctx.drawImage(img, 0, 0, medidas.ancho, medidas.alto);
+    resolve(ctx.canvas.toDataURL(TIPO_SALIDA_FOTO, CALIDAD_FOTO));
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    reject(new Error('Imagen no válida.'));
+  };
+  img.src = url;
+});
