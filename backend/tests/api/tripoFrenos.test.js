@@ -12,6 +12,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, authAdmin, JWT_SECRET_PRUEBA } from '../helpers/cargarServidor.js';
+import { respuestaGlb, urlEnBucket } from '../helpers/modeloGlb.js';
 
 const MODELO = 'https://cdn.tripo.test/modelo.glb';
 const ERROR_BASE = { data: null, error: { code: '42501', message: 'permission denied for table producto' } };
@@ -33,6 +34,7 @@ beforeEach(() => {
   respuestaCrear = { ok: true, body: { code: 0, data: { task_id: 'T-NUEVA' } } };
   respuestaTarea = { ok: true, body: { code: 0, data: { status: 'success', progress: 100, output: { model: MODELO } } } };
   fetchFalso = vi.fn(async (url) => {
+    if (String(url) === MODELO) return respuestaGlb(); // descarga del GLB para copiarlo al bucket
     const r = String(url).endsWith('/task') ? respuestaCrear : respuestaTarea;
     return { ok: r.ok, status: r.ok ? 200 : 500, json: async () => r.body };
   });
@@ -198,7 +200,7 @@ describe('3, 4 y 5. consultar una tarea', () => {
   it('3. "listo" solo se guarda si la fila sigue con la misma tarea', async () => {
     await consultar();
     const up = updates()[0];
-    expect(up.payload).toEqual({ model_3d_url: MODELO, model_3d_estado: 'listo' });
+    expect(up.payload).toEqual({ model_3d_url: urlEnBucket(5, 'T-1'), model_3d_estado: 'listo' });
     expect(up.filtros).toContainEqual(['eq', 'model_3d_task_id', 'T-1']);
   });
 
@@ -241,7 +243,7 @@ describe('3, 4 y 5. consultar una tarea', () => {
   it('4. reconoce output.model_url (nombre actual en la documentación de Tripo)', async () => {
     respuestaTarea = { ok: true, body: { code: 0, data: { status: 'success', progress: 100, output: { model_url: MODELO } } } };
     const res = await consultar();
-    expect(res.body).toMatchObject({ estado: 'listo', url: MODELO });
+    expect(res.body).toMatchObject({ estado: 'listo', url: urlEnBucket(5, 'T-1') });
   });
 
   it.each([

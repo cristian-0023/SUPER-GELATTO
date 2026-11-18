@@ -11,6 +11,7 @@ import request from 'supertest';
 import fs from 'node:fs';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, authAdmin } from '../helpers/cargarServidor.js';
+import { respuestaGlb, urlEnBucket } from '../helpers/modeloGlb.js';
 
 const ERROR_BASE = { data: null, error: { code: '42501', message: 'permission denied for table producto' } };
 const MODELO = 'https://tripo.test/modelo.glb';
@@ -48,7 +49,8 @@ beforeEach(() => {
   fake.reiniciar();
   escrituras.mockClear();
   correos.length = 0;
-  fetchFalso = vi.fn(async (url) => ({
+  // La URL del modelo entrega un GLB: el servidor lo copia al bucket "modelos-3d".
+  fetchFalso = vi.fn(async (url) => (String(url) === MODELO ? respuestaGlb() : {
     ok: true,
     json: async () => (String(url).endsWith('/task')
       ? { code: 0, data: { task_id: 'T-NUEVA' } }
@@ -237,16 +239,16 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
     expect(llamadasATripo()).toHaveLength(0);
   });
 
-  it('consultar: tarea generando que Tripo terminó -> guarda URL y estado "listo" en la base', async () => {
+  it('consultar: tarea generando que Tripo terminó -> guarda URL (del bucket propio) y estado "listo" en la base', async () => {
     fake.responder('producto', 'select', { data: { id_producto: 5, model_3d_task_id: 'T-1', model_3d_estado: 'generando', model_3d_url: null, model_3d_prompt: 'copa' }, error: null });
 
     const res = await admin('get', '/api/admin/products/5/model-3d');
 
-    expect(res.body).toMatchObject({ estado: 'listo', url: MODELO });
+    expect(res.body).toMatchObject({ estado: 'listo', url: urlEnBucket(5, 'T-1') });
     expect(llamadasATripo()[0][0]).toContain('/task/T-1');
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(1);
-    expect(ups[0].payload).toEqual({ model_3d_url: MODELO, model_3d_estado: 'listo' });
+    expect(ups[0].payload).toEqual({ model_3d_url: urlEnBucket(5, 'T-1'), model_3d_estado: 'listo' });
   });
 
   it('consultar: tarea que falló en Tripo -> guarda estado "error" en la base', async () => {

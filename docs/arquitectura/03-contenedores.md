@@ -23,6 +23,7 @@ Estos nombres se usan **igual** en todos los diagramas y figuras de esta carpeta
 | **API Express** | Servidor con las 26 rutas | Cocina | Vercel | Node.js, Express 4 (CommonJS), `backend/server.js` |
 | **Gelbot** | Asistente con IA (módulo de la API) | Ayudante de la cocina que atiende por chat | Dentro de la API Express | `backend/chatbot.js`, groq-sdk |
 | **Base de datos** | Postgres con las tablas del negocio | Bodega con su libreta | Supabase | Postgres, supabase-js con llave `service_role` |
+| **Bucket `modelos-3d`** | Archivos GLB de los modelos 3D que genera Tripo | Vitrina donde se guardan las maquetas terminadas | Supabase Storage | Lectura pública; solo el servidor (`service_role`) sube y borra. `backend/modelos3dStorage.js` |
 | **registrar_venta** | Función de la base que cobra y anota la venta | Caja registradora | Dentro de la Base de datos | PL/pgSQL, `security invoker` |
 | **Guardia (token de sesión)** | Revisión del token en cada petición (middleware de la API) | Guardia que pide carnet | Dentro de la API Express | JWT |
 | **Google Sign-In** | Identidad con Google | Oficina que emite carnets | Externo | OAuth / ID token |
@@ -86,7 +87,7 @@ flowchart LR
 | API Express | Vercel | `npm start` (`node server.js`). En Vercel el código se considera **producción** (`server.js:4`) y: no arranca sin Supabase (`server.js:495-499`), no arranca sin `JWT_SECRET` de 32+ caracteres (`server.js:504-514`), confía en 1 proxy para leer la IP real (`server.js:568-570`). |
 | Base de datos | Supabase | Esquema base en `supabase/schema_base_2026-10-25.sql` y cambios en `supabase/migrations/` (con su `rollbacks/`). Las migraciones se ejecutan a mano en el editor SQL de Supabase. |
 
-> **Estado: la base es la única fuente de verdad.** Productos destacados, ventas y tareas de Tripo 3D viven solo en la base (antes había archivos JSON en el disco del servidor, que en Vercel se perdían). Ojo: los códigos para recuperar contraseña viven solo en memoria (`server.js:624`) y se pierden al reiniciar.
+> **Estado: la base es la única fuente de verdad.** Productos destacados, ventas y tareas de Tripo 3D viven solo en la base (antes había archivos JSON en el disco del servidor, que en Vercel se perdían). Los modelos 3D terminados se copian del enlace temporal de Tripo al bucket `modelos-3d` (máximo 60 s de descarga y 50 MB) y `producto.model_3d_url` guarda la URL permanente del bucket. Ojo: los códigos para recuperar contraseña viven solo en memoria (`server.js:624`) y se pierden al reiniciar.
 
 ### Variables de entorno (solo nombres)
 

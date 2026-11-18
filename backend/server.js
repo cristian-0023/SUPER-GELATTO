@@ -20,6 +20,7 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
 const { handleChatbotRequest } = require('./chatbot');
+const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
 
 
 const {
@@ -106,6 +107,11 @@ const EXPIRA_RESERVA_3D_MS = 15 * 60 * 1000;
 // Estados de Tripo en los que la tarea sigue viva. 'sin_respuesta' es nuestro: Tripo no contestó (reintentar).
 const ESTADOS_TRIPO_EN_CURSO = ['queued', 'running', 'sin_respuesta'];
 const MENSAJE_TRIPO_FALLO = 'No se pudo iniciar la generación del modelo 3D. Inténtalo más tarde.';
+// Resultados de copiar el modelo terminado al bucket (modelos3dStorage.js) que obligan a marcar 'error'.
+const MENSAJES_COPIA_IMPOSIBLE = {
+  vencido: 'El modelo ya no está disponible en Tripo; regenerá el modelo.',
+  muy_grande: 'El modelo es demasiado grande para guardarlo.'
+};
 
 // Prompt 3D que llega del navegador: { prompt } (null si no se pidió modelo) o { error } para responder 400.
 function validarPrompt3D(valor, { obligatorio = false } = {}) {
@@ -138,7 +144,8 @@ function urlModeloValida(url) {
 //  3. Guarda el id de tarea solo si la reserva sigue vigente.
 // Devuelve { resultado: 'ok', taskId } | { resultado: 'ocupado' } | { resultado: 'error_tripo' }
 //        | { resultado: 'error_base', error }.
-async function iniciarTareaModelo3D(idProducto, promptLimpio) {
+// urlAnterior: el modelo que tenía el producto; si estaba en nuestro bucket, se borra tras ganar la reserva.
+async function iniciarTareaModelo3D(idProducto, promptLimpio, { urlAnterior = null } = {}) {
   const ahora = Date.now();
   const vence = new Date(ahora - EXPIRA_RESERVA_3D_MS).toISOString();
   const { data: reservado, error: reservaErr } = await supabase.from('producto')
@@ -156,6 +163,8 @@ async function iniciarTareaModelo3D(idProducto, promptLimpio) {
     .maybeSingle();
   if (reservaErr) return { resultado: 'error_base', error: reservaErr };
   if (!reservado) return { resultado: 'ocupado' };
+  // La reserva ya dejó model_3d_url vacío: el archivo anterior del bucket queda sin uso (nunca lanza error).
+  await borrarModeloAnterior({ supabase, url: urlAnterior });
 
   const reservaVigente = (consulta) => consulta
     .eq('id_producto', idProducto)
@@ -3185,15 +3194,27 @@ app.get('/api/admin/products/:id/model-3d', requireAdmin, async (req, res) => {
       const mismaTarea = (consulta) => consulta.eq('id_producto', prodId).eq('model_3d_task_id', tarea);
 
       if (taskInfo.status === 'success' && urlModeloValida(taskInfo.modelUrl)) {
-        // Primero se guarda en la base: si falla, el estado sigue "generando" y se reintenta en la próxima consulta.
+        // El enlace de Tripo vence: primero se copia el GLB a nuestro bucket y se guarda ESA URL.
+        const copia = await copiarModeloATienda({ supabase, idProducto: prodId, taskId: tarea, urlTripo: taskInfo.modelUrl });
+        if (!copia.ok && MENSAJES_COPIA_IMPOSIBLE[copia.motivo]) {
+          const { error: dbErr } = await mismaTarea(supabase.from('producto').update({ model_3d_estado: 'error' }));
+          if (falloSupabase(res, dbErr, 'No se pudo guardar el estado del modelo 3D.')) return;
+          return res.status(200).json({ estado: 'error', message: MENSAJES_COPIA_IMPOSIBLE[copia.motivo] });
+        }
+        if (!copia.ok) {
+          // Falla pasajera (red, Tripo entregó otra cosa, Storage): sigue "generando" y se reintenta en la próxima consulta.
+          return res.status(200).json({ estado: 'generando', progress: 100, message: 'Guardando el modelo…' });
+        }
+
+        // Si guardar falla, el estado sigue "generando" y se reintenta (la subida usa upsert: misma ruta).
         const { error: dbErr } = await mismaTarea(supabase.from('producto')
-          .update({ model_3d_url: taskInfo.modelUrl, model_3d_estado: 'listo' }));
+          .update({ model_3d_url: copia.url, model_3d_estado: 'listo' }));
         if (falloSupabase(res, dbErr, 'No se pudo guardar el modelo 3D del producto.')) return;
 
         return res.status(200).json({
           estado: 'listo',
-          url: taskInfo.modelUrl,
-          glb_url: taskInfo.modelUrl,
+          url: copia.url,
+          glb_url: copia.url,
           prompt: fila.model_3d_prompt
         });
       }
@@ -3234,13 +3255,13 @@ app.post('/api/admin/products/:id/regenerate-3d', requireAdmin, limitadorTripo, 
   try {
     // El producto debe existir antes de gastar una generación en Tripo.
     const { data: existe, error: leerErr } = await supabase
-      .from('producto').select('id_producto').eq('id_producto', prodId).maybeSingle();
+      .from('producto').select('id_producto, model_3d_url').eq('id_producto', prodId).maybeSingle();
     if (falloSupabase(res, leerErr, 'Error al iniciar la generación del modelo 3D.')) return;
     if (!existe) {
       return res.status(404).json({ ok: false, message: 'El producto no existe.' });
     }
 
-    const inicio = await iniciarTareaModelo3D(prodId, promptLimpio);
+    const inicio = await iniciarTareaModelo3D(prodId, promptLimpio, { urlAnterior: existe.model_3d_url });
     if (inicio.resultado === 'ocupado') {
       return res.status(409).json({ ok: false, message: 'Este producto ya tiene un modelo 3D generándose. Espera a que termine.' });
     }
