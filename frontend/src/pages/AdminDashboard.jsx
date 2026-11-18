@@ -14,6 +14,7 @@ import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/
 import { crearSondeoModelo3D } from '../utils/sondeoModelo3D';
 import { soloVentasCobradas } from '../utils/ingresos';
 import { armarCuerpoProducto, mapearProductoGuardado, armarCuerpoAlta, productoCreadoParaPanel, IMAGENES_PREDETERMINADAS } from '../utils/editorProductos';
+import { leerEntero, decidirTrasGuardar, cambiarProducto } from '../utils/edicionRapida';
 import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
@@ -254,25 +255,41 @@ const AdminDashboard = ({ user, onLogout }) => {
   // --- Update Category State ---
   const [updatingCategory, setUpdatingCategory] = useState(null);
 
+  // Después de un cambio optimista en la tabla: si el servidor no lo guardó, se vuelve al valor anterior
+  // y se avisa (con su mensaje); si la sesión venció (401), se pide verificar de nuevo.
+  const resolverCambioRapido = async (res, productId, anterior, mensajeError) => {
+    const decision = decidirTrasGuardar(res);
+    if (decision === 'ok') {
+      avisarProductosActualizados();
+      return;
+    }
+    setDashboardData(prev => ({ ...prev, products: cambiarProducto(prev.products, productId, anterior) }));
+    if (decision === 'sesion') {
+      setIsQrVerified(false);
+      return;
+    }
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (showToast) showToast(data.message || mensajeError, 'error');
+  };
+
   const handleUpdateCategory = async (productId, newCategory) => {
+    const producto = (dashboardData.products || []).find(p => String(p.id) === String(productId));
+    const anterior = { categoria: producto ? producto.categoria : newCategory };
     setUpdatingCategory(productId);
     // Optimistic update
-    setDashboardData(prev => ({
-      ...prev,
-      products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, categoria: newCategory } : p)
-    }));
+    setDashboardData(prev => ({ ...prev, products: cambiarProducto(prev.products, productId, { categoria: newCategory }) }));
+    let res = null;
     try {
-      const res = await apiFetch(`/api/admin/products/${productId}/category`, {
+      res = await apiFetch(`/api/admin/products/${productId}/category`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoria: newCategory })
       });
-      if (res.ok) avisarProductosActualizados();
     } catch (err) {
       console.error('Error actualizando categoría:', err);
-    } finally {
-      setUpdatingCategory(null);
     }
+    await resolverCambioRapido(res, productId, anterior, res ? 'Error al actualizar la categoría.' : 'Error de conexión al actualizar la categoría.');
+    setUpdatingCategory(null);
   };
 
   // --- Update Price State ---
@@ -284,9 +301,10 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [updatingStock, setUpdatingStock] = useState(null);
 
   const handleSaveStock = async (productId, newStockValue) => {
-    const numStock = parseInt(newStockValue, 10);
-    if (isNaN(numStock) || numStock < 0) {
-      if (showToast) showToast('El stock disponible debe ser un número entero mayor o igual a 0.', 'error');
+    // Sin truncar: 2.5 no se convierte en 2; si no es un entero válido no se llama al servidor.
+    const { valor: numStock, error: errorStock } = leerEntero(newStockValue, 0);
+    if (errorStock) {
+      if (showToast) showToast(errorStock, 'error');
       setEditingStock(null);
       return;
     }
@@ -357,27 +375,31 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   const handleSavePrice = async (productId) => {
     if (!editingPrice || String(editingPrice.id) !== String(productId)) return;
-    const newPrice = parseInt(editingPrice.value, 10);
-    if (!newPrice || newPrice <= 0) { setEditingPrice(null); return; }
+    // Sin truncar: 1.5 no se convierte en 1; si no es un entero válido no se llama al servidor.
+    const { valor: newPrice, error: errorPrecio } = leerEntero(editingPrice.value, 1);
+    if (errorPrecio) {
+      if (showToast) showToast(errorPrecio, 'error');
+      setEditingPrice(null);
+      return;
+    }
+    const producto = (dashboardData.products || []).find(p => String(p.id) === String(productId));
+    const anterior = producto ? { precio: producto.precio, price: producto.price } : {};
     setUpdatingPrice(productId);
     // Optimistic update
-    setDashboardData(prev => ({
-      ...prev,
-      products: prev.products.map(p => String(p.id) === String(productId) ? { ...p, precio: newPrice, price: newPrice } : p)
-    }));
+    setDashboardData(prev => ({ ...prev, products: cambiarProducto(prev.products, productId, { precio: newPrice, price: newPrice }) }));
     setEditingPrice(null);
+    let res = null;
     try {
-      const res = await apiFetch(`/api/admin/products/${productId}/price`, {
+      res = await apiFetch(`/api/admin/products/${productId}/price`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ precio: newPrice })
       });
-      if (res.ok) avisarProductosActualizados();
     } catch (err) {
       console.error('Error actualizando precio:', err);
-    } finally {
-      setUpdatingPrice(null);
     }
+    await resolverCambioRapido(res, productId, anterior, res ? 'Error al actualizar el precio.' : 'Error de conexión al actualizar el precio.');
+    setUpdatingPrice(null);
   };
 
   const handleCreateNewProduct = async (e) => {
