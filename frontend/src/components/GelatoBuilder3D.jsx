@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
 import { apiFetch } from '../utils/api';
+import { modelosAPrecargar } from '../utils/precargaModelos';
 
 // Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
@@ -89,6 +90,20 @@ const Loader = () => (
         <span className="text-white font-bold tracking-[0.2em] uppercase text-[10px]">Cocinando...</span>
         <span className="text-white/40 text-[8px] uppercase tracking-widest mt-1">Arte en proceso</span>
       </div>
+    </div>
+  </Html>
+);
+
+/* ─── Indicador pequeño mientras baja un sabor o topping elegido ─── */
+const CargandoPieza = ({ position = [0, 0, 0], texto }) => (
+  <Html center position={position}>
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center gap-2 whitespace-nowrap bg-background-dark/80 backdrop-blur-xl px-3 py-1.5 rounded-full border border-white/10 shadow-lg"
+    >
+      <div className="w-3.5 h-3.5 border-2 border-gold-premium/20 border-t-gold-premium rounded-full animate-spin motion-reduce:animate-none" />
+      <span className="text-white/80 font-bold tracking-[0.2em] uppercase text-[9px]">{texto}</span>
     </div>
   </Html>
 );
@@ -181,7 +196,7 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
             : `${BASE_PATH}/${scoopData.file || 'scoop_vanilla.glb'}`;
 
           return (
-            <Suspense key={`scoop-${index}-${scoopId}`} fallback={null}>
+            <Suspense key={`scoop-${index}-${scoopId}`} fallback={<CargandoPieza position={[0, y, 0]} texto={`Cargando ${scoopData.name || 'sabor'}…`} />}>
               <PartModel
                 url={modelUrl}
                 scale={scoopData.scale || 2.0}
@@ -198,7 +213,7 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
           if (!toppingData) return null;
           const transform = TOPPING_TRANSFORMS[index] || { pos: [0, 0, 0], rot: [0, 0, 0] };
           return (
-            <Suspense key={`topping-${index}-${toppingId}`} fallback={null}>
+            <Suspense key={`topping-${index}-${toppingId}`} fallback={<CargandoPieza position={[transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]]} texto={`Cargando ${toppingData.name}…`} />}>
               <PartModel url={`${BASE_PATH}/${toppingData.file}`} scale={2.0} position={[transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]]} rotation={transform.rot} />
             </Suspense>
           );
@@ -600,9 +615,10 @@ const GelatoBuilder3D = ({ user }) => {
   );
 };
 
-// ─── Preload assets to avoid popping ────────────────────────
-[...containers, ...DEFAULT_SCOOPS, ...toppingsData].forEach(item => {
-  useGLTF.preload(`${BASE_PATH}/${item.file}`);
+// ─── Precarga: solo la base que se ve por defecto ───────────
+// El resto de los modelos se baja cuando el cliente lo elige (antes se precargaban los 17).
+modelosAPrecargar(containers, 'cone').forEach((file) => {
+  useGLTF.preload(`${BASE_PATH}/${file}`);
 });
 
 export default GelatoBuilder3D;
