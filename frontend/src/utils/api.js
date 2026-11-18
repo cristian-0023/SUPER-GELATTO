@@ -6,6 +6,8 @@
  * preventing stale/expired tokens from leaving the user in a broken state.
  */
 
+import { borrarSesion } from './sesion';
+
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 /**
@@ -16,24 +18,11 @@ export function getToken() {
 }
 
 /**
- * Persist the JWT token returned by the backend.
- */
-export function setToken(token) {
-  if (token) {
-    localStorage.setItem('superGelatto_token', token);
-    sessionStorage.setItem('superGelatto_token', token);
-  }
-}
-
-/**
  * Remove session data (token + user) and redirect to the login page.
  * Called automatically on 401 responses.
  */
 export function clearSessionAndRedirect() {
-  localStorage.removeItem('superGelatto_token');
-  localStorage.removeItem('superGelatto_user');
-  sessionStorage.removeItem('superGelatto_token');
-  sessionStorage.removeItem('superGelatto_user');
+  borrarSesion();
   // Use window.location so it works outside React component tree too
   window.location.href = '/login';
 }

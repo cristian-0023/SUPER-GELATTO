@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { guardarSesion } from '../utils/sesion';
 import '../styles/Auth.css';
@@ -14,6 +14,9 @@ function Register({ onLogin }) {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  // Espera antes de ir a /login: se cancela si la pantalla se cierra antes.
+  const esperaLogin = useRef(null);
+  useEffect(() => () => clearTimeout(esperaLogin.current), []);
 
   const handleKeyDownNoSpaces = (e) => {
     if (e.key === ' ' || e.keyCode === 32) {
@@ -124,17 +127,15 @@ function Register({ onLogin }) {
 
       // Con token, queda con la sesión iniciada (igual que el login) y entra a la tienda.
       // Sin token (la base no devolvió la cuenta), sigue como antes: a iniciar sesión.
-      if (guardarSesion(data) && data.user) {
+      if (guardarSesion(data)) {
         setSuccess('¡Cuenta creada! Bienvenido/a a Super Gelatto...');
-        setTimeout(() => {
-          onLogin(data.user);
-          navigate('/');
-        }, 1500);
+        onLogin(data.user);
+        navigate('/');
         return;
       }
 
       setSuccess('¡Registro exitoso! Redirigiendo al login...');
-      setTimeout(() => {
+      esperaLogin.current = setTimeout(() => {
         navigate('/login');
       }, 2000);
     } catch (err) {

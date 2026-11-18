@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, Navigate } from 'react-router-dom';
 import { getToken } from '../utils/api';
+import { actualizarUsuarioGuardado } from '../utils/sesion';
 import { crearSondeo } from '../utils/sondeo';
 import SuperPointsCard from '../components/SuperPointsCard';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
@@ -39,7 +40,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
       const dataUrl = reader.result;
       setPicture(dataUrl);
       const updatedUserObj = { ...user, picture: dataUrl, avatar: dataUrl };
-      sessionStorage.setItem('superGelatto_user', JSON.stringify(updatedUserObj));
+      actualizarUsuarioGuardado(updatedUserObj);
       if (onUpdateUser) {
         onUpdateUser(updatedUserObj);
       }

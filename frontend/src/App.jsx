@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
 import { SuperPointsProvider } from './context/SuperPointsContext';
+import { actualizarUsuarioGuardado, borrarSesion, leerUsuarioGuardado } from './utils/sesion';
 import './index.css';
 
 // Lazy loading de páginas y componentes pesados
@@ -55,30 +56,21 @@ const AdminRoute = ({ children, user, onLogout }) => {
 };
 
 function App() {
-  const [user, setUser] = React.useState(() => {
-    const saved = localStorage.getItem('superGelatto_user') || sessionStorage.getItem('superGelatto_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  // Solo si el token guardado sigue vigente (24 h); si venció, se borra y se pide iniciar sesión.
+  const [user, setUser] = React.useState(() => leerUsuarioGuardado());
 
   const handleLogin = React.useCallback((userData) => {
     setUser(prev => {
       const updated = prev ? { ...prev, ...userData } : userData;
-      if (updated.rol === 'admin') {
-        localStorage.setItem('superGelatto_user', JSON.stringify(updated));
-      }
-      sessionStorage.setItem('superGelatto_user', JSON.stringify(updated));
+      // Igual para admin y cliente: el usuario queda en los dos almacenes (la sesión dura lo que el token).
+      actualizarUsuarioGuardado(updated);
       return updated;
     });
   }, []);
 
   const handleLogout = React.useCallback(() => {
     setUser(null);
-    localStorage.removeItem('superGelatto_user');
-    localStorage.removeItem('superGelatto_token');
-    sessionStorage.removeItem('superGelatto_user');
-    sessionStorage.removeItem('superGelatto_token');
-    sessionStorage.removeItem('superGelatto_face_verified');
-    sessionStorage.removeItem('superGelatto_face_verified_at');
+    borrarSesion();
   }, []);
 
   React.useEffect(() => {

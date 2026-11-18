@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { setToken } from '../utils/api';
 import { guardarSesion } from '../utils/sesion';
 import CapturaFacial from '../components/CapturaFacial';
 import '../styles/Auth.css';
@@ -118,7 +117,7 @@ function Login({ onLogin }) {
         return;
       }
 
-      if (data.token) setToken(data.token);
+      guardarSesion(data);
       onLogin(data.user);
       navigate(data.user.rol === 'admin' ? '/admin' : '/');
     } catch (err) {
