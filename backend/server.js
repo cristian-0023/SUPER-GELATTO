@@ -1275,8 +1275,11 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
     return res.status(403).json({ ok: false, message: 'No se puede registrar con ese correo.' });
   }
 
-  // Verificar si el usuario ya existe
-  const { data: existingUser } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
+  const errorRegistro = 'No se pudo completar el registro. Inténtalo más tarde.';
+
+  // Verificar si el usuario ya existe (si la base falla, no se intenta insertar).
+  const { data: existingUser, error: errorBusqueda } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
+  if (falloSupabase(res, errorBusqueda, errorRegistro)) return;
   if (existingUser) return res.status(409).json({ message: 'El email ya está registrado.' });
 
   try {
@@ -1290,15 +1293,14 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
 
     // Dos registros a la vez con el mismo correo: el segundo choca con el candado único de la base.
     if (registerError?.code === '23505') return res.status(409).json({ message: 'El email ya está registrado.' });
-    if (registerError) throw registerError;
+    if (falloSupabase(res, registerError, errorRegistro)) return;
 
     // Queda con la sesión iniciada, igual que en el login (rol de la fila insertada: 'cliente').
     // Si la base no devolvió la fila, se registra sin sesión y el frontend lo manda a /login.
     const sesion = newUser ? sesionDe(newUser) : {};
     return res.status(201).json({ message: 'Usuario registrado exitosamente.', ...sesion });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Error en el servidor.' });
+    falloSupabase(res, error || new Error('error desconocido'), errorRegistro);
   }
 });
 
