@@ -121,8 +121,9 @@ Migración `20261118120000_bucket_modelos_3d.sql` (rollback en `supabase/rollbac
 
 - Público de lectura, `file_size_limit` 50 MB y solo `model/gltf-binary`.
 - Una sola política sobre `storage.objects`: `modelos_3d_lectura_publica` (SELECT). Sin INSERT, UPDATE ni DELETE para `anon` ni `authenticated`; el servidor sube y borra con `service_role`.
-- Ruta de cada archivo: `producto-<id>/<taskId>.glb`. Al regenerar, el servidor borra el archivo anterior del producto.
-- Cuando Tripo termina, `producto.model_3d_estado` pasa a `listo` solo después de copiar el GLB; si la copia falla por algo pasajero, sigue `generando` y se reintenta; si el enlace de Tripo venció o el modelo pesa más de 50 MB, pasa a `error`.
+- Ruta de cada archivo: `producto-<id>/<taskId>.glb` (inmutable: se sube con `cacheControl` de un año).
+- Regenerar no borra el modelo bueno: `model_3d_url` conserva el anterior mientras el estado es `generando` (la consulta lo devuelve como `urlAnterior`). Cuando el nuevo queda `listo`, el update reemplaza la URL y recién entonces se borra del bucket el archivo anterior de ese mismo producto.
+- Cuando Tripo termina, `producto.model_3d_estado` pasa a `listo` solo después de copiar el GLB. Si la copia falla por algo pasajero, sigue `generando` y se reintenta, hasta 10 minutos contados desde `model_3d_actualizado`. Pasa a `error` si el enlace de Tripo venció, si el modelo pesa más de 50 MB, si el enlace apunta a un host no permitido (solo https público, nunca IPs ni localhost; lista opcional `TRIPO_CDN_HOSTS`) o si se agotaron los 10 minutos.
 
 ### `super_points`: la libreta de puntos
 

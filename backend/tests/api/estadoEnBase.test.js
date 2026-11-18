@@ -154,7 +154,9 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
     expect(res.body.model).toEqual({ taskId: 'T-NUEVA', estado: 'generando' });
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(2);
-    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'cono de helado', model_3d_url: null });
+    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'cono de helado' });
+    // La reserva no borra el modelo anterior: model_3d_url se reemplaza recién cuando el nuevo queda "listo".
+    expect('model_3d_url' in ups[0].payload).toBe(false);
     expect(ups[1].payload).toEqual({ model_3d_task_id: 'T-NUEVA' });
     for (const up of ups) expect(up.filtros).toContainEqual(['eq', 'id_producto', res.body.product.id]);
     expect(fake.errores).toEqual([]);
@@ -185,7 +187,9 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
     expect(res.body).toMatchObject({ ok: true, taskId: 'T-NUEVA', productId: 5 });
     const ups = fake.consultas('producto', 'update');
     expect(ups).toHaveLength(2);
-    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'copa de chocolate', model_3d_url: null });
+    expect(ups[0].payload).toMatchObject({ model_3d_task_id: null, model_3d_estado: 'generando', model_3d_prompt: 'copa de chocolate' });
+    // La reserva no borra el modelo anterior: model_3d_url se reemplaza recién cuando el nuevo queda "listo".
+    expect('model_3d_url' in ups[0].payload).toBe(false);
     expect(ups[1].payload).toEqual({ model_3d_task_id: 'T-NUEVA' });
     for (const up of ups) expect(up.filtros).toContainEqual(['eq', 'id_producto', 5]);
   });

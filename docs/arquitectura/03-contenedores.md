@@ -105,6 +105,7 @@ Los valores reales van en `backend/.env` y `frontend/.env` (nunca en git) o en e
 | `FRONTEND_URL` | API Express | Origen permitido (CORS) y enlace del correo de recuperación | Recomendada | Sí | `server.js:576`, `server.js:1492` |
 | `GROQ_API_KEY` | Gelbot | Llave de Groq | Para Gelbot | Sí | `chatbot.js:5-7` |
 | `TRIPO_API_KEY` | API Express | Llave de Tripo 3D | Para modelos 3D | Sí | `server.js:126` |
+| `TRIPO_CDN_HOSTS` | API Express | Hosts (sufijos, separados por coma) de los que se pueden descargar los modelos de Tripo | No (vacío = cualquier host público https) | Sí | `backend/modelos3dStorage.js` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | API Express | Correo real (sin ellas: Ethereal de prueba) | Para correos reales | Sí | `server.js:632-643` |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | API Express | Credenciales de AWS Rekognition | Para login facial | **No** | `server.js:36-45` |
 | `REKOGNITION_COLLECTION_ID` | API Express | Nombre de la colección de rostros | No (tiene valor por defecto) | **No** | `server.js:37` |
