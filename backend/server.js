@@ -2329,7 +2329,8 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
     // Solo columnas públicas; "id" es el alias que usa el panel para seguir el modelo 3D.
     const createdProductObj = { id: nextId, ...soloColumnasProductoAdmin(creado) };
 
-    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${nextId}, Nombre: "${datos.nombre}", Precio: $${datos.precio}`);
+    // El nombre va con JSON.stringify: un salto de línea en el nombre no puede inventar líneas en el log.
+    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${nextId}, Nombre: ${JSON.stringify(datos.nombre)}, Precio: $${datos.precio}`);
     return res.status(201).json({
       ok: true,
       message: 'Producto creado y agregado al catálogo exitosamente.',
@@ -2378,6 +2379,8 @@ const COLUMNAS_PRODUCTO_ADMIN = 'id_producto, nombre, precio, stock, descripcion
 const numero = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
 
 // Reglas de cada columna del producto: ÚNICA fuente para el alta, el editor y las rutas sueltas.
+// CATEGORIAS_VALIDAS (y PRECIO_MAX e ID_PRODUCTO_MAX) deben declararse ANTES de este objeto: el mensaje
+// de categoría se arma al cargar el archivo y fallaría si la constante todavía no existe.
 // limpiar(valor) devuelve el valor listo para la base, o undefined si no vale.
 const REGLAS_PRODUCTO = {
   nombre: {
@@ -2593,10 +2596,12 @@ function rutaCampoProducto({ columna, limpiar, error, mensajeError, mensajeOk })
   };
 }
 
-// Actualizar estado destacado del producto (cualquier valor se toma como verdadero o falso, como antes)
+// Actualizar estado destacado del producto: solo true/false (o los textos "true"/"false").
+const VALORES_DESTACADO = new Map([[true, true], [false, false], ['true', true], ['false', false]]);
 app.put('/api/admin/products/:id/featured', requireAdmin, rutaCampoProducto({
   columna: 'destacado',
-  limpiar: (v) => Boolean(v),
+  limpiar: (v) => VALORES_DESTACADO.get(v),
+  error: 'El valor de destacado debe ser verdadero o falso.',
   mensajeError: 'Error al actualizar estado destacado.',
   mensajeOk: (v) => `Producto ${v ? 'destacado' : 'retirado de destacados'} con éxito.`
 }));

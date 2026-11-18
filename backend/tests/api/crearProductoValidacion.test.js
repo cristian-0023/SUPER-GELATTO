@@ -235,3 +235,38 @@ describe('rutas sueltas: valores con las reglas compartidas', () => {
     expect((await put('/api/admin/products/5/stock', { stock })).status).toBe(400);
   });
 });
+
+describe('/featured: solo verdadero o falso', () => {
+  it.each([[true, true], [false, false], ['true', true], ['false', false]])('destacado %j -> guarda %j', async (destacado, esperado) => {
+    fake.responder('producto', 'update', { data: { id_producto: 5 }, error: null });
+    const res = await put('/api/admin/products/5/featured', { destacado });
+    expect(res.status).toBe(200);
+    expect(fake.consultas('producto', 'update')[0].payload).toEqual({ destacado: esperado });
+    expect(res.body.destacado).toBe(esperado);
+  });
+  it.each([[1], [0], ['si'], ['TRUE'], [''], [null], [[true]], [{}]])('destacado %j -> 400 sin tocar la base', async (destacado) => {
+    const res = await put('/api/admin/products/5/featured', { destacado });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(fake.consultas('producto')).toHaveLength(0);
+  });
+  it('sin destacado -> 400', async () => {
+    expect((await put('/api/admin/products/5/featured', {})).status).toBe(400);
+  });
+});
+
+describe('alta: el log no se puede falsificar con el nombre', () => {
+  it('el nombre va al log entre comillas JSON (un salto de línea queda escapado)', async () => {
+    const espia = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const res = await post({ ...VALIDO, name: 'Fresa\n✅ Producto 1 precio=1 actualizado.' });
+      expect(res.status).toBe(201);
+      const linea = espia.mock.calls.map((args) => args.join(' ')).find((l) => l.includes('Producto agregado'));
+      expect(linea).toBeDefined();
+      expect(linea).not.toContain('\n');
+      expect(linea).toContain(JSON.stringify('Fresa\n✅ Producto 1 precio=1 actualizado.'));
+    } finally {
+      espia.mockRestore();
+    }
+  });
+});
