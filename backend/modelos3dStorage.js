@@ -83,6 +83,10 @@ async function descargarModelo(urlTripo, { fetchFn, timeoutMs, maxBytes }) {
   }
 }
 
+// Copias en marcha en esta instancia, por ruta. El panel consulta cada 3 s y una descarga puede tardar más:
+// las consultas que llegan mientras tanto esperan la misma copia en vez de descargar y subir otra vez.
+const copiasEnCurso = new Map();
+
 // Copia el modelo terminado de Tripo al bucket propio.
 // Devuelve { ok: true, url, ruta } | { ok: false, motivo: 'reintentar' | 'vencido' | 'muy_grande' }.
 // Nunca devuelve detalles internos: el detalle va al log.
@@ -95,6 +99,15 @@ async function copiarModeloATienda({
     return { ok: false, motivo: 'reintentar' };
   }
 
+  const ruta = rutaDelModelo(idProducto, taskId);
+  if (copiasEnCurso.has(ruta)) return copiasEnCurso.get(ruta);
+  const copia = descargarYSubir({ supabase, ruta, taskId, urlTripo, fetchFn, timeoutMs, maxBytes })
+    .finally(() => copiasEnCurso.delete(ruta));
+  copiasEnCurso.set(ruta, copia);
+  return copia;
+}
+
+async function descargarYSubir({ supabase, ruta, taskId, urlTripo, fetchFn, timeoutMs, maxBytes }) {
   const descarga = await descargarModelo(urlTripo, { fetchFn, timeoutMs, maxBytes });
   if (!descarga.buffer) return { ok: false, motivo: descarga.motivo };
 
@@ -104,16 +117,21 @@ async function copiarModeloATienda({
     return { ok: false, motivo: 'reintentar' };
   }
 
-  const ruta = rutaDelModelo(idProducto, taskId);
-  const bucket = supabase.storage.from(BUCKET_MODELOS_3D);
-  // upsert: si dos consultas terminan a la vez, las dos escriben el mismo archivo en la misma ruta.
-  const { error: subirErr } = await bucket.upload(ruta, descarga.buffer, { contentType: TIPO_GLB, upsert: true });
-  if (subirErr) {
-    console.error(`No se pudo subir el modelo 3D a Storage (${ruta}):`, subirErr.message || subirErr);
+  try {
+    const bucket = supabase.storage.from(BUCKET_MODELOS_3D);
+    // upsert: si otra instancia sube el mismo modelo a la vez, las dos escriben el mismo archivo en la misma ruta.
+    const { error: subirErr } = await bucket.upload(ruta, descarga.buffer, { contentType: TIPO_GLB, upsert: true });
+    if (subirErr) {
+      console.error(`No se pudo subir el modelo 3D a Storage (${ruta}):`, subirErr.message || subirErr);
+      return { ok: false, motivo: 'reintentar' };
+    }
+    const { data } = bucket.getPublicUrl(ruta);
+    return { ok: true, url: data.publicUrl, ruta };
+  } catch (err) {
+    // Sin Storage (la base simulada de desarrollo no lo tiene) o un fallo inesperado del cliente.
+    console.error(`No se pudo subir el modelo 3D a Storage (${ruta}):`, err?.message);
     return { ok: false, motivo: 'reintentar' };
   }
-  const { data } = bucket.getPublicUrl(ruta);
-  return { ok: true, url: data.publicUrl, ruta };
 }
 
 // Borra del bucket el modelo anterior de un producto (al regenerar). Solo toca archivos de NUESTRO

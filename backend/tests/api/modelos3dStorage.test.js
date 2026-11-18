@@ -154,6 +154,33 @@ describe('copiarModeloATienda', () => {
     expect(console.error).toHaveBeenCalled();
   });
 
+  it('dos copias simultáneas del mismo modelo: una sola descarga y una sola subida (el panel consulta cada 3 s)', async () => {
+    const pendientes = [];
+    const soltar = () => pendientes.forEach((resolver) => resolver(new Response(GLB, { status: 200 })));
+    const fetchFn = vi.fn(() => new Promise((resolver) => pendientes.push(resolver)));
+
+    const p1 = copiar({ fetchFn });
+    const p2 = copiar({ fetchFn });
+    await new Promise((r) => setTimeout(r, 5));
+    soltar();
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(subidas()).toHaveLength(1);
+    expect(r1).toEqual(r2);
+    expect(r1.ok).toBe(true);
+
+    // Terminada la copia, una consulta posterior puede volver a intentarlo (no queda "pegada").
+    await copiar();
+    expect(subidas()).toHaveLength(2);
+  });
+
+  it('sin Storage (base simulada de desarrollo) o si upload lanza -> reintentar, sin lanzar error', async () => {
+    await expect(copiar({ supabase: {} })).resolves.toEqual({ ok: false, motivo: 'reintentar' });
+    fake.responderStorage('upload', () => { throw new Error('boom'); });
+    await expect(copiar()).resolves.toEqual({ ok: false, motivo: 'reintentar' });
+  });
+
   it('ruta segura aunque el taskId o el id vengan raros: no sube nada', async () => {
     const r1 = await copiar({ taskId: '../otro' });
     const r2 = await copiar({ idProducto: 'abc' });
