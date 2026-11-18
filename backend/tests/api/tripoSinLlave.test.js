@@ -119,7 +119,7 @@ describe.each([['vacía', ''], ['con solo espacios', '   ']])('rutas 3D con la l
 
   it('crear producto con prompt -> 201 sin modelo, sin llamar a Tripo y sin estado roto', async () => {
     const res = await request(app).post('/api/admin/products').set(authAdmin())
-      .send({ name: 'Sin 3D', price: 4000, prompt3d: 'cono de helado' });
+      .send({ name: 'Sin 3D', price: 4000, category: 'Clásico', prompt3d: 'cono de helado' });
 
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
@@ -134,7 +134,7 @@ describe.each([['vacía', ''], ['con solo espacios', '   ']])('rutas 3D con la l
   });
 
   it('crear producto sin prompt -> 201 normal', async () => {
-    const res = await request(app).post('/api/admin/products').set(authAdmin()).send({ name: 'Simple', price: 3000 });
+    const res = await request(app).post('/api/admin/products').set(authAdmin()).send({ name: 'Simple', price: 3000, category: 'Clásico' });
 
     expect(res.status).toBe(201);
     expect(res.body.model).toBeNull();

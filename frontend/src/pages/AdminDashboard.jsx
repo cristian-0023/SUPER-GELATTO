@@ -13,7 +13,7 @@ import { apiFetch } from '../utils/api';
 import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
 import { crearSondeoModelo3D } from '../utils/sondeoModelo3D';
 import { soloVentasCobradas } from '../utils/ingresos';
-import { armarCuerpoProducto, mapearProductoGuardado } from '../utils/editorProductos';
+import { armarCuerpoProducto, mapearProductoGuardado, armarCuerpoAlta, productoCreadoParaPanel, IMAGENES_PREDETERMINADAS } from '../utils/editorProductos';
 import { useCart } from '../context/CartContext';
 
 const getProductFallbackImage = (name = '') => {
@@ -392,15 +392,16 @@ const AdminDashboard = ({ user, onLogout }) => {
       const res = await apiFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createProductForm)
+        body: JSON.stringify(armarCuerpoAlta(createProductForm))
       });
-      const data = await res.json();
+      // Si el servidor responde 400, se muestra su mensaje (dice qué campo corregir).
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Error al crear el producto.');
       avisarProductosActualizados();
 
       setDashboardData(prev => ({
         ...prev,
-        products: [data.product, ...prev.products]
+        products: [productoCreadoParaPanel(data.product), ...prev.products]
       }));
 
       setCreateProductMsg({ type: 'success', text: '¡Producto agregado con éxito!' });
@@ -422,21 +423,6 @@ const AdminDashboard = ({ user, onLogout }) => {
     } finally {
       setCreateProductLoading(false);
     }
-  };
-
-  const handleAddProductFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      setCreateProductMsg({ type: 'error', text: 'La imagen excede 4MB.' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setCreateProductForm(prev => ({ ...prev, image: reader.result }));
-      setCreateProductMsg({ type: '', text: '' });
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleOpenImageModal = (product) => {
@@ -1843,9 +1829,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                       <div>
                         <label className="block text-xs uppercase tracking-widest text-white/40 mb-2 font-bold">Precio (COP) *</label>
                         <input 
-                          type="number" 
+                          type="number"
                           required
-                          placeholder="12000" 
+                          min="1"
+                          step="1"
+                          placeholder="12000"
                           value={newProduct.precio}
                           onChange={e => setNewProduct({...newProduct, precio: e.target.value})}
                           className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-gold-premium/40 transition-colors text-sm"
@@ -1862,6 +1850,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                           <option value="Clásico" className="bg-[#050505]">Clásico</option>
                           <option value="Vegano" className="bg-[#050505]">Vegano</option>
                           <option value="Temporada" className="bg-[#050505]">Temporada</option>
+                          <option value="Gourmet" className="bg-[#050505]">Gourmet</option>
                         </select>
                       </div>
                     </div>
@@ -2213,18 +2202,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                   Imágenes Predeterminadas
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {[
-                    { label: 'Fresa', url: '/images/gelato_fresa.png' },
-                    { label: 'Chocolate', url: '/images/gelato_chocolate.png' },
-                    { label: 'Mango', url: '/images/gelato_mango.png' },
-                    { label: 'Berries', url: '/images/gelato_berries.png' },
-                    { label: 'Pistacho', url: '/images/gelato_pistacho.png' },
-                    { label: 'Caramelo', url: '/images/caramelo salado.png' },
-                    { label: 'Vainilla', url: '/images/vainilla de madagascar.png' },
-                    { label: 'Limón', url: '/images/limone di amalfi.png' },
-                    { label: 'Tiramisú', url: '/images/Tiramisú Artigianale.png' },
-                    { label: 'Coco', url: '/images/Coco & Lima.png' },
-                  ].map((item, i) => (
+                  {IMAGENES_PREDETERMINADAS.map((item, i) => (
                     <button
                       type="button"
                       key={i}
@@ -2309,6 +2287,8 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <input
                     type="number"
                     required
+                    min="1"
+                    step="1"
                     placeholder="13000"
                     value={createProductForm.price}
                     onChange={(e) => setCreateProductForm(prev => ({ ...prev, price: e.target.value }))}
@@ -2364,7 +2344,7 @@ const AdminDashboard = ({ user, onLogout }) => {
               {/* Imagen del nuevo producto */}
               <div>
                 <label className="block text-xs uppercase tracking-wider text-white/40 mb-2 font-bold">
-                  Imagen del Producto (URL o Archivo Local)
+                  Imagen del Producto (enlace https o predeterminada)
                 </label>
                 <input
                   type="text"
@@ -2373,12 +2353,30 @@ const AdminDashboard = ({ user, onLogout }) => {
                   onChange={(e) => setCreateProductForm(prev => ({ ...prev, image: e.target.value }))}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-gold-premium/40 transition-colors text-sm mb-2"
                 />
-                
-                <label className="flex items-center justify-center gap-2 w-full bg-white/5 hover:bg-white/10 border border-dashed border-white/20 hover:border-gold-premium/40 rounded-xl p-2.5 text-xs text-white/70 hover:text-white cursor-pointer transition-all">
-                  <Upload size={14} className="text-gold-premium" />
+
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {IMAGENES_PREDETERMINADAS.map((item) => (
+                    <button
+                      type="button"
+                      key={item.url}
+                      onClick={() => setCreateProductForm(prev => ({ ...prev, image: item.url }))}
+                      aria-pressed={createProductForm.image === item.url}
+                      className={`px-2.5 py-1 border rounded-lg text-[10px] transition-all cursor-pointer ${
+                        createProductForm.image === item.url
+                          ? 'bg-gold-premium/20 text-gold-premium border-gold-premium/40'
+                          : 'bg-white/5 hover:bg-gold-premium/20 hover:text-gold-premium border-white/10 text-white/60'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div aria-disabled="true" className="flex items-center justify-center gap-2 w-full bg-white/5 border border-dashed border-white/10 rounded-xl p-2.5 text-xs text-white/30 cursor-not-allowed">
+                  <Upload size={14} className="text-white/30" />
                   <span>Subir Imagen Local desde tu Equipo</span>
-                  <input type="file" accept="image/*" onChange={handleAddProductFileUpload} className="hidden" />
-                </label>
+                </div>
+                <p className="mt-2 text-[11px] text-white/40">Pronto: subir fotos. Por ahora pegá un enlace https o elegí una predeterminada.</p>
 
                 {createProductForm.image && (
                   <div className="mt-3 flex items-center gap-3 bg-black/40 p-2 rounded-xl border border-white/10">

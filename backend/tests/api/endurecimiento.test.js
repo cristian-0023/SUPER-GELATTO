@@ -71,7 +71,7 @@ describe('7. rutas de producto: la base se actualiza primero; si falla, nada cam
   // escribe ningún archivo (en Vercel no se puede).
   it('featured: base OK -> no escribe archivos y el catálogo cambia', async () => {
     const antes = await catalogo();
-    fake.responder('producto', 'update', { data: null, error: null });
+    fake.responder('producto', 'update', { data: { id_producto: 1 }, error: null });
 
     const res = await put('/api/admin/products/1/featured', { destacado: !antes.destacado });
 
@@ -91,7 +91,7 @@ describe('7. rutas de producto: la base se actualiza primero; si falla, nada cam
   });
 
   it('precio: base OK -> el catálogo local cambia', async () => {
-    fake.responder('producto', 'update', { data: null, error: null });
+    fake.responder('producto', 'update', { data: { id_producto: 1 }, error: null });
     await put('/api/admin/products/1/price', { precio: 99999 });
     expect((await catalogo()).precio).toBe(99999);
   });
@@ -107,7 +107,7 @@ describe('7. rutas de producto: la base se actualiza primero; si falla, nada cam
   });
 
   it('categoría: base OK -> el catálogo local cambia', async () => {
-    fake.responder('producto', 'update', { data: null, error: null });
+    fake.responder('producto', 'update', { data: { id_producto: 1 }, error: null });
     await put('/api/admin/products/1/category', { categoria: 'Gourmet' });
     expect((await catalogo()).categoria).toBe('Gourmet');
   });
@@ -123,7 +123,7 @@ describe('7. rutas de producto: la base se actualiza primero; si falla, nada cam
   });
 
   it('stock: base OK -> el catálogo local cambia', async () => {
-    fake.responder('producto', 'update', { data: null, error: null });
+    fake.responder('producto', 'update', { data: { id_producto: 1 }, error: null });
     await put('/api/admin/products/1/stock', { stock: 3 });
     expect((await catalogo()).stock).toBe(3);
   });

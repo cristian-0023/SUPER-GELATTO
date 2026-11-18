@@ -62,7 +62,7 @@ describe('1. prompt 3D al crear producto', () => {
     ['no es texto', 123],
     ['es demasiado largo', 'a'.repeat(1001)],
   ])('si el prompt %s -> 400 y no se crea el producto ni se llama a Tripo', async (_, prompt3d) => {
-    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d });
+    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d });
 
     expect(res.status).toBe(400);
     expect(fake.consultas('producto', 'insert')).toHaveLength(0);
@@ -72,7 +72,7 @@ describe('1. prompt 3D al crear producto', () => {
   it('a Tripo y a la base va el prompt sin espacios sobrantes', async () => {
     baseConReserva();
 
-    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: '   cono de helado   ' });
+    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: '   cono de helado   ' });
 
     expect(res.status).toBe(201);
     expect(JSON.parse(crearTareaEnTripo()[0][1].body).prompt).toBe('cono de helado');
@@ -144,7 +144,7 @@ describe('2. una generación por producto a la vez', () => {
   it('crear producto con prompt también reserva antes de llamar a Tripo', async () => {
     baseConReserva({ gana: false });
 
-    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: 'cono' });
+    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: 'cono' });
 
     expect(res.status).toBe(201);
     expect(res.body.model).toBeNull();
@@ -286,7 +286,7 @@ describe('2. límite de generaciones por admin', () => {
 
   it('crear productos sin prompt no gasta el límite de generaciones', async () => {
     for (let i = 0; i < 4; i++) {
-      const res = await request(appLimite).post('/api/admin/products').set(tokenDe(73)).send({ name: `Simple ${i}`, price: 3000 });
+      const res = await request(appLimite).post('/api/admin/products').set(tokenDe(73)).send({ name: `Simple ${i}`, price: 3000, category: 'Clásico' });
       expect(res.status).toBe(201);
     }
   });
