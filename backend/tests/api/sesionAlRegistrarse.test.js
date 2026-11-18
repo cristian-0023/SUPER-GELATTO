@@ -132,6 +132,30 @@ describe('POST /api/register: deja la sesión iniciada', () => {
     expect(res.body.token).toBeUndefined();
   });
 
+  it('correo con mayúsculas -> se guarda en minúsculas y la búsqueda de duplicados usa minúsculas', async () => {
+    const { app } = cargarServidor(fake, ENTORNO);
+    const res = await registro(app, { email: 'Ana.Perez@Example.COM' });
+
+    expect(res.status).toBe(201);
+    expect(fake.consultas('usuario', 'insert')[0].payload[0].email).toBe('ana.perez@example.com');
+    expect(fake.consultas('usuario', 'select')[0].filtros).toContainEqual(['eq', 'email', 'ana.perez@example.com']);
+    expect(res.body.user.email).toBe('ana.perez@example.com');
+  });
+
+  it('dos registros a la vez con el mismo correo: el insert choca (23505) -> 409 sin token', async () => {
+    const { app } = cargarServidor(fake, ENTORNO);
+    fake.responder('usuario', 'insert', {
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "usuario_email_key"' },
+    });
+    const res = await registro(app);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe('El email ya está registrado.');
+    expect(res.body.token).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toMatch(/duplicate|constraint/);
+  });
+
   it('el insert solo pide de vuelta columnas no sensibles', async () => {
     const { app } = cargarServidor(fake, ENTORNO);
     await registro(app);
@@ -139,5 +163,21 @@ describe('POST /api/register: deja la sesión iniciada', () => {
     const columnas = fake.consultas('usuario', 'insert')[0].columnasRetorno;
     expect(typeof columnas).toBe('string');
     expect(columnas).not.toMatch(/password|\*/);
+  });
+});
+
+describe('POST /api/login: cuentas viejas guardadas con mayúsculas', () => {
+  it('busca sin distinguir mayúsculas (ilike en minúsculas) y deja entrar', async () => {
+    const { app } = cargarServidor(fake, ENTORNO);
+    fake.responder('usuario', 'select', {
+      data: { id_usuario: 9, nombre: 'Ana', email: 'Ana@Example.com', rol: 'cliente', password_hash: bcrypt.hashSync(CLAVE, 4) },
+      error: null,
+    });
+
+    const res = await request(app).post('/api/login').send({ email: 'ANA@example.com', password: CLAVE });
+
+    expect(res.status).toBe(200);
+    expect(fake.consultas('usuario', 'select')[0].filtros).toContainEqual(['ilike', 'email', 'ana@example.com']);
+    expect(res.body.user.id_usuario).toBe(9);
   });
 });

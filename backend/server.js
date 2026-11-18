@@ -1267,6 +1267,9 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
     return res.status(400).json({ message: MENSAJE_CONTRASENA_DEBIL });
   }
 
+  // Se guarda siempre en minúsculas (el login busca sin distinguir mayúsculas).
+  email = email.trim().toLowerCase();
+
   // Correos de administradores: solo entran con Google verificado (mensaje genérico, no revela cuáles son).
   if (esCorreoReservado(email)) {
     return res.status(403).json({ ok: false, message: 'No se puede registrar con ese correo.' });
@@ -1285,6 +1288,8 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
       .insert([{ nombre: name, apellido: lastName || '', email, password_hash: hashedPassword, rol: 'cliente' }])
       .select(COLUMNAS_SESION).maybeSingle();
 
+    // Dos registros a la vez con el mismo correo: el segundo choca con el candado único de la base.
+    if (registerError?.code === '23505') return res.status(409).json({ message: 'El email ya está registrado.' });
     if (registerError) throw registerError;
 
     // Queda con la sesión iniciada, igual que en el login (rol de la fila insertada: 'cliente').
