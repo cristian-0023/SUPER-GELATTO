@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, ContactShadows, Html } from '@react-three/drei';
@@ -7,6 +7,7 @@ import { X, ShoppingCart } from 'lucide-react';
 import { useCart, formatPrice } from '../context/CartContext';
 import { apiFetch } from '../utils/api';
 import { modelosAPrecargar } from '../utils/precargaModelos';
+import { registrarCarga, quitarCarga, textoDeCarga, estadoPorError, textoFallo } from '../utils/piezas3d';
 
 // Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
@@ -94,19 +95,48 @@ const Loader = () => (
   </Html>
 );
 
-/* ─── Indicador pequeño mientras baja un sabor o topping elegido ─── */
-const CargandoPieza = ({ position = [0, 0, 0], texto }) => (
-  <Html center position={position}>
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex items-center gap-2 whitespace-nowrap bg-background-dark/80 backdrop-blur-xl px-3 py-1.5 rounded-full border border-white/10 shadow-lg"
-    >
-      <div className="w-3.5 h-3.5 border-2 border-gold-premium/20 border-t-gold-premium rounded-full animate-spin motion-reduce:animate-none" />
-      <span className="text-white/80 font-bold tracking-[0.2em] uppercase text-[9px]">{texto}</span>
-    </div>
-  </Html>
+/* ─── Avisa a la región de estado (fuera del Canvas) mientras una pieza se descarga ─── */
+const RegistroCarga = ({ onCarga, clave, texto }) => {
+  useEffect(() => {
+    if (!onCarga) return undefined;
+    onCarga('inicio', clave, texto);
+    return () => onCarga('fin', clave);
+  }, [onCarga, clave, texto]);
+  return null;
+};
+
+/* ─── Giro pequeño en el lugar de la pieza que se está bajando (el texto va en la región de estado) ─── */
+const CargandoPieza = ({ position = [0, 0, 0], onCarga, clave, texto }) => (
+  <>
+    <RegistroCarga onCarga={onCarga} clave={clave} texto={texto} />
+    <Html center position={position}>
+      <div aria-hidden="true" className="w-5 h-5 border-2 border-gold-premium/20 border-t-gold-premium rounded-full animate-spin motion-reduce:animate-none" />
+    </Html>
+  </>
 );
+
+/* ─── Límite de errores por pieza: si su .glb falla, solo esa pieza muestra un aviso ─── */
+class PiezaSegura extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { fallo: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return estadoPorError(error);
+  }
+
+  render() {
+    if (!this.state.fallo) return this.props.children;
+    return (
+      <Html center position={this.props.position || [0, 0, 0]}>
+        <div role="alert" className="whitespace-nowrap bg-background-dark/85 px-3 py-1.5 rounded-full border border-white/15 text-xs font-bold text-white/90">
+          {textoFallo(this.props.nombre)}
+        </div>
+      </Html>
+    );
+  }
+}
 
 /* ─── Data ────────────────────────────────────────────── */
 const containers = [
@@ -149,7 +179,7 @@ const toppingsData = [
 ];
 
 /* ─── Scene ───────────────────────────────────────────── */
-const GelatoScene = ({ container, selectedScoops, selectedToppings, availableScoops = DEFAULT_SCOOPS }) => {
+const GelatoScene = ({ container, selectedScoops, selectedToppings, availableScoops = DEFAULT_SCOOPS, onCarga }) => {
   const containerData = containers.find(c => c.id === container);
 
   const baseY = -1;
@@ -176,15 +206,17 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
 
       <RotatingGroup>
         {/* Container (base) */}
-        <Suspense fallback={<Loader />}>
-          {containerData && (
-            <PartModel
-              url={`${BASE_PATH}/${containerData.file}`}
-              scale={containerData.scale}
-              position={[0, baseY, 0]}
-            />
-          )}
-        </Suspense>
+        {containerData && (
+          <PiezaSegura key={`base-${containerData.id}`} nombre={containerData.name} position={[0, baseY, 0]}>
+            <Suspense fallback={<><Loader /><RegistroCarga onCarga={onCarga} clave="base" texto={`Cargando ${containerData.name}…`} /></>}>
+              <PartModel
+                url={`${BASE_PATH}/${containerData.file}`}
+                scale={containerData.scale}
+                position={[0, baseY, 0]}
+              />
+            </Suspense>
+          </PiezaSegura>
+        )}
 
         {/* Scoops — stacked above the container */}
         {selectedScoops.map((scoopId, index) => {
@@ -195,15 +227,18 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
             ? scoopData.file
             : `${BASE_PATH}/${scoopData.file || 'scoop_vanilla.glb'}`;
 
+          const clave = `scoop-${index}-${scoopId}`;
           return (
-            <Suspense key={`scoop-${index}-${scoopId}`} fallback={<CargandoPieza position={[0, y, 0]} texto={`Cargando ${scoopData.name || 'sabor'}…`} />}>
-              <PartModel
-                url={modelUrl}
-                scale={scoopData.scale || 2.0}
-                position={[0, y, 0]}
-                isScoop={true}
-              />
-            </Suspense>
+            <PiezaSegura key={clave} nombre={scoopData.name} position={[0, y, 0]}>
+              <Suspense fallback={<CargandoPieza position={[0, y, 0]} onCarga={onCarga} clave={clave} texto={`Cargando ${scoopData.name || 'sabor'}…`} />}>
+                <PartModel
+                  url={modelUrl}
+                  scale={scoopData.scale || 2.0}
+                  position={[0, y, 0]}
+                  isScoop={true}
+                />
+              </Suspense>
+            </PiezaSegura>
           );
         })}
 
@@ -212,10 +247,14 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
           const toppingData = toppingsData.find(t => t.id === toppingId);
           if (!toppingData) return null;
           const transform = TOPPING_TRANSFORMS[index] || { pos: [0, 0, 0], rot: [0, 0, 0] };
+          const clave = `topping-${index}-${toppingId}`;
+          const posicion = [transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]];
           return (
-            <Suspense key={`topping-${index}-${toppingId}`} fallback={<CargandoPieza position={[transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]]} texto={`Cargando ${toppingData.name}…`} />}>
-              <PartModel url={`${BASE_PATH}/${toppingData.file}`} scale={2.0} position={[transform.pos[0], toppingBaseY + transform.pos[1], transform.pos[2]]} rotation={transform.rot} />
-            </Suspense>
+            <PiezaSegura key={clave} nombre={toppingData.name} position={posicion}>
+              <Suspense fallback={<CargandoPieza position={posicion} onCarga={onCarga} clave={clave} texto={`Cargando ${toppingData.name}…`} />}>
+                <PartModel url={`${BASE_PATH}/${toppingData.file}`} scale={2.0} position={posicion} rotation={transform.rot} />
+              </Suspense>
+            </PiezaSegura>
           );
         })}
       </RotatingGroup>
@@ -225,9 +264,9 @@ const GelatoScene = ({ container, selectedScoops, selectedToppings, availableSco
   );
 };
 
-const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, availableScoops, canvasRef }) => (
+const MemoizedCanvas = React.memo(({ container, selectedScoops, selectedToppings, availableScoops, canvasRef, onCarga }) => (
   <Canvas ref={canvasRef} dpr={[1, 1.5]} camera={{ position: [0, 3, 8], fov: 40 }} gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}>
-    <GelatoScene container={container} selectedScoops={selectedScoops} selectedToppings={selectedToppings} availableScoops={availableScoops} />
+    <GelatoScene container={container} selectedScoops={selectedScoops} selectedToppings={selectedToppings} availableScoops={availableScoops} onCarga={onCarga} />
   </Canvas>
 ));
 
@@ -270,7 +309,14 @@ const GelatoBuilder3D = ({ user }) => {
   const [selectedScoops, setSelectedScoops] = useState(['vanilla']);
   const [selectedToppings, setSelectedToppings] = useState([]);
   const [activeTab, setActiveTab] = useState('container');
+  const [cargas, setCargas] = useState([]);
   const scoopsList = DEFAULT_SCOOPS;
+
+  // Las piezas avisan desde el Canvas cuando empiezan y terminan de bajar (callback estable para el memo).
+  const avisarCarga = useCallback((accion, clave, texto) => {
+    setCargas((prev) => (accion === 'inicio' ? registrarCarga(prev, clave, texto) : quitarCarga(prev, clave)));
+  }, []);
+  const textoEstado = textoDeCarga(cargas);
 
   // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
   const basePrice = 10000;
@@ -427,7 +473,18 @@ const GelatoBuilder3D = ({ user }) => {
               selectedToppings={selectedToppings} 
               availableScoops={scoopsList}
               canvasRef={canvasRef}
+              onCarga={avisarCarga}
             />
+
+            {/* Estado de carga: región fija fuera del Canvas; existe siempre y solo cambia su texto */}
+            <div
+              role="status"
+              aria-live="polite"
+              className={`absolute top-12 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 whitespace-nowrap bg-background-dark/85 backdrop-blur-xl px-4 py-2 rounded-full border border-white/15 shadow-lg text-xs font-bold uppercase tracking-[0.15em] text-white motion-safe:transition-opacity motion-safe:duration-300 ${textoEstado ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            >
+              {textoEstado && <span aria-hidden="true" className="w-3.5 h-3.5 border-2 border-gold-premium/25 border-t-gold-premium rounded-full animate-spin motion-reduce:animate-none" />}
+              <span>{textoEstado}</span>
+            </div>
 
             {/* Bottom info bar */}
             <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background-dark/90 via-background-dark/50 to-transparent z-10">
@@ -615,9 +672,9 @@ const GelatoBuilder3D = ({ user }) => {
   );
 };
 
-// ─── Precarga: solo la base que se ve por defecto ───────────
+// ─── Precarga: solo la base y el sabor que se ven por defecto ─
 // El resto de los modelos se baja cuando el cliente lo elige (antes se precargaban los 17).
-modelosAPrecargar(containers, 'cone').forEach((file) => {
+[...modelosAPrecargar(containers, 'cone'), ...modelosAPrecargar(DEFAULT_SCOOPS, 'vanilla')].forEach((file) => {
   useGLTF.preload(`${BASE_PATH}/${file}`);
 });
 
