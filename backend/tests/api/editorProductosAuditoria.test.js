@@ -53,6 +53,7 @@ describe('categorías válidas', () => {
   });
   it('/category acepta Gourmet y rechaza lo demás', async () => {
     expect((await put('/api/admin/products/7/category', { categoria: 'Otra' })).status).toBe(400);
+    productoExiste();
     expect((await put('/api/admin/products/7/category', { categoria: 'Gourmet' })).status).toBe(200);
   });
 });

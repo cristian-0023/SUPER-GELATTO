@@ -55,8 +55,12 @@ describe('g. POST /api/admin/products (crear producto)', () => {
   });
 });
 
+// Las rutas sueltas piden la fila actualizada (update ... select ... maybeSingle): sin fila -> 404.
+const productoExiste = () => fake.responder('producto', 'update', { data: { id_producto: 5 }, error: null });
+
 describe('h. PUT /api/admin/products/:id/featured', () => {
   it('actualiza solo { destacado } del producto', async () => {
+    productoExiste();
     const res = await put('/api/admin/products/5/featured', { destacado: true });
 
     const ups = fake.consultas('producto', 'update');
@@ -78,6 +82,7 @@ describe('h. PUT /api/admin/products/:id/featured', () => {
 
 describe('i. PUT /api/admin/products/:id/stock', () => {
   it('actualiza solo { stock } (sin stock_disponible)', async () => {
+    productoExiste();
     const res = await put('/api/admin/products/5/stock', { stock: 7 });
 
     const ups = fake.consultas('producto', 'update');
@@ -100,6 +105,7 @@ describe('i. PUT /api/admin/products/:id/stock', () => {
 
 describe('j. precio y categoría', () => {
   it('precio: actualiza { precio }', async () => {
+    productoExiste();
     const res = await put('/api/admin/products/5/price', { precio: 3000 });
 
     expect(fake.consultas('producto', 'update')[0].payload).toEqual({ precio: 3000 });
@@ -116,6 +122,7 @@ describe('j. precio y categoría', () => {
   });
 
   it('categoría: actualiza { categoria }', async () => {
+    productoExiste();
     const res = await put('/api/admin/products/5/category', { categoria: 'Vegano' });
 
     expect(fake.consultas('producto', 'update')[0].payload).toEqual({ categoria: 'Vegano' });
@@ -156,7 +163,7 @@ describe('k. guardar model_3d_url (GET /api/admin/products/:id/model-3d)', () =>
   // La tarea ahora vive en la base (producto.model_3d_*): el fake no guarda nada, así que la lectura de la
   // fila se simula con la tarea "generando" que dejó la creación.
   async function productoConTarea3D() {
-    const res = await post('/api/admin/products', { name: 'Con 3D', price: 4000, prompt3d: 'cono de helado' });
+    const res = await post('/api/admin/products', { name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: 'cono de helado' });
     expect(res.status).toBe(201);
     const id = res.body.product.id;
     fake.llamadas.length = 0;

@@ -79,6 +79,7 @@ describe('destacados: solo producto.destacado', () => {
   });
 
   it('destacar un producto se guarda en la base y se ve en GET /api/products (sin archivo)', async () => {
+    fake.responder('producto', 'update', { data: { id_producto: 5 }, error: null }); // el producto existe
     const put = await admin('put', '/api/admin/products/5/featured').send({ destacado: true });
     expect(put.status).toBe(200);
     expect(fake.consultas('producto', 'update')[0].payload).toEqual({ destacado: true });
@@ -148,7 +149,7 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
   it('crear un producto con prompt guarda la tarea "generando" en la fila del producto', async () => {
     fake.responder('producto', 'update', reservaGanada);
 
-    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: 'cono de helado' });
+    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: 'cono de helado' });
 
     expect(res.status).toBe(201);
     expect(res.body.model).toEqual({ taskId: 'T-NUEVA', estado: 'generando' });
@@ -165,14 +166,14 @@ describe('modelos 3D: tarea, estado y URL en la base', () => {
   it('crear con prompt: si la base no guarda la tarea, el producto queda creado pero sin modelo', async () => {
     fake.responder('producto', 'update', ERROR_BASE);
 
-    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: 'cono' });
+    const res = await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: 'cono' });
 
     expect(res.status).toBe(201);
     expect(res.body.model).toBeNull();
   });
 
   it('el insert del producto no usa las columnas nuevas (crear funciona aunque falte la migración)', async () => {
-    await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, prompt3d: 'cono' });
+    await admin('post', '/api/admin/products').send({ name: 'Con 3D', price: 4000, category: 'Clásico', prompt3d: 'cono' });
     const fila = [].concat(fake.consultas('producto', 'insert')[0].payload)[0];
     expect(Object.keys(fila).filter((k) => k.startsWith('model_3d'))).toEqual([]);
   });

@@ -2277,21 +2277,12 @@ app.post('/api/admin/create-admin', requireAdmin, limitadorCrearAdmin, async (re
 // pero dejamos el endpoint preparado.
 // Endpoint para agregar un nuevo producto al catálogo
 app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, async (req, res) => {
-  let { name, description, price, category, image, featured, stock, nombre, descripcion, precio, categoria, prompt_usado, prompt3d, prompt } = req.body;
+  const cuerpo = req.body && typeof req.body === 'object' ? req.body : {};
+  const { prompt_usado, prompt3d, prompt } = cuerpo;
 
-  name = name || nombre;
-  description = description || descripcion;
-  price = price || precio;
-  category = category || categoria;
-
-  if (!name || !price) {
-    return res.status(400).json({ message: 'El nombre y el precio del producto son obligatorios.' });
-  }
-
-  const numPrice = parseFloat(price);
-  if (isNaN(numPrice) || numPrice <= 0) {
-    return res.status(400).json({ message: 'El precio debe ser un número mayor a 0.' });
-  }
+  // Mismas reglas que el editor, ANTES de insertar y antes de llamar a Tripo.
+  const { datos, error: errorValidacion } = validarAltaProducto(cuerpo);
+  if (errorValidacion) return res.status(400).json({ ok: false, message: errorValidacion });
 
   // El prompt 3D se valida ANTES de crear el producto: un prompt inválido no deja un producto a medias.
   const prompt3dValidado = validarPrompt3D(prompt_usado || prompt3d || prompt);
@@ -2299,33 +2290,19 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
     return res.status(400).json({ ok: false, message: prompt3dValidado.error });
   }
 
-  const numStock = stock !== undefined && stock !== null && !isNaN(parseInt(stock, 10)) ? Math.max(0, parseInt(stock, 10)) : 50;
   try {
-
-    const finalImage = image || getProductImage(name);
-    const isFeatured = Boolean(featured);
-    const cat = category || 'Clásico';
-    const desc = description || '';
-
     const newProdItem = {
-      nombre: name,
-      precio: numPrice,
-      descripcion: desc,
-      imagen: finalImage,
-      categoria: cat,
-      destacado: isFeatured,
-      stock: numStock,
+      ...datos,
       estado: true,
       rating: 4.9,
       reviews: 1
     };
 
-    // Insertar en Supabase o mockDb
-    // La base genera el id_producto; se pide la fila creada para conocerlo.
+    // La base genera el id_producto; se pide la fila creada (solo columnas públicas) para conocerlo.
     const { data: creado, error: insertErr } = await supabase
       .from('producto')
       .insert([newProdItem])
-      .select()
+      .select(COLUMNAS_PRODUCTO_ADMIN)
       .single();
     if (falloSupabase(res, insertErr, 'Error interno al crear el producto.')) return;
 
@@ -2349,21 +2326,11 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
       else console.warn('No se inició el modelo 3D del producto nuevo:', inicio.resultado, inicio.error || '');
     }
 
-    const createdProductObj = {
-      id: nextId,
-      id_producto: nextId,
-      name: name,
-      nombre: name,
-      precio: numPrice,
-      price: numPrice,
-      desc: desc,
-      image: finalImage,
-      categoria: cat,
-      destacado: isFeatured,
-      stock: numStock
-    };
+    // Solo columnas públicas; "id" es el alias que usa el panel para seguir el modelo 3D.
+    const createdProductObj = { id: nextId, ...soloColumnasProductoAdmin(creado) };
 
-    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${nextId}, Nombre: "${name}", Precio: $${numPrice}`);
+    // El nombre va con JSON.stringify: un salto de línea en el nombre no puede inventar líneas en el log.
+    console.log(`🍦 ¡Producto agregado exitosamente! ID: ${nextId}, Nombre: ${JSON.stringify(datos.nombre)}, Precio: $${datos.precio}`);
     return res.status(201).json({
       ok: true,
       message: 'Producto creado y agregado al catálogo exitosamente.',
@@ -2372,7 +2339,7 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
     });
   } catch (error) {
     console.error('Error al crear producto:', error);
-    return res.status(500).json({ message: 'Error interno al crear el producto.' });
+    return res.status(500).json({ ok: false, message: 'Error interno al crear el producto.' });
   }
 });
 
@@ -2408,44 +2375,114 @@ const PRECIO_MAX = 99999999;
 // Columnas públicas del producto que devuelven las rutas de edición (nunca model_3d_prompt ni task_id).
 const COLUMNAS_PRODUCTO_ADMIN = 'id_producto, nombre, precio, stock, descripcion, imagen, categoria, estado, destacado';
 
+// Solo number o string numérico (true, [5], null y '' no valen).
+const numero = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
+
+// Reglas de cada columna del producto: ÚNICA fuente para el alta, el editor y las rutas sueltas.
+// CATEGORIAS_VALIDAS (y PRECIO_MAX e ID_PRODUCTO_MAX) deben declararse ANTES de este objeto: el mensaje
+// de categoría se arma al cargar el archivo y fallaría si la constante todavía no existe.
+// limpiar(valor) devuelve el valor listo para la base, o undefined si no vale.
+const REGLAS_PRODUCTO = {
+  nombre: {
+    error: 'El nombre debe tener entre 1 y 120 caracteres.',
+    limpiar: (v) => {
+      const nombre = typeof v === 'string' ? v.trim() : '';
+      return nombre.length >= 1 && nombre.length <= 120 ? nombre : undefined;
+    }
+  },
+  precio: {
+    error: 'El precio debe ser un número entero mayor que 0.',
+    limpiar: (v) => {
+      const precio = numero(v);
+      return Number.isInteger(precio) && precio >= 1 && precio <= PRECIO_MAX ? precio : undefined;
+    }
+  },
+  stock: {
+    error: 'El stock debe ser un número entero mayor o igual a 0.',
+    limpiar: (v) => {
+      const stock = numero(v);
+      return Number.isInteger(stock) && stock >= 0 && stock <= ID_PRODUCTO_MAX ? stock : undefined;
+    }
+  },
+  descripcion: {
+    error: 'La descripción no puede superar 2000 caracteres.',
+    limpiar: (v) => (typeof v === 'string' && v.length <= 2000 ? v : undefined)
+  },
+  categoria: {
+    error: 'Categoría inválida. Opciones: ' + CATEGORIAS_VALIDAS.join(', '),
+    limpiar: (v) => (CATEGORIAS_VALIDAS.includes(v) ? v : undefined)
+  },
+  estado: {
+    error: 'El estado debe ser verdadero o falso.',
+    limpiar: (v) => (typeof v === 'boolean' ? v : undefined)
+  }
+};
+
+// Aplica las reglas a { columna: valor }. Los valores undefined se saltan (no vinieron).
+// Devuelve { datos } con las columnas de la base, o { error } en español (el del primer campo inválido).
+function validarCamposProducto(campos) {
+  const datos = {};
+  for (const [columna, valor] of Object.entries(campos)) {
+    if (valor === undefined) continue;
+    const regla = REGLAS_PRODUCTO[columna];
+    const limpio = regla.limpiar(valor);
+    if (limpio === undefined) return { error: regla.error };
+    datos[columna] = limpio;
+  }
+  return { datos };
+}
+
 // Valida el cuerpo del editor. Devuelve { datos } con las columnas de la base, o { error } en español.
 function validarEdicionProducto(cuerpo) {
   const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
-  const datos = {};
-  // Solo number o string numérico (true, [5], null y '' no valen).
-  const numero = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
-  if (c.name !== undefined) {
-    const nombre = typeof c.name === 'string' ? c.name.trim() : '';
-    if (nombre.length < 1 || nombre.length > 120) return { error: 'El nombre debe tener entre 1 y 120 caracteres.' };
-    datos.nombre = nombre;
-  }
-  if (c.precio !== undefined) {
-    const precio = numero(c.precio);
-    if (!Number.isInteger(precio) || precio < 1 || precio > PRECIO_MAX) return { error: 'El precio debe ser un número entero mayor que 0.' };
-    datos.precio = precio;
-  }
-  if (c.stock !== undefined) {
-    const stock = numero(c.stock);
-    if (!Number.isInteger(stock) || stock < 0 || stock > ID_PRODUCTO_MAX) return { error: 'El stock debe ser un número entero mayor o igual a 0.' };
-    datos.stock = stock;
-  }
-  if (c.descripcion !== undefined) {
-    if (typeof c.descripcion !== 'string' || c.descripcion.length > 2000) return { error: 'La descripción no puede superar 2000 caracteres.' };
-    datos.descripcion = c.descripcion;
-  }
-  if (c.categoria !== undefined) {
-    if (!CATEGORIAS_VALIDAS.includes(c.categoria)) return { error: 'Categoría inválida. Opciones: ' + CATEGORIAS_VALIDAS.join(', ') };
-    datos.categoria = c.categoria;
-  }
-  if (c.estado !== undefined) {
-    if (typeof c.estado !== 'boolean') return { error: 'El estado debe ser verdadero o falso.' };
-    datos.estado = c.estado;
-  }
+  const { datos, error } = validarCamposProducto({
+    nombre: c.name, precio: c.precio, stock: c.stock, descripcion: c.descripcion, categoria: c.categoria, estado: c.estado
+  });
+  if (error) return { error };
   if (Object.keys(datos).length === 0) return { error: 'No hay ningún dato válido para actualizar.' };
   return { datos };
 }
 
-// Imagen del producto: URL https:// o ruta local que empieza con una sola "/" y sin "..".
+const STOCK_INICIAL_POR_DEFECTO = 50;
+const MENSAJE_IMAGEN_INVALIDA = 'La imagen debe ser una URL https:// o una ruta que empiece con "/" (máximo 2048 caracteres).';
+
+// Valida el cuerpo del alta (acepta los nombres en inglés o en español, sin "a || b": un valor inválido
+// no se reemplaza por el otro). Nombre, precio y categoría son obligatorios; stock 50 (si no viene o viene
+// vacío) y descripción vacía por defecto. La imagen es opcional: si no viene, se elige una por el nombre.
+// Devuelve { datos } con las columnas de la base, o { error } en español.
+function validarAltaProducto(cuerpo) {
+  const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
+  const elegir = (a, b) => (a !== undefined ? a : b);
+  // Los obligatorios ausentes pasan como null para que su regla los rechace.
+  const obligatorio = (v) => (v === undefined ? null : v);
+  const { datos, error } = validarCamposProducto({
+    nombre: obligatorio(elegir(c.name, c.nombre)),
+    precio: obligatorio(elegir(c.price, c.precio)),
+    stock: c.stock === undefined || c.stock === '' ? STOCK_INICIAL_POR_DEFECTO : c.stock,
+    descripcion: elegir(elegir(c.description, c.descripcion), ''),
+    categoria: obligatorio(elegir(c.category, c.categoria))
+  });
+  if (error) return { error };
+
+  if (c.image === undefined || c.image === null || c.image === '') {
+    datos.imagen = getProductImage(datos.nombre);
+  } else {
+    const imagen = imagenProductoValida(c.image);
+    if (!imagen) return { error: MENSAJE_IMAGEN_INVALIDA };
+    datos.imagen = imagen;
+  }
+  datos.destacado = elegir(c.featured, c.destacado) === true;
+  return { datos };
+}
+
+// Deja solo las columnas públicas del producto (la base simulada puede devolver más).
+function soloColumnasProductoAdmin(fila) {
+  const limpia = {};
+  for (const columna of COLUMNAS_PRODUCTO_ADMIN.split(', ')) limpia[columna] = fila[columna];
+  return limpia;
+}
+
+// Imagen del producto: URL https:// (sin usuario ni clave) o ruta local que empieza con una sola "/" y sin "..".
 function imagenProductoValida(valor) {
   if (typeof valor !== 'string') return null;
   const img = valor.trim();
@@ -2457,6 +2494,8 @@ function imagenProductoValida(valor) {
   }
   try {
     const url = new URL(img);
+    // Con usuario o clave (https://user:pass@...) se podría engañar a quien mira el enlace o filtrar datos.
+    if (url.username || url.password) return null;
     return url.protocol === 'https:' ? url.href : null;
   } catch {
     return null;
@@ -2469,7 +2508,7 @@ app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   const imagen = imagenProductoValida(req.body && req.body.image);
   if (!imagen) {
-    return res.status(400).json({ ok: false, message: 'La imagen debe ser una URL https:// o una ruta que empiece con "/" (máximo 2048 caracteres).' });
+    return res.status(400).json({ ok: false, message: MENSAJE_IMAGEN_INVALIDA });
   }
   try {
     const { data, error } = await supabase
@@ -2524,115 +2563,72 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// Actualizar estado destacado del producto
-app.put('/api/admin/products/:id/featured', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { destacado } = req.body;
+// Rutas sueltas del panel (destacado, precio, categoría y stock): cambian UNA columna del producto.
+// El id se valida igual que en el editor y el valor con su regla compartida (REGLAS_PRODUCTO).
+// Base primero (es la única fuente de verdad): si falla -> 500; si no hay fila -> 404. La copia en
+// memoria solo cambia después de que la base guardó.
+function rutaCampoProducto({ columna, limpiar, error, mensajeError, mensajeOk }) {
+  return async (req, res) => {
+    const prodId = idPositivoValido(req.params.id);
+    if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
+    const valor = limpiar((req.body || {})[columna]);
+    if (valor === undefined) return res.status(400).json({ ok: false, message: error });
 
-  try {
-    const prodId = parseInt(id, 10);
-    const isFeatured = Boolean(destacado);
+    try {
+      const { data, error: dbErr } = await supabase
+        .from('producto')
+        .update({ [columna]: valor })
+        .eq('id_producto', prodId)
+        .select('id_producto')
+        .maybeSingle();
+      if (falloSupabase(res, dbErr, mensajeError)) return;
+      if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
 
-    // Base primero (producto.destacado es la única fuente de verdad): si falla, no se informa éxito
-    // y la copia en memoria no cambia.
-    const { error: dbErr } = await supabase.from('producto').update({ destacado: isFeatured }).eq('id_producto', prodId);
-    if (falloSupabase(res, dbErr, 'Error al actualizar estado destacado.')) return;
+      const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
+      if (fbItem) fbItem[columna] = valor;
 
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.destacado = isFeatured;
+      console.log(`✅ Producto ${prodId} ${columna}=${valor} actualizado.`);
+      return res.status(200).json({ ok: true, message: mensajeOk(valor), id: prodId, [columna]: valor });
+    } catch (err) {
+      console.error(mensajeError, err);
+      return res.status(500).json({ ok: false, message: mensajeError });
+    }
+  };
+}
 
-    console.log(`✅ Producto ${prodId} destacado=${isFeatured} guardado en la base.`);
-    return res.status(200).json({ ok: true, message: `Producto ${isFeatured ? 'destacado' : 'retirado de destacados'} con éxito.`, id: prodId, destacado: isFeatured });
-  } catch (error) {
-    console.error('Error al actualizar estado destacado:', error);
-    return res.status(500).json({ message: 'Error al actualizar estado destacado.' });
-  }
-});
+// Actualizar estado destacado del producto: solo true/false (o los textos "true"/"false").
+const VALORES_DESTACADO = new Map([[true, true], [false, false], ['true', true], ['false', false]]);
+app.put('/api/admin/products/:id/featured', requireAdmin, rutaCampoProducto({
+  columna: 'destacado',
+  limpiar: (v) => VALORES_DESTACADO.get(v),
+  error: 'El valor de destacado debe ser verdadero o falso.',
+  mensajeError: 'Error al actualizar estado destacado.',
+  mensajeOk: (v) => `Producto ${v ? 'destacado' : 'retirado de destacados'} con éxito.`
+}));
 
 // Actualizar precio del producto
-app.put('/api/admin/products/:id/price', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { precio } = req.body;
-  const numPrice = parseInt(precio, 10);
-
-  if (!numPrice || numPrice <= 0) {
-    return res.status(400).json({ message: 'El precio debe ser un número positivo.' });
-  }
-
-  try {
-    const prodId = parseInt(id, 10);
-
-    // Base primero: la copia en memoria solo cambia si la base respondió sin error
-    const { error: dbErr } = await supabase.from('producto').update({ precio: numPrice }).eq('id_producto', prodId);
-    if (falloSupabase(res, dbErr, 'Error al actualizar el precio.')) return;
-
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.precio = numPrice;
-
-    console.log(`✅ Producto ${prodId} precio=${numPrice} actualizado.`);
-    return res.status(200).json({ ok: true, message: 'Precio actualizado con éxito.', id: prodId, precio: numPrice });
-  } catch (error) {
-    console.error('Error al actualizar precio:', error);
-    return res.status(500).json({ message: 'Error al actualizar el precio.' });
-  }
-});
+app.put('/api/admin/products/:id/price', requireAdmin, rutaCampoProducto({
+  columna: 'precio',
+  ...REGLAS_PRODUCTO.precio,
+  mensajeError: 'Error al actualizar el precio.',
+  mensajeOk: () => 'Precio actualizado con éxito.'
+}));
 
 // Actualizar categoría del producto
-app.put('/api/admin/products/:id/category', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { categoria } = req.body;
-
-  if (!categoria || !CATEGORIAS_VALIDAS.includes(categoria)) {
-    return res.status(400).json({ message: 'Categoría inválida. Opciones: ' + CATEGORIAS_VALIDAS.join(', ') });
-  }
-
-  try {
-    const prodId = parseInt(id, 10);
-
-    // Base primero: la copia en memoria solo cambia si la base respondió sin error
-    const { error: dbErr } = await supabase.from('producto').update({ categoria }).eq('id_producto', prodId);
-    if (falloSupabase(res, dbErr, 'Error al actualizar la categoría.')) return;
-
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) fbItem.categoria = categoria;
-
-    console.log(`✅ Producto ${prodId} categoría=${categoria} actualizada.`);
-    return res.status(200).json({ ok: true, message: 'Categoría actualizada con éxito.', id: prodId, categoria });
-  } catch (error) {
-    console.error('Error al actualizar categoría:', error);
-    return res.status(500).json({ message: 'Error al actualizar la categoría.' });
-  }
-});
+app.put('/api/admin/products/:id/category', requireAdmin, rutaCampoProducto({
+  columna: 'categoria',
+  ...REGLAS_PRODUCTO.categoria,
+  mensajeError: 'Error al actualizar la categoría.',
+  mensajeOk: () => 'Categoría actualizada con éxito.'
+}));
 
 // Actualizar stock del producto
-app.put('/api/admin/products/:id/stock', requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { stock } = req.body;
-  const numStock = parseInt(stock, 10);
-
-  if (isNaN(numStock) || numStock < 0) {
-    return res.status(400).json({ message: 'El stock debe ser un número entero mayor o igual a 0.' });
-  }
-
-  try {
-    const prodId = parseInt(id, 10);
-
-    // Base primero: la copia en memoria solo cambia si la base respondió sin error
-    const { error: dbErr } = await supabase.from('producto').update({ stock: numStock }).eq('id_producto', prodId);
-    if (falloSupabase(res, dbErr, 'Error al actualizar el stock disponible.')) return;
-
-    const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
-    if (fbItem) {
-      fbItem.stock = numStock;
-    }
-
-    console.log(`✅ Producto ${prodId} stock=${numStock} actualizado.`);
-    return res.status(200).json({ ok: true, message: 'Stock disponible actualizado con éxito.', id: prodId, stock: numStock });
-  } catch (error) {
-    console.error('Error al actualizar stock:', error);
-    return res.status(500).json({ message: 'Error al actualizar el stock disponible.' });
-  }
-});
+app.put('/api/admin/products/:id/stock', requireAdmin, rutaCampoProducto({
+  columna: 'stock',
+  ...REGLAS_PRODUCTO.stock,
+  mensajeError: 'Error al actualizar el stock disponible.',
+  mensajeOk: () => 'Stock disponible actualizado con éxito.'
+}));
 
 // ─── Despertador diario (Vercel Cron) ───────────────────────────
 // Una consulta mínima a la base evita que Supabase (plan gratis) se pause por falta de actividad.
