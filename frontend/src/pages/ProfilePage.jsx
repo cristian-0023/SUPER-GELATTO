@@ -4,6 +4,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { getToken } from '../utils/api';
 import { actualizarUsuarioGuardado } from '../utils/sesion';
 import { crearSondeo } from '../utils/sondeo';
+import { validarFotoPerfil, achicarFoto } from '../utils/fotoPerfil';
 import SuperPointsCard from '../components/SuperPointsCard';
 import { User, Mail, Star, Package, CreditCard, ChevronRight, Edit2, Sparkles, Gift, Crown, Info, Loader2, Save, X, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 
@@ -11,12 +12,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const fileInputRef = useRef(null);
-  
-  // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE
-  if (!user?.id) {
-    return <Navigate to="/register" state={{ from: '/perfil' }} />;
-  }
-  
+
   // Edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user?.name || '');
@@ -26,28 +22,34 @@ const ProfilePage = ({ user, onUpdateUser }) => {
   const [status, setStatus] = useState({ type: null, message: '' });
   const [errors, setErrors] = useState({});
 
-  const handleAvatarUpload = (e) => {
+  // Aviso de la foto (se ve aunque no se esté editando el perfil).
+  const [avisoFoto, setAvisoFoto] = useState({ type: null, message: '' });
+
+  const handleAvatarUpload = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // permite volver a elegir el mismo archivo
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setStatus({ type: 'error', message: 'Por favor selecciona una imagen válida.' });
+    const validacion = validarFotoPerfil(file);
+    if (!validacion.ok) {
+      setAvisoFoto({ type: 'error', message: validacion.mensaje });
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
+    try {
+      // Se guarda achicada (máx. 256x256, JPEG): pesa decenas de KB y no llena localStorage.
+      const dataUrl = await achicarFoto(file);
       setPicture(dataUrl);
       const updatedUserObj = { ...user, picture: dataUrl, avatar: dataUrl };
       actualizarUsuarioGuardado(updatedUserObj);
       if (onUpdateUser) {
         onUpdateUser(updatedUserObj);
       }
-      setStatus({ type: 'success', message: '¡Foto de perfil cargada correctamente!' });
-      setTimeout(() => setStatus({ type: null, message: '' }), 3000);
-    };
-    reader.readAsDataURL(file);
+      setAvisoFoto({ type: 'success', message: '¡Foto de perfil cargada correctamente!' });
+      setTimeout(() => setAvisoFoto({ type: null, message: '' }), 3000);
+    } catch {
+      setAvisoFoto({ type: 'error', message: 'No pudimos leer esa imagen. Prueba con otra foto.' });
+    }
   };
 
   const handleKeyDownNoSpaces = (e) => {
@@ -177,6 +179,12 @@ const ProfilePage = ({ user, onUpdateUser }) => {
     }
   };
 
+  // SI NO ESTÁ REGISTRADO (no tiene ID de base de datos), LO MANDAMOS A REGISTRARSE.
+  // Va después de todos los hooks: React exige llamarlos siempre en el mismo orden.
+  if (!user?.id) {
+    return <Navigate to="/register" state={{ from: '/perfil' }} />;
+  }
+
   return (
     <div className="pt-[80px] pb-24 px-4 sm:px-6 min-h-screen">
       <div className="max-w-7xl mx-auto">
@@ -189,7 +197,7 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleAvatarUpload} 
-                accept="image/*" 
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 className="hidden" 
               />
               
@@ -215,6 +223,23 @@ const ProfilePage = ({ user, onUpdateUser }) => {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-white">Cambiar foto</span>
                 </div>
               </div>
+
+              <AnimatePresence>
+                {avisoFoto.message && (
+                  <motion.div
+                    role={avisoFoto.type === 'error' ? 'alert' : 'status'}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className={`w-full mb-6 p-3 rounded-lg flex items-center gap-2 text-[11px] font-bold ${
+                      avisoFoto.type === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}
+                  >
+                    {avisoFoto.type === 'success' ? <CheckCircle2 size={14} className="flex-shrink-0" /> : <AlertCircle size={14} className="flex-shrink-0" />}
+                    {avisoFoto.message}
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {!isEditing ? (
                 <div className="text-center w-full">

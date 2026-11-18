@@ -105,3 +105,19 @@ describe('modo simulado (sin Supabase): Super Points', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('modo simulado (sin Supabase): login con "_" en el correo', () => {
+  it('quien se registra con "_" puede iniciar sesión (ilike entiende el escape de comodines)', async () => {
+    const datos = { name: 'Ana', lastName: 'Sim', email: 'ana_sim@example.com', password: 'Clave123!', confirmPassword: 'Clave123!' };
+    const reg = await request(app).post('/api/register').send(datos);
+    expect(reg.status).toBe(201);
+
+    const res = await request(app).post('/api/login').send({ email: 'ana_sim@example.com', password: 'Clave123!' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe('ana_sim@example.com');
+
+    // "anaxsim" no debe encajar con la cuenta "ana_sim".
+    const otro = await request(app).post('/api/login').send({ email: 'anaxsim@example.com', password: 'Clave123!' });
+    expect(otro.status).toBe(401);
+  });
+});

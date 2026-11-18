@@ -21,6 +21,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
 const { handleChatbotRequest } = require('./chatbot');
 const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
+const { correoParaIlike } = require('./correoIlike');
 
 
 const {
@@ -478,7 +479,8 @@ const makeQueryBuilder = (tableName) => {
       return builder;
     },
     ilike: (field, value) => {
-      const target = String(value || '').toLowerCase();
+      // Como la base real: "\_", "\%" y "\\" son caracteres literales (escapados con correoParaIlike).
+      const target = String(value || '').replace(/\\(.)/g, '$1').toLowerCase();
       queryData = queryData.filter(item => String(item[field] || '').toLowerCase() === target);
       return builder;
     },
@@ -1275,8 +1277,11 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
     return res.status(403).json({ ok: false, message: 'No se puede registrar con ese correo.' });
   }
 
-  // Verificar si el usuario ya existe
-  const { data: existingUser } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
+  const errorRegistro = 'No se pudo completar el registro. Inténtalo más tarde.';
+
+  // Verificar si el usuario ya existe (si la base falla, no se intenta insertar).
+  const { data: existingUser, error: errorBusqueda } = await supabase.from('usuario').select('email').eq('email', email).maybeSingle();
+  if (falloSupabase(res, errorBusqueda, errorRegistro)) return;
   if (existingUser) return res.status(409).json({ message: 'El email ya está registrado.' });
 
   try {
@@ -1290,15 +1295,14 @@ app.post('/api/register', limitadorRegistro, async (req, res) => {
 
     // Dos registros a la vez con el mismo correo: el segundo choca con el candado único de la base.
     if (registerError?.code === '23505') return res.status(409).json({ message: 'El email ya está registrado.' });
-    if (registerError) throw registerError;
+    if (falloSupabase(res, registerError, errorRegistro)) return;
 
     // Queda con la sesión iniciada, igual que en el login (rol de la fila insertada: 'cliente').
     // Si la base no devolvió la fila, se registra sin sesión y el frontend lo manda a /login.
     const sesion = newUser ? sesionDe(newUser) : {};
     return res.status(201).json({ message: 'Usuario registrado exitosamente.', ...sesion });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Error en el servidor.' });
+    falloSupabase(res, error || new Error('error desconocido'), errorRegistro);
   }
 });
 
@@ -1326,7 +1330,8 @@ app.post('/api/login', limitadorLogin, async (req, res) => {
 
   const cleanEmail = String(email || '').trim().toLowerCase();
 
-  const { data: user, error } = await supabase.from('usuario').select('*').ilike('email', cleanEmail).maybeSingle();
+  // Correo exacto sin distinguir mayúsculas (se escapan los comodines de ilike).
+  const { data: user, error } = await supabase.from('usuario').select('*').ilike('email', correoParaIlike(cleanEmail)).maybeSingle();
 
   if (error || !user) return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
 
@@ -1522,8 +1527,7 @@ async function verificarCredencialGoogle(credential) {
 // Busca el usuario por correo exacto (sin distinguir mayúsculas). Se escapan los comodines de ilike
 // (% y _) y se confirma la coincidencia exacta, para que un correo no "encaje" con la cuenta de otro.
 async function buscarUsuarioPorEmail(email) {
-  const patron = email.replace(/[\\%_]/g, (c) => '\\' + c);
-  const { data, error } = await supabase.from('usuario').select(COLUMNAS_SESION).ilike('email', patron).maybeSingle();
+  const { data, error } = await supabase.from('usuario').select(COLUMNAS_SESION).ilike('email', correoParaIlike(email)).maybeSingle();
   if (error) return { error };
   const usuario = data && String(data.email || '').trim().toLowerCase() === email ? data : null;
   return { usuario };
@@ -1617,9 +1621,6 @@ function urlFrontendRecuperacion() {
 }
 // En producción el correo debe ser real (SMTP): sin él el enlace no llegaría a nadie.
 const hayCorreoReal = () => !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-
-// Para ilike: "_" y "%" son comodines; se escapan para comparar el correo exacto (sin mayúsculas).
-const correoParaIlike = (correo) => correo.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 app.post('/api/forgot-password', limitadorOlvidoClave, async (req, res) => {
   const { email } = req.body;
@@ -1914,11 +1915,10 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
 
     // 4. Correo ya usado por otra cuenta (sin distinguir mayúsculas; se escapan los comodines de ilike).
     if (!mismoCorreo(email, destino.email)) {
-      const patron = email.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c);
       const { data: otros, error: errorDuplicado } = await supabase
         .from('usuario')
         .select('id_usuario, email')
-        .ilike('email', patron)
+        .ilike('email', correoParaIlike(email.toLowerCase()))
         .neq('id_usuario', id)
         .limit(5);
       if (falloSupabase(res, errorDuplicado, 'Error al actualizar el perfil.')) return;
