@@ -98,12 +98,23 @@ describe('alta: categoría', () => {
 });
 
 describe('alta: stock', () => {
-  it.each([['decimal', 2.5], ['negativo', -1], ['texto', 'mucho'], ['true', true], ['[5]', [5]], ['mayor al tope', 2147483648], ['vacío', '']])(
+  it.each([['decimal', 2.5], ['negativo', -1], ['texto', 'mucho'], ['true', true], ['[5]', [5]], ['mayor al tope', 2147483648]])(
     'stock %s -> 400', async (_, stock) => {
       await esperarRechazo({ ...VALIDO, stock });
     });
-  it('sin stock -> se guarda 0', async () => {
+  // Decisión del usuario: sin stock (o vacío) vale 50, como antes.
+  it('sin stock -> se guarda 50', async () => {
     const res = await post(VALIDO);
+    expect(res.status).toBe(201);
+    expect(primera(fake.consultas('producto', 'insert')[0]).stock).toBe(50);
+  });
+  it("stock '' -> se guarda 50", async () => {
+    const res = await post({ ...VALIDO, stock: '' });
+    expect(res.status).toBe(201);
+    expect(primera(fake.consultas('producto', 'insert')[0]).stock).toBe(50);
+  });
+  it('stock 0 explícito -> se guarda 0', async () => {
+    const res = await post({ ...VALIDO, stock: 0 });
     expect(res.status).toBe(201);
     expect(primera(fake.consultas('producto', 'insert')[0]).stock).toBe(0);
   });

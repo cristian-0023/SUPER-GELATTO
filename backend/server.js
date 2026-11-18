@@ -2440,11 +2440,12 @@ function validarEdicionProducto(cuerpo) {
   return { datos };
 }
 
+const STOCK_INICIAL_POR_DEFECTO = 50;
 const MENSAJE_IMAGEN_INVALIDA = 'La imagen debe ser una URL https:// o una ruta que empiece con "/" (máximo 2048 caracteres).';
 
 // Valida el cuerpo del alta (acepta los nombres en inglés o en español, sin "a || b": un valor inválido
-// no se reemplaza por el otro). Nombre, precio y categoría son obligatorios; stock 0 y descripción vacía
-// por defecto. La imagen es opcional: si no viene, se elige una por el nombre.
+// no se reemplaza por el otro). Nombre, precio y categoría son obligatorios; stock 50 (si no viene o viene
+// vacío) y descripción vacía por defecto. La imagen es opcional: si no viene, se elige una por el nombre.
 // Devuelve { datos } con las columnas de la base, o { error } en español.
 function validarAltaProducto(cuerpo) {
   const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
@@ -2454,7 +2455,7 @@ function validarAltaProducto(cuerpo) {
   const { datos, error } = validarCamposProducto({
     nombre: obligatorio(elegir(c.name, c.nombre)),
     precio: obligatorio(elegir(c.price, c.precio)),
-    stock: c.stock === undefined ? 0 : c.stock,
+    stock: c.stock === undefined || c.stock === '' ? STOCK_INICIAL_POR_DEFECTO : c.stock,
     descripcion: elegir(elegir(c.description, c.descripcion), ''),
     categoria: obligatorio(elegir(c.category, c.categoria))
   });

@@ -13,7 +13,7 @@ describe('armarCuerpoAlta', () => {
   it('precio vacío se manda vacío (no 0) para que el servidor lo rechace', () => {
     expect(armarCuerpoAlta({ ...FORM, price: '' }).precio).toBe('');
   });
-  it('stock vacío no se manda (el servidor pone 0)', () => {
+  it('stock vacío no se manda (el servidor pone 50)', () => {
     expect(armarCuerpoAlta({ ...FORM, stock: '' })).not.toHaveProperty('stock');
   });
   it('imagen vacía o con espacios no se manda (el servidor elige una por el nombre)', () => {

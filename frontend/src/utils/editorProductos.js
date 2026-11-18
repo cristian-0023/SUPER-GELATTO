@@ -43,7 +43,7 @@ export const IMAGENES_PREDETERMINADAS = [
 
 // Cuerpo de POST /api/admin/products a partir del formulario "Agregar producto".
 // Un precio vacío se manda vacío (no 0) para que el servidor lo rechace; el stock vacío no se manda
-// (el servidor pone 0) y la imagen vacía tampoco (el servidor elige una por el nombre).
+// (el servidor pone 50) y la imagen vacía tampoco (el servidor elige una por el nombre).
 export function armarCuerpoAlta(form) {
   const vacio = (v) => v === '' || v === null || v === undefined;
   const cuerpo = {
