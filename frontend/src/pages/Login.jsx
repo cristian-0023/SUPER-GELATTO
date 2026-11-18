@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
 import { setToken } from '../utils/api';
+import { guardarSesion } from '../utils/sesion';
 import CapturaFacial from '../components/CapturaFacial';
 import '../styles/Auth.css';
 
@@ -81,15 +82,7 @@ function Login({ onLogin }) {
       const data = await loginRes.json();
 
       if (loginRes.ok) {
-        if (data.token) {
-          setToken(data.token);
-          sessionStorage.setItem('superGelatto_token', data.token);
-          localStorage.setItem('superGelatto_token', data.token);
-        }
-        if (data.user) {
-          localStorage.setItem('superGelatto_user', JSON.stringify(data.user));
-          sessionStorage.setItem('superGelatto_user', JSON.stringify(data.user));
-        }
+        guardarSesion(data);
         onLogin({ ...data.user, picture });
         navigate(data.user?.rol === 'admin' ? '/admin' : '/');
       } else {
@@ -152,14 +145,8 @@ function Login({ onLogin }) {
         throw new Error(data.message || 'Reconocimiento facial no reconocido o acceso denegado.');
       }
 
-      if (data.token) {
-        setToken(data.token);
-        sessionStorage.setItem('superGelatto_token', data.token);
-        localStorage.setItem('superGelatto_token', data.token);
-      }
+      guardarSesion(data);
       if (data.user) {
-        localStorage.setItem('superGelatto_user', JSON.stringify(data.user));
-        sessionStorage.setItem('superGelatto_user', JSON.stringify(data.user));
         onLogin(data.user);
         navigate(data.user.rol === 'admin' ? '/admin' : '/');
       }

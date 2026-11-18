@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { guardarSesion } from '../utils/sesion';
 import '../styles/Auth.css';
 
-function Register() {
+function Register({ onLogin }) {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -118,6 +119,17 @@ function Register() {
       if (!res.ok || data.ok === false) {
         setErrors({ server: data.message || 'Error al registrarse.' });
         setLoading(false);
+        return;
+      }
+
+      // Con token, queda con la sesión iniciada (igual que el login) y entra a la tienda.
+      // Sin token (la base no devolvió la cuenta), sigue como antes: a iniciar sesión.
+      if (guardarSesion(data) && data.user) {
+        setSuccess('¡Cuenta creada! Bienvenido/a a Super Gelatto...');
+        setTimeout(() => {
+          onLogin(data.user);
+          navigate('/');
+        }, 1500);
         return;
       }
 

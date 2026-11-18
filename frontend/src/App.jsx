@@ -100,7 +100,7 @@ function App() {
             />
             <Route
               path="/register"
-              element={user ? <Navigate to="/" /> : <Register />}
+              element={user ? <Navigate to="/" /> : <Register onLogin={handleLogin} />}
             />
             <Route
               path="/forgot-password"
