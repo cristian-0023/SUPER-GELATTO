@@ -2022,8 +2022,20 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   }
 });
 
+// Cuenta del super admin: por el correo configurado o por un rol super_admin en la base. Nunca se borra
+// ni se le cambia el rol (tampoco él mismo).
+function esCuentaSuperAdmin(usuario) {
+  return esSuperAdminEmail(usuario?.email) || usuario?.rol === 'super_admin';
+}
+
+// Columnas que bastan para decidir permisos sobre otra cuenta (nunca password_hash).
+const COLUMNAS_PERMISOS_USUARIO = 'id_usuario, email, rol';
+
 app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
-  const { id } = req.params;
+  const id = idPositivoValido(req.params.id); // mismo formato: entero positivo
+  if (!id) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
+  }
   let requesterEmail = (req.user?.email || '').toLowerCase().trim();
 
   try {
@@ -2034,18 +2046,17 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
       }
     }
 
-    const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
+    const { data: targetUser, error: errorLectura } = await supabase
+      .from('usuario').select(COLUMNAS_PERMISOS_USUARIO).eq('id_usuario', id).maybeSingle();
+    if (falloSupabase(res, errorLectura, 'Error al eliminar usuario.')) return;
 
     if (!targetUser) {
-      return res.status(404).json({ message: 'Usuario no encontrado.' });
+      return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
     }
 
-    const targetEmail = (targetUser.email || '').toLowerCase().trim();
-    const isTargetSuperAdmin = esSuperAdminEmail(targetEmail) || targetUser.rol === 'super_admin';
-
     // No se permite eliminar la cuenta principal de super administrador
-    if (isTargetSuperAdmin) {
-      return res.status(403).json({ message: 'Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar.' });
+    if (esCuentaSuperAdmin(targetUser)) {
+      return res.status(403).json({ ok: false, message: 'Acceso denegado. La cuenta principal de super administrador está protegida y no se puede eliminar.' });
     }
 
     // Permisos de eliminación:
@@ -2055,8 +2066,9 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     const isRequesterSuperAdmin = esSuperAdminEmail(requesterEmail);
 
     if (isTargetAdmin && !isRequesterSuperAdmin) {
-      return res.status(403).json({ 
-        message: 'Acceso denegado. Solo la cuenta principal de Super Administrador puede eliminar usuarios administradores.' 
+      return res.status(403).json({
+        ok: false,
+        message: 'Acceso denegado. Solo la cuenta principal de Super Administrador puede eliminar usuarios administradores.'
       });
     }
 
@@ -2071,52 +2083,54 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     }
 
     const { error } = await supabase.from('usuario').delete().eq('id_usuario', id);
-    if (error) {
-      console.error('Error en Supabase al eliminar usuario:', error);
-      throw error;
-    }
+    if (falloSupabase(res, error, 'Error al eliminar usuario.')) return;
     return res.status(200).json({ message: 'Usuario eliminado correctamente.' });
   } catch (error) {
     console.error('Error al eliminar usuario:', error);
-    return res.status(500).json({ message: error.message || 'Error al eliminar usuario.' });
+    return res.status(500).json({ ok: false, message: 'Error al eliminar usuario.' });
   }
 });
 
 app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   const { rol } = req.body;
   const requesterEmail = (req.user?.email || '').toLowerCase();
+  const soySuperAdmin = esSuperAdminEmail(requesterEmail);
 
   if (!rol || !['admin', 'cliente'].includes(rol)) {
-    return res.status(400).json({ message: 'Rol no válido.' });
+    return res.status(400).json({ ok: false, message: 'Rol no válido.' });
   }
   const id = idPositivoValido(req.params.id); // mismo formato: entero positivo
   if (!id) {
     return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
   }
-  // Solo el super administrador nombra administradores (igual que en create-admin).
-  if (rol === 'admin' && !esSuperAdminEmail(requesterEmail)) {
-    return res.status(403).json({ ok: false, message: 'Solo el super administrador puede ascender cuentas a administrador.' });
-  }
 
   try {
+    // Se lee la cuenta antes de decidir, para que "cuenta protegida" tenga prioridad sobre "solo el super
+    // admin asciende". Ningún camino actualiza antes de pasar todas las comprobaciones.
     const { data: targetUser, error: errorLectura } = await supabase
-      .from('usuario').select('id_usuario, email, rol').eq('id_usuario', id).maybeSingle();
+      .from('usuario').select(COLUMNAS_PERMISOS_USUARIO).eq('id_usuario', id).maybeSingle();
     if (falloSupabase(res, errorLectura, 'Error al actualizar el rol del usuario.')) return;
 
     if (!targetUser) {
-      return res.status(404).json({ message: 'Usuario no encontrado.' });
+      return res.status(404).json({ ok: false, message: 'Usuario no encontrado.' });
     }
 
     // No se puede modificar el rol de la cuenta principal de super administrador
-    if (esSuperAdminEmail(targetUser.email)) {
-      return res.status(403).json({ message: 'Acceso denegado. No se puede modificar el rol de la cuenta principal de super administrador.' });
+    if (esCuentaSuperAdmin(targetUser)) {
+      return res.status(403).json({ ok: false, message: 'Acceso denegado. No se puede modificar el rol de la cuenta principal de super administrador.' });
+    }
+
+    // Solo el super administrador nombra administradores (igual que en create-admin).
+    if (rol === 'admin' && !soySuperAdmin) {
+      return res.status(403).json({ ok: false, message: 'Solo el super administrador puede ascender cuentas a administrador.' });
     }
 
     // Si el usuario objetivo es administrador y se intenta bajar a cliente:
     // Solo el super administrador (SUPER_ADMIN_EMAIL) puede realizar el cambio.
-    if (targetUser.rol === 'admin' && rol === 'cliente' && !esSuperAdminEmail(requesterEmail)) {
-      return res.status(403).json({ 
-        message: 'Acceso denegado. Solo la cuenta de super administrador principal puede bajar de categoría a los administradores a cliente.' 
+    if (targetUser.rol === 'admin' && rol === 'cliente' && !soySuperAdmin) {
+      return res.status(403).json({
+        ok: false,
+        message: 'Acceso denegado. Solo la cuenta de super administrador principal puede bajar de categoría a los administradores a cliente.'
       });
     }
 

@@ -1,10 +1,12 @@
 // Seguridad de PUT /api/admin/users/:id/role (SEC-001). Contrato:
-//  - Solo el super admin asciende cuentas a admin: un admin normal que pide rol 'admin' -> 403 y no toca la base.
+//  - Solo el super admin asciende cuentas a admin: un admin normal que pide rol 'admin' -> 403 y no actualiza.
 //  - El :id de la URL debe ser un entero positivo -> si no, 400 sin consultar la base.
-//  - Nadie toca el rol del super admin (ni él mismo) -> 403.
+//  - Nadie toca el rol del super admin (por correo o por rol super_admin), ni él mismo -> 403 "cuenta principal".
+//    Esa comprobación va antes que la de ascender, para que el mensaje sea el correcto.
 //  - Un admin normal no puede bajar a otro admin a cliente -> 403. El super admin sí -> 200.
 //  - La lectura del usuario pide columnas concretas (nunca '*', que incluye password_hash).
 //  - Error de la base al leer -> 500 sin detalles internos y sin actualizar. Usuario inexistente -> 404.
+//  - Todas las respuestas de error llevan ok:false.
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
@@ -35,14 +37,13 @@ const lecturas = () => fake.consultas('usuario', 'select');
 const updates = () => fake.consultas('usuario', 'update');
 
 describe('PUT /api/admin/users/:id/role: ascender a admin', () => {
-  it('admin normal asciende a un cliente -> 403 en español, sin leer ni actualizar', async () => {
+  it('admin normal asciende a un cliente -> 403 en español y no actualiza', async () => {
     objetivo(CLIENTE);
     const res = await cambiarRol(50, 'admin', ADMIN_SESION);
     expect(res.status).toBe(403);
     expect(res.body.ok).toBe(false);
-    expect(res.body.message).toMatch(/super administrador/i);
+    expect(res.body.message).toMatch(/super administrador puede ascender/i);
     expect(res.body.message).not.toMatch(/@/);
-    expect(lecturas()).toHaveLength(0);
     expect(updates()).toHaveLength(0);
   });
 
@@ -60,6 +61,7 @@ describe('PUT /api/admin/users/:id/role: ascender a admin', () => {
     await cambiarRol(50, 'admin');
     expect(lecturas()).toHaveLength(1);
     expect(lecturas()[0].columnas).toBe('id_usuario, email, rol');
+    expect(lecturas()[0].modo).toBe('maybeSingle');
     expect(lecturas()[0].filtros).toContainEqual(['eq', 'id_usuario', 50]);
   });
 });
@@ -78,6 +80,7 @@ describe('PUT /api/admin/users/:id/role: reglas que ya existían', () => {
   it('rol no válido -> 400', async () => {
     const res = await cambiarRol(50, 'super_admin');
     expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
     expect(updates()).toHaveLength(0);
   });
 
@@ -86,10 +89,29 @@ describe('PUT /api/admin/users/:id/role: reglas que ya existían', () => {
     expect(res.status).toBe(401);
   });
 
-  it('nadie toca el rol del super admin, ni él mismo -> 403', async () => {
+  it('nadie toca el rol del super admin, ni él mismo -> 403 { ok:false }', async () => {
     objetivo(CUENTA_SUPER);
     const res = await cambiarRol(1, 'cliente');
     expect(res.status).toBe(403);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toMatch(/cuenta principal/i);
+    expect(updates()).toHaveLength(0);
+  });
+
+  it('una cuenta con rol super_admin también está protegida, aunque su correo no sea el configurado', async () => {
+    objetivo({ id_usuario: 7, email: 'otra@example.com', rol: 'super_admin' });
+    const res = await cambiarRol(7, 'admin');
+    expect(res.status).toBe(403);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toMatch(/cuenta principal/i);
+    expect(updates()).toHaveLength(0);
+  });
+
+  it('admin normal que pide admin sobre la cuenta del super admin -> mensaje de cuenta protegida, no el de ascender', async () => {
+    objetivo(CUENTA_SUPER);
+    const res = await cambiarRol(1, 'admin', ADMIN_SESION);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/cuenta principal/i);
     expect(updates()).toHaveLength(0);
   });
 
@@ -97,6 +119,7 @@ describe('PUT /api/admin/users/:id/role: reglas que ya existían', () => {
     objetivo(OTRO_ADMIN);
     const res = await cambiarRol(60, 'cliente', ADMIN_SESION);
     expect(res.status).toBe(403);
+    expect(res.body.ok).toBe(false);
     expect(updates()).toHaveLength(0);
   });
 
@@ -112,6 +135,7 @@ describe('PUT /api/admin/users/:id/role: reglas que ya existían', () => {
     objetivo(null);
     const res = await cambiarRol(999, 'admin');
     expect(res.status).toBe(404);
+    expect(res.body.ok).toBe(false);
     expect(updates()).toHaveLength(0);
   });
 
