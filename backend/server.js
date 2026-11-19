@@ -2083,16 +2083,25 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 });
 
 app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
-  const { id } = req.params;
   const { rol } = req.body;
   const requesterEmail = (req.user?.email || '').toLowerCase();
 
   if (!rol || !['admin', 'cliente'].includes(rol)) {
     return res.status(400).json({ message: 'Rol no válido.' });
   }
+  const id = idPositivoValido(req.params.id); // mismo formato: entero positivo
+  if (!id) {
+    return res.status(400).json({ ok: false, message: 'Identificador de usuario no válido.' });
+  }
+  // Solo el super administrador nombra administradores (igual que en create-admin).
+  if (rol === 'admin' && !esSuperAdminEmail(requesterEmail)) {
+    return res.status(403).json({ ok: false, message: 'Solo el super administrador puede ascender cuentas a administrador.' });
+  }
 
   try {
-    const { data: targetUser } = await supabase.from('usuario').select('*').eq('id_usuario', id).single();
+    const { data: targetUser, error: errorLectura } = await supabase
+      .from('usuario').select('id_usuario, email, rol').eq('id_usuario', id).maybeSingle();
+    if (falloSupabase(res, errorLectura, 'Error al actualizar el rol del usuario.')) return;
 
     if (!targetUser) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
@@ -2112,11 +2121,11 @@ app.put('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
     }
 
     const { error } = await supabase.from('usuario').update({ rol }).eq('id_usuario', id);
-    if (error) throw error;
+    if (falloSupabase(res, error, 'Error al actualizar el rol del usuario.')) return;
     return res.status(200).json({ message: 'Rol de usuario actualizado correctamente.', id, rol });
   } catch (error) {
     console.error('Error al actualizar rol de usuario:', error);
-    return res.status(500).json({ message: 'Error al actualizar el rol del usuario.' });
+    return res.status(500).json({ ok: false, message: 'Error al actualizar el rol del usuario.' });
   }
 });
 
