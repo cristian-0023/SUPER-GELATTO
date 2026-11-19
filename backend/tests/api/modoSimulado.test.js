@@ -6,7 +6,8 @@ import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 
 let app;
 beforeAll(() => {
-  ({ app } = cargarServidor(null, { sinSupabase: true }));
+  // Correo falso: el pago aprobado no debe crear una cuenta de Ethereal ni salir a la red.
+  ({ app } = cargarServidor(null, { sinSupabase: true, correo: () => {} }));
 });
 beforeEach(() => {
   vi.spyOn(Math, 'random').mockReturnValue(0.1); // siempre aprobado

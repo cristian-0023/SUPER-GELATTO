@@ -1,0 +1,63 @@
+# Integración continua (CI-001 / PC-01).
+# Revisa cada propuesta de cambio (pull request) hacia main y cada commit que llega a main:
+#   - backend: instala las dependencias exactas del lockfile y corre todas las pruebas (npm test).
+#   - frontend: instala las dependencias exactas del lockfile y compila la aplicación (vite build).
+# No usa ningún secreto: las pruebas usan un Supabase falso y Postgres en memoria (PGlite).
+# Los nombres de los jobs (backend, frontend) se exigen por nombre en la protección de main (CI-002):
+# si se cambian aquí, hay que cambiarlos también allí.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Permisos mínimos: solo leer el código.
+permissions:
+  contents: read
+
+# Un push nuevo al mismo PR cancela la corrida vieja. En main el grupo es el commit (sha):
+# nada se cancela y cada commit de main conserva su propio resultado.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # Sin variables VITE_* de CI: toma VITE_API_URL de frontend/.env.production (URL pública, no secreta)
+      # y el id público de Google que index.jsx trae por defecto.
+      - run: npx vite build
