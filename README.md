@@ -82,6 +82,14 @@ cd SUPER-GELATTO
 
 ---
 
+## ✅ Integración continua
+
+Cada pull request hacia `main` (y cada commit en `main`) corre solo dos revisiones en GitHub Actions:
+`backend` (todas las pruebas con `npm test`) y `frontend` (compilación con `npx vite build`).
+Verde = todo bien; rojo = pulsa **Details** para ver qué falló. Más detalles en [docs/CI.md](./docs/CI.md).
+
+---
+
 ## 📄 Licencia
 
 Este proyecto es para fines educativos y demostrativos.
