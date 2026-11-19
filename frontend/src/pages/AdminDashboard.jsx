@@ -16,6 +16,7 @@ import { soloVentasCobradas } from '../utils/ingresos';
 import { armarCuerpoProducto, mapearProductoGuardado, armarCuerpoAlta, productoCreadoParaPanel, IMAGENES_PREDETERMINADAS } from '../utils/editorProductos';
 import { leerEntero, decidirTrasGuardar, cambiarProducto } from '../utils/edicionRapida';
 import { useCart } from '../context/CartContext';
+import { puedeEditarRol } from '../utils/permisosUsuarios';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -1234,11 +1235,10 @@ const AdminDashboard = ({ user, onLogout }) => {
                     const isTargetSuperAdmin = u.es_super_admin === true || u.rol === 'super_admin';
                     const isTargetAdmin = u.rol === 'admin';
 
-                    // Modificación de Rol:
+                    // Modificación de Rol (misma regla que el servidor, ver utils/permisosUsuarios):
                     // 1. Nadie puede cambiar el rol del Super Admin principal.
-                    // 2. Si el objetivo es Administrador, SOLO el Super Admin puede cambiar su rol.
-                    // 3. Si el objetivo es Cliente, cualquier Administrador puede ascenderlo a admin.
-                    const canEditRole = !isTargetSuperAdmin && (!isTargetAdmin || isCurrentUserSuperAdmin);
+                    // 2. SOLO el Super Admin cambia roles: ascender un cliente a admin o bajar un admin a cliente.
+                    const canEditRole = puedeEditarRol({ esObjetivoSuperAdmin: isTargetSuperAdmin, soySuperAdmin: isCurrentUserSuperAdmin });
 
                     // Eliminación de Usuario:
                     // 1. Nadie puede eliminar la cuenta principal del Super Admin.
@@ -1265,7 +1265,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             value={u.rol || 'cliente'}
                             disabled={!canEditRole || actionLoading === `role-${userId}`}
                             onChange={(e) => handleUpdateRole(userId, e.target.value)}
-                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta de Super Admin puede cambiar el rol de un administrador') : 'Cambiar rol'}
+                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo el Super Admin puede cambiar roles') : 'Cambiar rol'}
                             className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none transition-all ${
                               !canEditRole ? 'opacity-60 cursor-not-allowed ' : 'cursor-pointer '
                             }${
