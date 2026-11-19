@@ -28,6 +28,16 @@ solo y muestra una luz verde o roja. Nadie tiene que acordarse de correr las pru
 5. Para repetir una corrida sin cambiar código (por ejemplo, si GitHub tuvo un problema), usa
    **Re-run jobs** en la pestaña **Actions**.
 
+## Cómo comprobar que el CI funciona (criterio de aceptación)
+
+1. **Verde:** en un PR sano, `backend` y `frontend` salen en verde en menos de unos 8 minutos.
+2. **Rojo en `backend`:** en una rama de prueba que se borra después, agrega `expect(1).toBe(2)`
+   dentro de cualquier prueba del backend y abre un PR: `backend` debe salir en rojo. Quita la línea,
+   haz push y debe volver a verde.
+3. **Rojo en `frontend`:** en otra rama de prueba, agrega un `import` de un archivo que no existe en
+   cualquier componente: `frontend` debe salir en rojo.
+4. El flujo usa `npm ci` con los lockfiles y no usa ningún secreto del repositorio.
+
 ## Importante
 
 - Los nombres `backend` y `frontend` se exigen en la protección de `main` (CI-002). Si se cambian en

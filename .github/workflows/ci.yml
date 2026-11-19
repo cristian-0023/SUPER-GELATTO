@@ -17,10 +17,10 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo al mismo PR cancela la corrida vieja. En main no se cancela:
-# cada commit de main conserva su propio resultado.
+# Un push nuevo al mismo PR cancela la corrida vieja. En main el grupo es el commit (sha):
+# nada se cancela y cada commit de main conserva su propio resultado.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
