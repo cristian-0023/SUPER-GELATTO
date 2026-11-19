@@ -4,11 +4,15 @@
 //  - El cuerpo de cualquier petición tiene un tope de 1 MB -> 413 en JSON y en español.
 //  - Solo las rutas que reciben imágenes (Face ID y crear producto) aceptan más (hasta 8 MB), y las de
 //    administrador comprueban la sesión ANTES de leer el cuerpo grande.
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { createRequire } from 'node:module';
 import request from 'supertest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, authAdmin } from '../helpers/cargarServidor.js';
 import http from 'node:http';
+
+// AWS nunca se llama de verdad: en la prueba de la foto de 3 MB se reemplaza RekognitionClient.prototype.send.
+const { RekognitionClient } = createRequire(import.meta.url)('@aws-sdk/client-rekognition');
 
 // POST con http de Node: devuelve { status, body } aunque el servidor responda sin leer todo el cuerpo.
 function postCrudo(app, ruta, cuerpo) {
@@ -103,8 +107,15 @@ describe('tamaño máximo del cuerpo', () => {
   });
 
   it('una foto de 3 MB en rekognition-login sí se acepta (no 413)', async () => {
-    const res = await request(app).post('/api/admin/faceid/rekognition-login').send({ image: texto(3 * MB) });
-    expect(res.status).not.toBe(413);
+    // Sin credenciales, AWS rechazaría la llamada: se simula ese rechazo sin salir a la red.
+    const envio = vi.spyOn(RekognitionClient.prototype, 'send').mockRejectedValue(new Error('AWS no disponible en pruebas'));
+    try {
+      const res = await request(app).post('/api/admin/faceid/rekognition-login').send({ image: texto(3 * MB) });
+      expect(res.status).not.toBe(413);
+      expect(envio).toHaveBeenCalled();
+    } finally {
+      envio.mockRestore();
+    }
   });
 
   it('más de 8 MB en rekognition-login -> 413', async () => {
