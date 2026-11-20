@@ -71,24 +71,98 @@ describe('medidasPanel en escritorio', () => {
 });
 
 describe('medidasPanel en celular', () => {
-  it('390x844: pantalla completa debajo de la barra', () => {
+  it('390x844 sin teclado: top = barra y bottom = 0 (sin alto en px calculado en JS); es modal', () => {
     const m = medidasPanel({ ancho: 390, alto: 844 });
-    expect(m).toEqual({ modo: 'movil', arriba: ALTO_NAVBAR, alto: 844 - ALTO_NAVBAR });
+    expect(m).toEqual({ modo: 'movil', modal: true, arriba: ALTO_NAVBAR, abajo: 0 });
   });
 
-  it('con el teclado abierto usa el alto visible (el input queda encima del teclado)', () => {
-    const m = medidasPanel({ ancho: 390, alto: 844, altoVisible: 500 });
-    expect(m.alto).toBe(500 - ALTO_NAVBAR);
+  it('teclado abierto (Android, offsetTop 0): el borde de abajo es el del área visible', () => {
+    const m = medidasPanel({ ancho: 390, alto: 844, altoVisible: 500, desplazamientoVisible: 0 });
+    expect(m).toEqual({ modo: 'movil', modal: true, arriba: ALTO_NAVBAR, alto: 500 - ALTO_NAVBAR });
   });
 
-  it('alto visible inválido o mayor a la ventana: usa el alto de la ventana', () => {
-    expect(medidasPanel({ ancho: 390, alto: 844, altoVisible: NaN }).alto).toBe(844 - ALTO_NAVBAR);
-    expect(medidasPanel({ ancho: 390, alto: 844, altoVisible: 0 }).alto).toBe(844 - ALTO_NAVBAR);
-    expect(medidasPanel({ ancho: 390, alto: 844, altoVisible: 2000 }).alto).toBe(844 - ALTO_NAVBAR);
+  it('teclado abierto (iOS, la vista se desplaza): suma visualViewport.offsetTop', () => {
+    const m = medidasPanel({ ancho: 390, alto: 844, altoVisible: 500, desplazamientoVisible: 20 });
+    // Área visible: de 20 a 520. El panel sigue empezando en la barra y termina en 520.
+    expect(m.arriba).toBe(ALTO_NAVBAR);
+    expect(m.arriba + m.alto).toBe(520);
   });
 
-  it('nunca da un alto negativo ni ridículo', () => {
-    expect(medidasPanel({ ancho: 390, alto: 120 }).alto).toBe(ALTO_MIN_PANEL);
+  it('iOS con mucho desplazamiento: el encabezado baja hasta el borde visible (no queda fuera de vista)', () => {
+    const m = medidasPanel({ ancho: 390, alto: 844, altoVisible: 450, desplazamientoVisible: 300 });
+    expect(m.arriba).toBe(300);
+    expect(m.arriba + m.alto).toBe(750);
+  });
+
+  it('alto visible inválido o igual/mayor a la ventana: sin teclado (top/bottom)', () => {
+    for (const altoVisible of [NaN, 0, 844, 2000, undefined]) {
+      const m = medidasPanel({ ancho: 390, alto: 844, altoVisible });
+      expect(m.abajo).toBe(0);
+      expect(m.alto).toBeUndefined();
+    }
+  });
+
+  it('desplazamiento inválido se toma como 0', () => {
+    const m = medidasPanel({ ancho: 390, alto: 844, altoVisible: 500, desplazamientoVisible: -40 });
+    expect(m.arriba + m.alto).toBe(500);
+  });
+
+  it('con teclado nunca da un alto negativo', () => {
+    expect(medidasPanel({ ancho: 390, alto: 844, altoVisible: 60 }).alto).toBeGreaterThan(0);
+  });
+
+  it('escritorio no es modal', () => {
+    expect(medidasPanel({ ancho: 1366, alto: 636 }).modal).toBe(false);
+  });
+});
+
+describe('hayPropuestaPendiente', () => {
+  it('true si algún mensaje tiene una confirmación de admin pendiente', () => {
+    expect(hayPropuestaPendiente([{ id: 1 }, { id: 2, propuesta: { estado: 'pendiente' } }])).toBe(true);
+  });
+  it('false si están resueltas, no hay o la lista es inválida', () => {
+    expect(hayPropuestaPendiente([{ id: 2, propuesta: { estado: 'resuelta' } }, { id: 3, propuesta: null }])).toBe(false);
+    expect(hayPropuestaPendiente([])).toBe(false);
+    expect(hayPropuestaPendiente(undefined)).toBe(false);
+  });
+});
+
+describe('debeCerrarConEscape', () => {
+  const esc = (extra = {}) => ({ key: 'Escape', defaultPrevented: false, ...extra });
+  it('Escape sin nada pendiente cierra', () => {
+    expect(debeCerrarConEscape(esc(), [{ id: 1 }])).toBe(true);
+  });
+  it('otra tecla no cierra', () => {
+    expect(debeCerrarConEscape(esc({ key: 'Enter' }), [])).toBe(false);
+  });
+  it('no cierra si otro diálogo ya atendió el Escape (defaultPrevented)', () => {
+    expect(debeCerrarConEscape(esc({ defaultPrevented: true }), [])).toBe(false);
+  });
+  it('no cierra con una confirmación de admin pendiente', () => {
+    expect(debeCerrarConEscape(esc(), [{ id: 1, propuesta: { estado: 'pendiente' } }])).toBe(false);
+  });
+  it('evento inválido no cierra', () => {
+    expect(debeCerrarConEscape(null, [])).toBe(false);
+  });
+});
+
+describe('debeDevolverFoco (al cerrar, el foco vuelve al botón solo si estaba en el panel)', () => {
+  const body = { nombre: 'body' };
+  const dentro = { nombre: 'input' };
+  const fuera = { nombre: 'buscador' };
+  const panel = { contains: (el) => el === dentro };
+  it('foco dentro del panel -> sí', () => {
+    expect(debeDevolverFoco({ activo: dentro, panel, body })).toBe(true);
+  });
+  it('foco en otra parte de la página (por ejemplo, tras el auto-cierre) -> no', () => {
+    expect(debeDevolverFoco({ activo: fuera, panel, body })).toBe(false);
+  });
+  it('foco perdido (body o nada, como al tocar en Safari) -> sí, para no dejarlo perdido', () => {
+    expect(debeDevolverFoco({ activo: body, panel, body })).toBe(true);
+    expect(debeDevolverFoco({ activo: null, panel, body })).toBe(true);
+  });
+  it('sin panel (ya desmontado) y foco en otra parte -> no', () => {
+    expect(debeDevolverFoco({ activo: fuera, panel: null, body })).toBe(false);
   });
 });
 
