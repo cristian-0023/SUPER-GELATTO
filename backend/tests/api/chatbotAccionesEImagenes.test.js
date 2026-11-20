@@ -216,3 +216,54 @@ describe('3. el precio lo escribe el servidor', () => {
     expect(sistema).toContain('Mango Biche - $8.500');
   });
 });
+
+describe('4. fotos de los helados en la lista', () => {
+  it('tras getProducts, la respuesta trae `productos` con datos de la base (no del modelo)', async () => {
+    guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores 🍦')];
+    const res = await chat({ message: 'qué sabores de helado tienen' }, tokenCliente());
+    expect(res.body.response).toMatch(/sabores/);
+    expect(res.body.productos).toEqual([
+      { id: 1, nombre: 'Fresa Salvaje', precio: 9000, image: '/images/gelato_fresa.png' },
+      { id: 2, nombre: 'Chocolate Belga', precio: 12000, image: 'https://cdn.example.com/choco.png' },
+      // URL de imagen peligrosa: se descarta (el navegador pondrá una foto por defecto)
+      { id: 3, nombre: 'Mango Biche', precio: 8500, image: null },
+    ]);
+  });
+
+  it('máximo 12 productos y solo activos', async () => {
+    const muchos = Array.from({ length: 20 }, (_, i) => ({ id_producto: i + 1, nombre: `Sabor ${i + 1}`, precio: 1000 * (i + 1), imagen: `/images/s${i + 1}.png`, estado: i !== 0 }));
+    fake.responder('producto', 'select', { data: muchos, error: null });
+    guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores 🍦')];
+    const res = await chat({ message: 'muéstrame el menú' }, tokenCliente());
+    expect(res.body.productos).toHaveLength(12);
+    expect(res.body.productos.map((p) => p.id)).not.toContain(1);
+    expect(res.body.productos[0]).toEqual({ id: 2, nombre: 'Sabor 2', precio: 2000, image: '/images/s2.png' });
+  });
+
+  it.each([
+    ['http (no https)', 'http://cdn.example.com/a.png'],
+    ['protocolo relativo', '//evil.example.com/a.png'],
+    ['con ..', '/images/../../etc/passwd'],
+    ['data:', 'data:image/png;base64,AAAA'],
+    ['con usuario y clave', 'https://user:pass@cdn.example.com/a.png'],
+  ])('imagen inválida (%s) llega como null', async (_c, imagen) => {
+    fake.responder('producto', 'select', { data: [{ id_producto: 9, nombre: 'Coco', precio: 7000, imagen, estado: true }], error: null });
+    guion = [pideHerramienta('getProducts'), texto('Sabores.')];
+    const res = await chat({ message: 'menú' }, tokenCliente());
+    expect(res.body.productos).toEqual([{ id: 9, nombre: 'Coco', precio: 7000, image: null }]);
+  });
+
+  it('sin getProducts no hay campo productos', async () => {
+    guion = [texto('¡Hola!')];
+    const res = await chat({ message: 'hola' }, tokenCliente());
+    expect(res.body.productos).toBeUndefined();
+  });
+
+  it('si la segunda llamada falla, igual se muestran los sabores con un texto amable', async () => {
+    guion = [pideHerramienta('getProducts'), errorGroq(400, 'tool_use_failed')];
+    const res = await chat({ message: 'qué sabores de helado tienen' }, tokenCliente());
+    expect(res.body.productos).toHaveLength(3);
+    expect(res.body.response).toMatch(/sabores/i);
+    expect(res.body.response).not.toMatch(MENSAJE_FALLA);
+  });
+});
