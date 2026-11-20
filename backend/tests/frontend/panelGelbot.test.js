@@ -46,9 +46,15 @@ describe('medidasPanel en escritorio', () => {
     expect(1080 - m.abajo - m.altoMax).toBeGreaterThan(ALTO_NAVBAR);
   });
 
-  it('ventana muy baja: el alto no baja del mínimo usable', () => {
+  it('ventana muy baja: no tapa la barra aunque quede más bajo que el mínimo cómodo', () => {
     const m = medidasPanel({ ancho: 1024, alto: 300 });
-    expect(m.altoMax).toBe(ALTO_MIN_PANEL);
+    expect(300 - m.abajo - m.altoMax).toBeGreaterThanOrEqual(ALTO_NAVBAR + MARGEN_PANEL);
+    expect(m.altoMax).toBeLessThan(ALTO_MIN_PANEL);
+    expect(m.altoMax).toBeGreaterThan(0);
+  });
+
+  it('ventana absurda (más baja que la barra): alto mínimo de seguridad, nunca negativo', () => {
+    expect(medidasPanel({ ancho: 1024, alto: 90 }).altoMax).toBeGreaterThan(0);
   });
 
   it('respeta un alto de barra distinto', () => {
