@@ -12,14 +12,17 @@ import { crearBase, valor, contar, leer, RUTA_MIGRACION_RLS } from './helpers.js
 
 const raizSupabase = resolve(dirname(fileURLToPath(import.meta.url)), '../../../supabase');
 const RUTA_PUNTOS = resolve(raizSupabase, 'migrations/20261111120000_super_points.sql');
+const RUTA_NIVEL_SALDO = resolve(raizSupabase, 'migrations/20261120120000_nivel_por_saldo.sql');
 const RUTA_PERSONALIZADO = resolve(raizSupabase, 'migrations/20261120130000_helado_personalizado.sql');
 const RUTA_ROLLBACK_PERSONALIZADO = resolve(raizSupabase, 'rollbacks/20261120130000_helado_personalizado.rollback.sql');
 
-// Igual que la base real: migraciones en orden (ventas -> candados RLS -> Super Points -> personalizado).
+// Igual que la base real: migraciones en orden
+// (ventas -> candados RLS -> Super Points -> nivel por saldo -> personalizado).
 async function base() {
   const db = await crearBase();
   await db.exec(leer(RUTA_MIGRACION_RLS));
   await db.exec(leer(RUTA_PUNTOS));
+  await db.exec(leer(RUTA_NIVEL_SALDO));
   await db.exec(leer(RUTA_PERSONALIZADO));
   return db;
 }
@@ -175,6 +178,22 @@ describe('registrar_venta con helado personalizado', () => {
     expect(Number(v.total)).toBe(9500);
     const e = await errorDe(() => vender(db, 1, [helado()], 'Pagado', 101));
     expect(e.message).toBe('PUNTOS_INSUFICIENTES');
+  });
+
+  it('el tope del canje con personalizado usa el nivel del SALDO antes de la compra (no lo ganado en la historia)', async () => {
+    // Ganó 1200 (sería Master, 20 %) pero gastó 800: saldo 400 = Fan (10 %).
+    const ventaA = await valor(db, "insert into public.venta (total, tipo_venta, id_usuario, estado) values (0, 'Online', 1, 'Pagado') returning id_venta");
+    const ventaB = await valor(db, "insert into public.venta (total, tipo_venta, id_usuario, estado) values (0, 'Online', 1, 'Pagado') returning id_venta");
+    await db.query("insert into public.super_points (id_usuario, id_venta, tipo, puntos_generados) values (1, $1, 'ganado', 1200)", [ventaA]);
+    await db.query("insert into public.super_points (id_usuario, id_venta, tipo, puntos_generados) values (1, $1, 'canjeado', -800)", [ventaB]);
+    // Personalizado de $10.000: Fan -> tope 10 % = $1.000 = 200 puntos (con Master serían 400).
+    const e = await errorDe(() => vender(db, 1, [helado()], 'Pagado', 201));
+    expect(e.message).toBe('PUNTOS_EXCEDEN_TOPE');
+    const v = await vender(db, 1, [helado()], 'Pagado', 200);
+    expect(Number(v.total)).toBe(9000);
+    expect(v.puntos_usados).toBe(200);
+    expect(v.puntos_ganados).toBe(90);
+    expect(v.saldo).toBe(400 - 200 + 90);
   });
 
   it('un pago fallido registra el personalizado sin puntos', async () => {
