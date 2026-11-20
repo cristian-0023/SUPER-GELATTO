@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const Groq = require("groq-sdk");
+const { APIError: GroqAPIError } = require("groq-sdk/error");
 require('dotenv').config();
 
 let groq = null;
@@ -34,6 +35,25 @@ function clasificarErrorGroq(error) {
   else if (status === 401 || codigo === 'invalid_api_key') categoria = 'llave';
   else if (status === 429 || codigo === 'rate_limit_exceeded') categoria = 'limite';
   return { categoria, status, codigo: typeof codigo === 'string' ? codigo.slice(0, 60) : null };
+}
+
+const esErrorDeGroq = (error) => error instanceof GroqAPIError || typeof error?.status === 'number';
+
+// Quita del texto de un error la llave y el mensaje del usuario, y lo recorta (para el log).
+function textoSeguroParaLog(texto, mensajeUsuario, max) {
+  let limpio = String(texto || '');
+  const ocultar = [process.env.GROQ_API_KEY, typeof mensajeUsuario === 'string' ? mensajeUsuario : ''];
+  for (const secreto of ocultar) {
+    if (secreto && secreto.length >= 4) limpio = limpio.split(secreto).join('[oculto]');
+  }
+  return limpio.slice(0, max);
+}
+
+// Si el modelo se quedó sin tokens, la respuesta llega cortada: se avisa en el log (sin el contenido).
+function avisarSiSeCorto(respuesta) {
+  if (respuesta?.choices?.[0]?.finish_reason === 'length') {
+    console.warn('chatbot: respuesta cortada por límite de tokens', { modelo: GROQ_MODEL });
+  }
 }
 
 const MENSAJE_SIN_ASISTENTE = "El asistente no está disponible en este momento. Inténtalo más tarde 🍦.";
@@ -473,6 +493,8 @@ function limpiarHistorial(history) {
 // ── Limpiador de respuestas ───────────────────────────────────
 function cleanText(text) {
   return (text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "") // razonamiento dentro del contenido (modelos que "piensan")
+    .replace(/<think>[\s\S]*$/i, "")            // <think> sin cierre: se descarta todo lo que sigue
     .replace(/\[TIPO\s*\d+[^\]]*\]/gi, "")
     .replace(/```[a-z]*\s*[\s\S]*?```/gi, "") // Elimina cualquier bloque de código markdown (como ```sql ... ```)
     .replace(/`[^`\n]*?`(?:\s*;)*/gi, "") // Elimina cualquier fragmento de código en línea entre comillas invertidas
@@ -702,6 +724,7 @@ USUARIO: ${userName} | role: "cliente"`;
       ...OPCIONES_RAZONAMIENTO
     });
 
+    avisarSiSeCorto(response);
     let responseMessage = response.choices[0].message;
     const toolCalls = responseMessage.tool_calls;
 
@@ -865,6 +888,7 @@ USUARIO: ${userName} | role: "cliente"`;
         ...OPCIONES_RAZONAMIENTO
       });
 
+      avisarSiSeCorto(second);
       const finalText = cleanText(second.choices?.[0]?.message?.content) || MENSAJE_RESPUESTA_VACIA;
 
       return res.json({
@@ -887,10 +911,18 @@ USUARIO: ${userName} | role: "cliente"`;
     });
 
   } catch (error) {
-    // Solo categoría, status, código y modelo: nunca la llave ni el texto del usuario.
-    const { categoria, status, codigo } = clasificarErrorGroq(error);
-    console.error('chatbot: error de Groq', { categoria, status, codigo, modelo: GROQ_MODEL, tipo: error?.name || null });
-    res.json({ response: categoria === 'limite' ? MENSAJE_DEMANDA : MENSAJE_FALLA });
+    // Nunca la llave ni el texto del usuario en el log.
+    if (esErrorDeGroq(error)) {
+      const { categoria, status, codigo } = clasificarErrorGroq(error);
+      console.error('chatbot: error de Groq', { categoria, status, codigo, modelo: GROQ_MODEL, tipo: error?.name || null });
+      return res.json({ response: categoria === 'limite' ? MENSAJE_DEMANDA : MENSAJE_FALLA });
+    }
+    console.error('chatbot: error interno', {
+      nombre: error?.name || 'Error',
+      mensaje: textoSeguroParaLog(error?.message, message, 200),
+      pila: textoSeguroParaLog(error?.stack, message, 1000)
+    });
+    res.json({ response: MENSAJE_FALLA });
   }
 }
 
