@@ -86,12 +86,12 @@ stateDiagram-v2
 |---|---|
 | **Ganar** | 1 punto por cada $100 realmente pagados, redondeando hacia abajo, sobre el total después del descuento. Ejemplos: $9.000 = 90 puntos; pedido de $20.000 con $4.000 de descuento = 160 puntos |
 | **Valor** | 1 punto = $5 de descuento. El cliente recupera cerca del 5 % en puntos |
-| **Niveles** | Según los puntos **ganados** en toda la historia (gastar puntos no baja el nivel). Lover 0–100 (máximo pagable con puntos: 5 %); Fan 101–500 (10 %); Pro 501–1000 (15 %); Master 1001 o más (20 %) |
-| **Canjear** | El cliente elige cuántos puntos usar al pagar (números enteros). El máximo es el menor entre su saldo y `piso(subtotal × % del nivel ÷ $5)`. El nivel es el que tiene **antes** de la compra; los puntos ganados en una compra se pueden usar desde la siguiente |
+| **Niveles** | Según el **saldo actual** de puntos (regla del 2026-11-19; gastar puntos puede bajar el nivel y con él el % de la compra siguiente). Lover 0–100 (máximo pagable con puntos: 5 %); Fan 101–500 (10 %); Pro 501–1000 (15 %); Master 1001 o más (20 %) |
+| **Canjear** | El cliente elige cuántos puntos usar al pagar (números enteros). El máximo es el menor entre su saldo y `piso(subtotal × % del nivel ÷ $5)`. El nivel es el que da su saldo **antes** de la compra; los puntos ganados en una compra se pueden usar desde la siguiente |
 | **Arranque y vencimiento** | Todos arrancan en cero. Las compras anteriores al programa no dan puntos. No vencen |
 | **Pago fallido** | No gana ni gasta puntos |
 | **Admin marca una venta como cobrada** | Si una venta "Fallido" o "Pendiente" pasa a un estado cobrado, el cliente gana sus puntos por el total de esa venta. Se dan una sola vez por venta |
-| **Cancelación** | Al pasar una venta cobrada a "Cancelado": se devuelven los puntos canjeados; se quitan los ganados sin bajar el saldo de cero (si ya los gastó, se quita lo que haya), y esos puntos dejan de contar para el nivel. Pasa una sola vez. Si la venta vuelve a salir de "Cancelado", los puntos no se vuelven a mover |
+| **Cancelación** | Al pasar una venta cobrada a "Cancelado": se devuelven los puntos canjeados; se quitan los ganados sin bajar el saldo de cero (si ya los gastó, se quita lo que haya), y el nivel se recalcula con el saldo que queda. Pasa una sola vez. Si la venta vuelve a salir de "Cancelado", los puntos no se vuelven a mover |
 | **Ajustes manuales** | No existen desde el panel de admin |
 
 ### Detalle técnico de Super Points

@@ -251,7 +251,7 @@ sequenceDiagram
   end
 ```
 
-- Si el cliente ya gastó los puntos ganados, se quita solo lo que tenga. El movimiento `revertido` anota lo que realmente se quitó, y el nivel deja de contar todos los puntos ganados en esa venta.
+- Si el cliente ya gastó los puntos ganados, se quita solo lo que tenga. El movimiento `revertido` anota lo que realmente se quitó, y el nivel se recalcula con el saldo que queda (regla del 2026-11-19: el nivel sale del saldo actual).
 - Si un admin saca la venta de "Cancelado", los puntos no se vuelven a mover.
 - Una venta sin movimientos (Fallido, Pendiente o anterior al programa) no mueve nada al cancelarse.
 
