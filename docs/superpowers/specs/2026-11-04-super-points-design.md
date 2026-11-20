@@ -25,16 +25,16 @@ Hoy los Super Points son decoración: el perfil muestra 120 puntos falsos a todo
 
 **Valor:** 1 punto = $5 de descuento. El cliente recibe de vuelta cerca del 5 %.
 
-**Niveles** (por puntos GANADOS en toda la historia; gastar puntos no baja el nivel):
+**Niveles** (por el SALDO ACTUAL de puntos; gastar puntos puede bajar el nivel). *Cambio de regla del 2026-11-19, aprobado por el dueño: antes el nivel salía de los puntos ganados en toda la historia y gastar no lo bajaba. Migración `20261120120000_nivel_por_saldo.sql`.*
 
-| Nivel | Puntos ganados | Máximo de la compra pagable con puntos |
+| Nivel | Saldo actual | Máximo de la compra pagable con puntos |
 |---|---|---|
 | Lover | 0 – 100 | 5 % |
 | Fan | 101 – 500 | 10 % |
 | Pro | 501 – 1000 | 15 % |
 | Master | 1001 o más | 20 % |
 
-**Canjear:** el cliente elige cuántos puntos usar al pagar, en números enteros. Máximo usable = el menor entre su saldo y `piso(total × % del nivel ÷ $5)`. El nivel es el que tiene ANTES de esta compra, y `total` es el subtotal con precios de la base. Los puntos de una compra quedan disponibles para la siguiente.
+**Canjear:** el cliente elige cuántos puntos usar al pagar, en números enteros. Máximo usable = el menor entre su saldo y `piso(total × % del nivel ÷ $5)`. El nivel es el que da su saldo ANTES de esta compra (antes de restar lo que canjea y de sumar lo que gana), y `total` es el subtotal con precios de la base. Los puntos de una compra quedan disponibles para la siguiente.
 
 **Pago fallido:** no gana ni gasta puntos.
 
@@ -43,14 +43,14 @@ Hoy los Super Points son decoración: el perfil muestra 120 puntos falsos a todo
 **Cancelar:** cuando una venta cobrada pasa a "Cancelado":
 - se devuelven los puntos canjeados en esa venta;
 - se quitan los ganados, sin dejar el saldo por debajo de cero (si ya los gastó, se quita lo que haya);
-- los puntos ganados en esa venta dejan de contar para el nivel, así que el nivel puede bajar;
+- el nivel se recalcula con el saldo que queda (sube por lo devuelto y baja por lo quitado);
 - pasa una sola vez por venta, aunque el estado se cambie varias veces.
 
 Si un admin saca una venta de "Cancelado", los puntos NO se vuelven a mover: la cancelación es definitiva para los puntos (decisión del diseñador, para evitar regalos por error).
 
 La reversa solo actúa sobre lo que está en la libreta: una venta sin movimientos (Fallido, Pendiente o anterior a este cambio) no mueve nada al cancelarse (decisión del diseñador).
 
-Si el cliente ya gastó los puntos de una venta cancelada, la diferencia se perdona: se anota lo que realmente se pudo quitar, y el nivel descuenta TODOS los puntos ganados en esa venta (decisión del diseñador). Por eso la libreta debe poder saber, por venta, cuánto se ganó aunque se haya quitado menos.
+Si el cliente ya gastó los puntos de una venta cancelada, la diferencia se perdona: se anota lo que realmente se pudo quitar (decisión del diseñador). La libreta sabe, por venta, cuánto se ganó aunque se haya quitado menos. Desde el 2026-11-19 el nivel sale del saldo, así que solo cuenta lo que realmente se quitó; los "ganados" quedan como dato informativo.
 
 Las ventas "Pagado" anteriores a este cambio no tienen puntos.
 

@@ -1,7 +1,7 @@
 // Cuentas de Super Points de la página (frontend/src/utils/superPoints.js). Los valores (5 pesos por punto,
 // 100 pesos para ganar, niveles y topes) llegan del servidor: aquí se pasan como datos, no están fijos en el código.
 import { describe, it, expect } from 'vitest';
-import { calcularCanje, puntosAGanar, progresoNivel, describirMovimiento, puntosConSigno } from '../../../frontend/src/utils/superPoints.js';
+import { calcularCanje, puntosAGanar, progresoNivel, progresoDelCliente, mostrarAvisoNivel, describirMovimiento, puntosConSigno } from '../../../frontend/src/utils/superPoints.js';
 
 const niveles = [
   { nombre: 'Lover', min: 0, max: 100, pct: 5 },
@@ -129,6 +129,36 @@ describe('progresoNivel', () => {
     expect(progresoNivel(50, [])).toEqual({ actual: null, siguiente: null, porcentaje: 0 });
     expect(progresoNivel(NaN, niveles).porcentaje).toBe(0);
     expect(progresoNivel(-10, niveles).actual.nombre).toBe('Lover');
+  });
+});
+
+// Regla del 2026-11-19: el nivel y el avance salen del SALDO actual, no de los puntos ganados en la historia.
+describe('progresoDelCliente', () => {
+  it('usa el saldo: muchos ganados y poco saldo quedan en el nivel bajo', () => {
+    const p = progresoDelCliente({ saldo: 50, ganados: 1200 }, niveles);
+    expect(p.actual.nombre).toBe('Lover');
+    expect(p.siguiente.nombre).toBe('Fan');
+    expect(p.porcentaje).toBe(49); // 50 de 101
+  });
+
+  it('fronteras por saldo: 100 Lover, 101 Fan, 500 Fan, 501 Pro, 1000 Pro, 1001 Master', () => {
+    const nivelCon = (saldo) => progresoDelCliente({ saldo, ganados: 5000 }, niveles).actual.nombre;
+    expect([100, 101, 500, 501, 1000, 1001].map(nivelCon)).toEqual(['Lover', 'Fan', 'Fan', 'Pro', 'Pro', 'Master']);
+  });
+
+  it('sin resumen o sin niveles no inventa nada', () => {
+    expect(progresoDelCliente(null, niveles).actual.nombre).toBe('Lover');
+    expect(progresoDelCliente({ saldo: 300 }, undefined)).toEqual({ actual: null, siguiente: null, porcentaje: 0 });
+  });
+});
+
+describe('mostrarAvisoNivel', () => {
+  it('el aviso de que el nivel puede bajar solo aparece con saldo mayor que 0', () => {
+    expect(mostrarAvisoNivel({ saldo: 1 })).toBe(true);
+    expect(mostrarAvisoNivel({ saldo: 0, ganados: 500 })).toBe(false);
+    expect(mostrarAvisoNivel({ saldo: -3 })).toBe(false);
+    expect(mostrarAvisoNivel(null)).toBe(false);
+    expect(mostrarAvisoNivel({ saldo: '50' })).toBe(false);
   });
 });
 

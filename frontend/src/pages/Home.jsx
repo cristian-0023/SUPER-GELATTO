@@ -488,7 +488,7 @@ const Home = ({ user }) => {
               </span>
             </h2>
             <p className="text-white/50 max-w-lg mx-auto text-base leading-relaxed">
-              Cada compra suma. Sube de nivel y desbloquea beneficios exclusivos del club más dulce del mundo.
+              Cada compra suma puntos. Úsalos o guárdalos: tu nivel depende de los puntos que tengas hoy. Sube de nivel y desbloquea beneficios exclusivos del club más dulce del mundo.
             </p>
           </motion.div>
 

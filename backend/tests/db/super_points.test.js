@@ -1,6 +1,7 @@
 // Pruebas de la migración 20261111120000_super_points: libreta de Super Points, canje dentro de
 // registrar_venta y movimientos de puntos al cambiar el estado de una venta (cambiar_estado_venta).
-// Reglas (diseño 2026-11-04): $100 pagados = 1 punto (piso), 1 punto = $5, niveles por puntos ganados
+// Reglas (diseño 2026-11-04): $100 pagados = 1 punto (piso), 1 punto = $5, niveles por SALDO actual
+// (regla del 2026-11-19, migración 20261120120000_nivel_por_saldo; antes eran por puntos ganados):
 // Lover 0-100 (5 %), Fan 101-500 (10 %), Pro 501-1000 (15 %), Master 1001+ (20 %).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resolve, dirname } from 'node:path';
@@ -10,12 +11,14 @@ import { crearBase, registrarVenta, valor, contar, leer, RUTA_MIGRACION_RLS } fr
 const raizSupabase = resolve(dirname(fileURLToPath(import.meta.url)), '../../../supabase');
 const RUTA_PUNTOS = resolve(raizSupabase, 'migrations/20261111120000_super_points.sql');
 const RUTA_ROLLBACK_PUNTOS = resolve(raizSupabase, 'rollbacks/20261111120000_super_points.rollback.sql');
+const RUTA_NIVEL_SALDO = resolve(raizSupabase, 'migrations/20261120120000_nivel_por_saldo.sql');
 
-// Igual que la base real: migraciones en orden (ventas -> candados RLS -> Super Points).
+// Igual que la base real: migraciones en orden (ventas -> candados RLS -> Super Points -> nivel por saldo).
 async function base() {
   const db = await crearBase();
   await db.exec(leer(RUTA_MIGRACION_RLS));
   await db.exec(leer(RUTA_PUNTOS));
+  await db.exec(leer(RUTA_NIVEL_SALDO));
   // Producto barato (para totales < $100) y un segundo cliente.
   await db.exec(`
     insert into public.producto (id_producto, nombre, precio, estado, stock) values (20, 'Mini cono', 99.99, true, 50);
@@ -108,13 +111,13 @@ describe('reglas y resumen', () => {
     expect(r.siguiente_nivel).toBe(siguiente);
   });
 
-  it('gastar puntos no baja el nivel (cuenta lo ganado, no el saldo)', async () => {
+  it('gastar puntos baja el nivel (cuenta el saldo, no lo ganado)', async () => {
     await darPuntos(db, 1, 600);
     const idVenta = await valor(db,
       "insert into public.venta (total, tipo_venta, id_usuario, estado) values (0, 'Online', 1, 'Pagado') returning id_venta");
     await db.query(
       "insert into public.super_points (id_usuario, id_venta, tipo, puntos_generados) values (1, $1, 'canjeado', -550)", [idVenta]);
-    expect(await resumen(db, 1)).toMatchObject({ saldo: 50, ganados: 600, nivel: 'Pro' });
+    expect(await resumen(db, 1)).toMatchObject({ saldo: 50, ganados: 600, nivel: 'Lover', pct_max: 5 });
   });
 });
 

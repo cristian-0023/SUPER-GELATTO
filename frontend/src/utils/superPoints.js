@@ -35,24 +35,37 @@ export function puntosAGanar(total, pesosPorPunto) {
 }
 
 /**
- * Nivel actual, siguiente y avance (0-100) dentro del nivel, según los puntos GANADOS en toda la historia.
+ * Nivel actual, siguiente y avance (0-100) dentro del nivel para una cantidad de puntos (el saldo actual).
  * `niveles` viene ordenado de menor a mayor: [{nombre, min, max, pct}], con max null en el último.
  */
-export function progresoNivel(ganados, niveles) {
+export function progresoNivel(puntos, niveles) {
   if (!Array.isArray(niveles) || niveles.length === 0) return { actual: null, siguiente: null, porcentaje: 0 };
-  const g = esNumero(ganados) && ganados > 0 ? ganados : 0;
+  const saldo = esNumero(puntos) && puntos > 0 ? puntos : 0;
 
   let indice = 0;
   niveles.forEach((nivel, i) => {
-    if (g >= nivel.min) indice = i;
+    if (saldo >= nivel.min) indice = i;
   });
   const actual = niveles[indice];
   const siguiente = niveles[indice + 1] || null;
   if (!siguiente) return { actual, siguiente: null, porcentaje: 100 };
 
   const tramo = siguiente.min - actual.min;
-  const avance = tramo > 0 ? Math.floor(((g - actual.min) / tramo) * 100) : 0;
+  const avance = tramo > 0 ? Math.floor(((saldo - actual.min) / tramo) * 100) : 0;
   return { actual, siguiente, porcentaje: Math.min(100, Math.max(0, avance)) };
+}
+
+/**
+ * Nivel y avance del cliente a partir de su resumen de /api/me/points.
+ * Regla del 2026-11-19: cuenta el SALDO actual (gastar puntos puede bajar el nivel); `ganados` es solo informativo.
+ */
+export function progresoDelCliente(resumen, niveles) {
+  return progresoNivel(resumen?.saldo, niveles);
+}
+
+/** El aviso "si usas puntos, tu nivel puede bajar" solo tiene sentido si el cliente tiene puntos (saldo > 0). */
+export function mostrarAvisoNivel(resumen) {
+  return esNumero(resumen?.saldo) && resumen.saldo > 0;
 }
 
 const numeroCO = new Intl.NumberFormat('es-CO');

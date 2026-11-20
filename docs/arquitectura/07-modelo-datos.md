@@ -137,7 +137,7 @@ Cada movimiento es una fila. El saldo de un cliente es la suma de `puntos_genera
 | `revertido` | cero o negativo | Venta cancelada: se quitan los ganados sin dejar el saldo bajo cero. Aunque quite 0, marca la venta como revertida |
 
 - Restricciones: un mismo `tipo` no se repite en la misma venta (`super_points_venta_tipo_key`), así cada movimiento ocurre una sola vez. Cada tipo tiene su signo (`super_points_signo_check`).
-- El nivel usa solo los `ganado` de ventas **sin** `revertido`.
+- El nivel sale del **saldo** (la suma de todos los movimientos), regla del 2026-11-19 (`20261120120000_nivel_por_saldo.sql`). Gastar puntos puede bajar el nivel. `ganados` (los `ganado` de ventas **sin** `revertido`) se sigue calculando solo como dato informativo.
 - Índice `super_points_id_usuario_fecha_idx (id_usuario, fecha_generacion desc)` para saldo e historial.
 - Sin permisos para `anon` ni `authenticated` (`revoke all`, migración línea 84): solo el servidor (`service_role`) la lee y escribe.
 - La tabla estaba vacía: no hubo nada que migrar. Migración `20261111120000_super_points.sql:29-84`.
@@ -147,7 +147,7 @@ Cada movimiento es una fila. El saldo de un cliente es la suma de `puntos_genera
 | Función | Qué hace | Migración | Quién la ejecuta |
 |---|---|---|---|
 | `super_points_reglas()` | Valores del programa: `pesos_por_punto` 100, `valor_punto` 5 y la lista de niveles (nombre, mínimo, máximo, `pct`). Es el **único** lugar con estos valores | líneas 109-126 | `service_role` |
-| `super_points_resumen(p_id_usuario)` | Devuelve `saldo`, `ganados`, `nivel`, `pct_max`, `valor_saldo`, `puntos_para_siguiente` y `siguiente_nivel` (en Master, 0 y `null`). El nivel sale de `ganados` (no de `saldo`) | líneas 135-183 | `service_role` |
+| `super_points_resumen(p_id_usuario)` | Devuelve `saldo`, `ganados`, `nivel`, `pct_max`, `valor_saldo`, `puntos_para_siguiente` y `siguiente_nivel` (en Master, 0 y `null`). Desde el 2026-11-19 el nivel, `pct_max` y lo que falta para el siguiente salen del `saldo` (un saldo negativo cuenta como 0); `ganados` es solo informativo | líneas 135-183; reemplazada por `20261120120000_nivel_por_saldo.sql` (rollback en `supabase/rollbacks/`) | `service_role` |
 | `cambiar_estado_venta(p_id_venta, p_estado)` | Cambia el estado y mueve los puntos **en la misma transacción**. Bloquea la venta y luego al cliente. A un estado cobrado desde `Pendiente` o `Fallido` otorga puntos (una vez); a `Cancelado` devuelve y revierte (una vez). Salir de `Cancelado` no mueve nada. Errores `ESTADO_INVALIDO`, `VENTA_NO_EXISTE` | líneas 446-533 | `service_role` |
 
 Las cuatro funciones están en `public` con `search_path` vacío y se les quita el permiso a `public`, `anon` y `authenticated` (líneas 539-546).
