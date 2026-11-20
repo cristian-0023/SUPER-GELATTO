@@ -5,6 +5,7 @@ import { ShoppingCart, LogOut, User, Menu, X, Star, RotateCcw } from 'lucide-rea
 import { useCart } from '../context/CartContext';
 import { useSuperPoints } from '../context/SuperPointsContext';
 import CartDrawer from './CartDrawer';
+import { ALTO_NAVBAR } from '../utils/layout';
 import '../styles/Navbar.css';
 
 const Navbar = ({ user, onLogout }) => {
@@ -55,7 +56,7 @@ const Navbar = ({ user, onLogout }) => {
 
   return (
     <>
-      <nav className={`fixed top-0 w-full h-[80px] flex items-center z-[100] transition-all duration-500 ${
+      <nav style={{ height: ALTO_NAVBAR }} className={`fixed top-0 w-full flex items-center z-[100] transition-all duration-500 ${
         scrolled 
           ? 'bg-background-dark/95 backdrop-blur-xl border-b border-white/10 shadow-2xl' 
           : 'bg-background-dark/60 backdrop-blur-sm'
@@ -205,7 +206,8 @@ const Navbar = ({ user, onLogout }) => {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="absolute top-full left-0 w-full max-h-[calc(100vh-80px)] overflow-y-auto bg-background-dark/95 backdrop-blur-xl border-b border-white/10 md:hidden shadow-2xl z-50"
+              style={{ maxHeight: `calc(100vh - ${ALTO_NAVBAR}px)` }}
+              className="absolute top-full left-0 w-full overflow-y-auto bg-background-dark/95 backdrop-blur-xl border-b border-white/10 md:hidden shadow-2xl z-50"
             >
               <div className="flex flex-col p-6 gap-4">
                 {navLinks.map((link) => (

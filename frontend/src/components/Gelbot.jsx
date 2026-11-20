@@ -1,16 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { X, Send, Mic, Plus, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { getToken } from '../utils/api';
 import { armarTarjetasProductos, productoDeTarjeta, cantidadParaCarrito, FOTO_POR_DEFECTO } from '../utils/tarjetasGelbot';
-import { medidasPanel } from '../utils/panelGelbot';
+import { medidasPanel, debeCerrarConEscape, debeDevolverFoco } from '../utils/panelGelbot';
 
-// Medidas actuales de la ventana; altoVisible baja cuando se abre el teclado del celular.
+// Medidas actuales de la ventana. alto = vista de diseño (no cambia con el teclado); altoVisible y
+// desplazamientoVisible (visualViewport) cambian cuando se abre el teclado del celular.
 const leerVentana = () => (typeof window === 'undefined' ? {} : {
   ancho: window.innerWidth,
-  alto: window.innerHeight,
+  alto: document.documentElement.clientHeight || window.innerHeight,
   altoVisible: window.visualViewport?.height,
+  desplazamientoVisible: window.visualViewport?.offsetTop,
 });
 
 const ANILLO_FOCO = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-cacao-950';
@@ -90,6 +93,13 @@ const Gelbot = ({ user }) => {
   const inputRef = useRef(null);
   const botonFlotanteRef = useRef(null);
   const yaSeAbrio = useRef(false);
+  const panelRef = useRef(null);
+  const devolverFoco = useRef(false);
+  const mensajesRef = useRef(messages);
+  mensajesRef.current = messages;
+  // Temporizadores del auto-cierre (despedida): se limpian si el componente se desmonta.
+  const temporizadores = useRef([]);
+  useEffect(() => () => temporizadores.current.forEach(clearTimeout), []);
   const reducirMovimiento = useReducedMotion();
   const [ventana, setVentana] = useState(leerVentana);
   const medidas = medidasPanel(ventana);
@@ -104,27 +114,49 @@ const Gelbot = ({ user }) => {
   }, [messages, isLoading, isOpen]);
 
   // Panel abierto: seguir el tamaño de la ventana (y del teclado), cerrar con Escape y llevar el foco al campo.
-  // Al cerrarlo, el foco vuelve al botón flotante (no en la primera carga de la página).
+  // Al cerrarlo, el foco vuelve al botón flotante solo si estaba en el panel (no en la primera carga ni si
+  // el usuario ya está en otra parte de la página, por ejemplo tras el auto-cierre).
   useEffect(() => {
     if (!isOpen) {
-      if (yaSeAbrio.current) botonFlotanteRef.current?.focus();
+      if (yaSeAbrio.current && devolverFoco.current) botonFlotanteRef.current?.focus();
+      devolverFoco.current = false;
       return undefined;
     }
     yaSeAbrio.current = true;
     const actualizar = () => setVentana(leerVentana());
-    const alTeclear = (e) => { if (e.key === 'Escape') setIsOpen(false); };
+    // Escape no cierra con una confirmación de admin pendiente ni si otro diálogo ya lo atendió.
+    const alTeclear = (e) => {
+      if (!debeCerrarConEscape(e, mensajesRef.current)) return;
+      e.preventDefault();
+      setIsOpen(false);
+    };
     actualizar();
     window.addEventListener('resize', actualizar);
     window.visualViewport?.addEventListener('resize', actualizar);
+    window.visualViewport?.addEventListener('scroll', actualizar);
     document.addEventListener('keydown', alTeclear);
     const enfocar = requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
     return () => {
+      devolverFoco.current = debeDevolverFoco({ activo: document.activeElement, panel: panelRef.current, body: document.body });
       cancelAnimationFrame(enfocar);
       window.removeEventListener('resize', actualizar);
       window.visualViewport?.removeEventListener('resize', actualizar);
+      window.visualViewport?.removeEventListener('scroll', actualizar);
       document.removeEventListener('keydown', alTeclear);
     };
   }, [isOpen]);
+
+  // En el celular el panel ocupa toda la pantalla: el resto de la app queda inerte (el foco no se escapa
+  // detrás del chat). El panel vive fuera de #root (portal), así que no se ve afectado. Al cerrar se restaura.
+  const modal = isOpen && medidas.modal;
+  useEffect(() => {
+    if (!modal) return undefined;
+    const raiz = document.getElementById('root');
+    if (!raiz) return undefined;
+    const anterior = raiz.inert;
+    raiz.inert = true;
+    return () => { raiz.inert = anterior; };
+  }, [modal]);
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -236,12 +268,12 @@ const Gelbot = ({ user }) => {
 
       // Acción: cerrar chat automáticamente (despedida)
       if (data.action === 'closeChat') {
-        setTimeout(() => {
+        temporizadores.current.push(setTimeout(() => {
           setIsOpen(false);
-          setTimeout(() => {
+          temporizadores.current.push(setTimeout(() => {
             setMessages([welcomeMsg(user)]);
-          }, 500);
-        }, 3500);
+          }, 500));
+        }, 3500));
       }
 
     } catch (error) {
@@ -297,9 +329,12 @@ const Gelbot = ({ user }) => {
   };
 
   // Escritorio: panel compacto abajo a la derecha que crece con el contenido hasta un máximo que nunca llega
-  // a la barra superior. Celular: toda la pantalla debajo de la barra (la barra y el carrito siguen a la vista).
+  // a la barra superior. Celular: toda la pantalla debajo de la barra (la barra y el carrito siguen a la vista):
+  // top = barra y bottom = 0; solo con el teclado abierto se fija el alto del área visible.
   const estiloPanel = esMovil
-    ? { top: medidas.arriba, height: medidas.alto, left: 0, right: 0 }
+    ? (medidas.alto === undefined
+        ? { top: medidas.arriba, bottom: medidas.abajo, left: 0, right: 0 }
+        : { top: medidas.arriba, height: medidas.alto, left: 0, right: 0 })
     : { width: medidas.ancho, maxHeight: medidas.altoMax, bottom: medidas.abajo, right: 24, transformOrigin: 'bottom right' };
 
   const animacion = reducirMovimiento
@@ -317,14 +352,15 @@ const Gelbot = ({ user }) => {
 
   return (
     <>
-      <AnimatePresence>
+      {createPortal(<AnimatePresence>
         {isOpen && (
           <motion.section
+            ref={panelRef}
             key="panel-gelbot"
             id="gelbot-panel"
             data-gelbot-panel=""
             role="dialog"
-            aria-modal="false"
+            aria-modal={medidas.modal ? 'true' : 'false'}
             aria-labelledby="gelbot-titulo"
             style={estiloPanel}
             {...animacion}
@@ -645,14 +681,14 @@ const Gelbot = ({ user }) => {
                 type="submit"
                 aria-label="Enviar mensaje"
                 disabled={!input.trim() || isLoading}
-                className={`flex-none w-11 h-11 rounded-full flex items-center justify-center bg-gold-premium text-background-dark transition-colors hover:bg-gold-light disabled:bg-cacao-800 disabled:text-crema-suave/60 disabled:cursor-not-allowed ${ANILLO_FOCO}`}
+                className={`flex-none w-11 h-11 rounded-full flex items-center justify-center bg-gold-premium text-background-dark transition-colors hover:bg-gold-light disabled:bg-cacao-800 disabled:text-crema-suave/80 disabled:cursor-not-allowed ${ANILLO_FOCO}`}
               >
                 <Send size={18} aria-hidden="true" />
               </button>
             </form>
           </motion.section>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
 
       {/* Botón flotante: abre el chat; mientras está abierto se oculta (se cierra con la X o con Escape) */}
       <button

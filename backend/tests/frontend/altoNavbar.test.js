@@ -18,7 +18,8 @@ describe('altura de la barra superior', () => {
   });
   it('Navbar.jsx importa la constante y no tiene la altura escrita a mano', () => {
     expect(navbar).toMatch(/import\s*\{[^}]*\bALTO_NAVBAR\b[^}]*\}\s*from\s*['"]\.\.\/utils\/layout['"]/);
-    expect(navbar).not.toMatch(/h-\[\d+px\]/);
+    // Altura fija escrita a mano (los min-h-[44px] de los botones no cuentan).
+    expect(navbar).not.toMatch(/(^|[\s"'`])h-\[\d+px\]/);
     expect(navbar).not.toMatch(/calc\(100vh\s*-\s*\d+px\)/);
   });
 });
