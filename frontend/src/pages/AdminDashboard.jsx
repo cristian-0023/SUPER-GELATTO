@@ -19,6 +19,7 @@ import { useCart } from '../context/CartContext';
 import { puedeEditarRol } from '../utils/permisosUsuarios';
 import { decidirAnteErrorPanel, mensajeDeError } from '../utils/respuestaAdmin';
 import { borrarSesion } from '../utils/sesion';
+import { describirPersonalizacion } from '../utils/personalizado';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -349,6 +350,29 @@ const AdminDashboard = ({ user, onLogout }) => {
   };
 
   const [updatingSaleStatus, setUpdatingSaleStatus] = useState(null);
+
+  // Detalle de una venta (productos y composición del helado personalizado): se pide al abrirla.
+  const [ventaAbierta, setVentaAbierta] = useState(null);
+  const [detallesVenta, setDetallesVenta] = useState({});
+  const alternarDetalleVenta = async (idVenta) => {
+    if (ventaAbierta === idVenta) {
+      setVentaAbierta(null);
+      return;
+    }
+    setVentaAbierta(idVenta);
+    if (detallesVenta[idVenta]?.items) return;
+    setDetallesVenta((prev) => ({ ...prev, [idVenta]: { cargando: true } }));
+    try {
+      const res = await apiFetch(`/api/admin/sales/${idVenta}/items`);
+      const data = await res.json().catch(() => ({}));
+      setDetallesVenta((prev) => ({
+        ...prev,
+        [idVenta]: res.ok && data.ok ? { items: data.items || [] } : { error: data.message || 'No pudimos cargar el detalle de la venta.' }
+      }));
+    } catch {
+      setDetallesVenta((prev) => ({ ...prev, [idVenta]: { error: 'No pudimos cargar el detalle de la venta.' } }));
+    }
+  };
 
   const handleUpdateSaleStatus = async (saleId, newStatus) => {
     setUpdatingSaleStatus(saleId);
@@ -1364,8 +1388,12 @@ const AdminDashboard = ({ user, onLogout }) => {
                     const clientEmail = s.email || clientUser?.email;
                     const clientName = (s.nombre ? `${s.nombre} ${s.apellido || ''}` : null) || (clientUser ? `${clientUser.nombre || ''} ${clientUser.apellido || ''}` : null);
 
+                    const abierta = ventaAbierta === s.id_venta;
+                    const detalle = detallesVenta[s.id_venta];
+
                     return (
-                      <tr key={s.id_venta} className="hover:bg-white/[0.02] transition-colors group">
+                      <React.Fragment key={s.id_venta}>
+                      <tr className="hover:bg-white/[0.02] transition-colors group">
                         <td className="p-6">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-2xl bg-gold-premium/10 border border-gold-premium/30 flex items-center justify-center text-gold-premium shadow-[0_0_15px_rgba(212,175,55,0.15)] group-hover:scale-105 transition-transform">
@@ -1378,6 +1406,16 @@ const AdminDashboard = ({ user, onLogout }) => {
                               <span className="text-[9px] text-gold-premium/80 font-mono uppercase tracking-widest block mt-0.5">
                                 Venta confirmada
                               </span>
+                              <button
+                                type="button"
+                                onClick={() => alternarDetalleVenta(s.id_venta)}
+                                aria-expanded={abierta}
+                                aria-controls={`detalle-venta-${s.id_venta}`}
+                                className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-white/60 hover:text-gold-premium focus-visible:text-gold-premium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold-premium/60 rounded transition-colors"
+                              >
+                                <ChevronRight size={12} className={`transition-transform duration-200 ${abierta ? 'rotate-90' : ''}`} />
+                                {abierta ? 'Ocultar detalle' : 'Ver detalle'}
+                              </button>
                             </div>
                           </div>
                         </td>
@@ -1455,6 +1493,39 @@ const AdminDashboard = ({ user, onLogout }) => {
                           </div>
                         </td>
                       </tr>
+                      {abierta && (
+                        <tr id={`detalle-venta-${s.id_venta}`} className="bg-white/[0.015]">
+                          <td colSpan={5} className="px-6 pb-6 pt-0">
+                            {(!detalle || detalle.cargando) && (
+                              <p className="flex items-center gap-2 text-xs text-white/50 py-3">
+                                <RefreshCw size={12} className="animate-spin" /> Cargando detalle…
+                              </p>
+                            )}
+                            {detalle?.error && <p className="text-xs text-red-400 py-3">{detalle.error}</p>}
+                            {detalle?.items && detalle.items.length === 0 && (
+                              <p className="text-xs text-white/50 py-3">Esta venta no tiene productos registrados.</p>
+                            )}
+                            {detalle?.items && detalle.items.length > 0 && (
+                              <ul className="divide-y divide-white/5 border-t border-white/5">
+                                {detalle.items.map((it, i) => (
+                                  <li key={i} className="flex items-start justify-between gap-6 py-3">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-semibold text-white">{it.nombre}</p>
+                                      {it.personalizacion && (
+                                        <p className="text-xs text-white/60 mt-0.5">{describirPersonalizacion(it.personalizacion)}</p>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-white/70 tabular-nums whitespace-nowrap">
+                                      {it.cantidad} × {formatCurrency(it.precio_unitario)}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>

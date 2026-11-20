@@ -8,6 +8,7 @@ import { useCart, formatPrice } from '../context/CartContext';
 import { apiFetch } from '../utils/api';
 import { modelosAPrecargar } from '../utils/precargaModelos';
 import { registrarCarga, quitarCarga, textoDeCarga, estadoPorError, textoFallo } from '../utils/piezas3d';
+import { armarItemPersonalizado, precioPersonalizado } from '../utils/personalizado';
 
 // Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
@@ -318,11 +319,22 @@ const GelatoBuilder3D = ({ user }) => {
   }, []);
   const textoEstado = textoDeCarga(cargas);
 
-  // Calculate price: Base(10k) + Extra Scoops(2k each) + Toppings(1k each)
-  const basePrice = 10000;
-  const extraScoopsPrice = Math.max(0, selectedScoops.length - 1) * 2000;
-  const toppingsPrice = selectedToppings.length * 1000;
-  const total = basePrice + extraScoopsPrice + toppingsPrice;
+  // Precios de la base (tabla componente_personalizado). Mientras cargan, o si fallan, se usa el respaldo
+  // (igual a la semilla de la base). El total que se cobra lo calcula siempre el servidor.
+  const [componentes, setComponentes] = useState(null);
+  useEffect(() => {
+    let vigente = true;
+    apiFetch('/api/personalizado/precios')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (vigente && data?.ok && Array.isArray(data.componentes)) setComponentes(data.componentes);
+      })
+      .catch((err) => console.warn('No se pudieron cargar los precios del helado personalizado:', err));
+    return () => { vigente = false; };
+  }, []);
+
+  const seleccion = { envase: container, sabores: selectedScoops, toppings: selectedToppings };
+  const total = precioPersonalizado(seleccion, componentes);
 
   const handleAddToCart = () => {
     // SECURITY CHECK: Solo registrados en DB pueden comprar
@@ -342,23 +354,26 @@ const GelatoBuilder3D = ({ user }) => {
       }
     }
 
-    const containerName = containers.find(c => c.id === container)?.name || 'Gelato';
     const firstScoop = scoopsList.find(s => String(s.id) === String(selectedScoops[0])) || DEFAULT_SCOOPS[0];
 
-    const customProduct = {
-      id: `custom-${Date.now()}`,
-      nombre: `Personalizado: ${containerName}`,
-      precio: total,
-      image: screenshot, // The 360 snapshot!
-      emoji: firstScoop?.emoji || '🍨',
-      categoria: 'Personalizado',
-      isCustom: true,
-      gradientArt: {
-        gradient: `linear-gradient(135deg, ${firstScoop?.color || '#FFB347'} 0%, #ffffff 100%)`,
-        emoji: firstScoop?.emoji || '🍦',
-        decorEmoji: containers.find(c => c.id === container)?.emoji || '✨'
+    // La línea lleva la composición (ids del armador); la misma composición suma cantidad en la misma línea.
+    const customProduct = armarItemPersonalizado({
+      seleccion,
+      componentes,
+      imagen: screenshot, // The 360 snapshot!
+      extra: {
+        emoji: firstScoop?.emoji || '🍨',
+        gradientArt: {
+          gradient: `linear-gradient(135deg, ${firstScoop?.color || '#FFB347'} 0%, #ffffff 100%)`,
+          emoji: firstScoop?.emoji || '🍦',
+          decorEmoji: containers.find(c => c.id === container)?.emoji || '✨'
+        }
       }
-    };
+    });
+    if (customProduct.precio === null) {
+      if (showToast) showToast('No pudimos calcular el precio de tu creación. Recarga la página e inténtalo de nuevo.', 'error');
+      return;
+    }
 
     addToCart(customProduct, 1);
     
@@ -661,7 +676,7 @@ const GelatoBuilder3D = ({ user }) => {
                   onClick={handleAddToCart}
                   className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-background-dark font-bold text-sm uppercase tracking-widest shadow-lg shadow-amber-400/20 hover:shadow-amber-400/40 transition-shadow flex items-center justify-center gap-2"
                 >
-                  Confirmar y Añadir ({formatPrice(total)}) <ShoppingCart size={18} />
+                  Confirmar y Añadir{total !== null ? ` (${formatPrice(total)})` : ''} <ShoppingCart size={18} />
                 </motion.button>
               </div>
             </div>

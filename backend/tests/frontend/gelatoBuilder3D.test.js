@@ -45,3 +45,37 @@ describe('GelatoBuilder3D: errores por pieza', () => {
     expect(limites.length).toBe(3);
   });
 });
+
+// Helado personalizado pagable: la línea del carrito lleva la composición y el precio sale de la base.
+const leerFuente = (rel) => fs.readFileSync(path.resolve(__dirname, '../../../frontend/src', rel), 'utf8');
+
+describe('GelatoBuilder3D: helado personalizado pagable', () => {
+  it('ya no inventa un producto custom-<fecha> ni calcula el precio con números fijos', () => {
+    expect(fuente).not.toMatch(/custom-\$\{Date\.now\(\)\}/);
+    expect(fuente).not.toMatch(/basePrice\s*=\s*10000/);
+    expect(fuente).not.toMatch(/\*\s*2000/);
+  });
+
+  it('arma la línea con armarItemPersonalizado y muestra precios de /api/personalizado/precios', () => {
+    expect(fuente).toMatch(/armarItemPersonalizado\(/);
+    expect(fuente).toMatch(/precioPersonalizado\(/);
+    expect(fuente).toMatch(/['"`]\/api\/personalizado\/precios['"`]/);
+  });
+});
+
+describe('carrito, checkout y panel muestran la composición', () => {
+  it('el carrito limpia los personalizados viejos al cargar', () => {
+    expect(leerFuente('context/CartContext.jsx')).toMatch(/limpiarCarritoGuardado\(/);
+  });
+
+  it('el carrito y el checkout muestran el detalle del personalizado', () => {
+    expect(leerFuente('components/CartDrawer.jsx')).toMatch(/item\.detalle/);
+    expect(leerFuente('pages/CheckoutPage.jsx')).toMatch(/item\.detalle/);
+  });
+
+  it('el panel pide el detalle de una venta con su composición', () => {
+    const panel = leerFuente('pages/AdminDashboard.jsx');
+    expect(panel).toMatch(/\/api\/admin\/sales\/\$\{[^}]+\}\/items/);
+    expect(panel).toMatch(/describirPersonalizacion\(/);
+  });
+});

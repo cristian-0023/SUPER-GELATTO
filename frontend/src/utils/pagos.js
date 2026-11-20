@@ -3,6 +3,8 @@
  * El usuario NO va en el cuerpo: el servidor lo saca del token de la sesión.
  */
 
+import { lineaParaPago } from './personalizado.js';
+
 export const MENSAJE_SESION_VENCIDA = 'Tu sesión venció. Inicia sesión de nuevo para pagar: tu carrito sigue guardado.';
 
 export function armarPago({ token, metodo, banco, cart, totalPrice, referencia, forzarRechazo, puntosUsar }) {
@@ -13,7 +15,7 @@ export function armarPago({ token, metodo, banco, cart, totalPrice, referencia, 
     body: JSON.stringify({
       method: metodo,
       bank: banco,
-      items: cart.map((item) => ({
+      items: cart.map((item) => (item.tipo === 'personalizado' ? lineaParaPago(item) : {
         id: item.id,
         id_producto: item.id,
         name: item.nombre || item.name,

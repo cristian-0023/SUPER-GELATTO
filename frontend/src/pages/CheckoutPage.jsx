@@ -268,6 +268,9 @@ const CheckoutPage = ({ user }) => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-bold text-white truncate">{item.nombre || item.name}</h4>
+                      {item.detalle && (
+                        <p className="text-xs text-white/60 leading-snug mt-0.5">{item.detalle}</p>
+                      )}
                       <div className="flex justify-between items-center mt-1">
                         <span className="text-xs text-white/40">{item.quantity} x {formatPrice(item.precio || item.price)}</span>
                         <span className="text-sm font-bold text-gold-premium">{formatPrice((item.quantity * (item.precio || item.price)))}</span>
