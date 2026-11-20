@@ -1,7 +1,19 @@
 // Tarjetas de helados del chat Gelbot (frontend/src/utils/tarjetasGelbot.js): el servidor manda
 // `productos` y el navegador los vuelve a validar antes de mostrarlos (nunca confía a ciegas).
 import { describe, it, expect } from 'vitest';
-import { armarTarjetasProductos, productoDeTarjeta, FOTO_POR_DEFECTO, MAX_TARJETAS } from '../../../frontend/src/utils/tarjetasGelbot.js';
+import { armarTarjetasProductos, productoDeTarjeta, cantidadParaCarrito, FOTO_POR_DEFECTO, MAX_TARJETAS } from '../../../frontend/src/utils/tarjetasGelbot.js';
+
+describe('cantidadParaCarrito (quantity que manda el servidor)', () => {
+  it.each([[2, 2], [10, 10], [1, 1]])('%s -> %s', (q, esperado) => {
+    expect(cantidadParaCarrito(q)).toBe(esperado);
+  });
+  it.each([[undefined], [null], [0], [-3], ['abc'], [2.5], [NaN]])('%s (inválida) -> 1', (q) => {
+    expect(cantidadParaCarrito(q)).toBe(1);
+  });
+  it('tope de 10', () => {
+    expect(cantidadParaCarrito(99)).toBe(10);
+  });
+});
 
 describe('armarTarjetasProductos', () => {
   it('arma id, nombre, precio, precio en texto ($9.000) y foto', () => {

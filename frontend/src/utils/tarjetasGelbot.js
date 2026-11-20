@@ -37,6 +37,9 @@ export function armarTarjetasProductos(productos) {
   return tarjetas;
 }
 
+// Cantidad que manda el servidor (pendiente).
+export function cantidadParaCarrito() { return 0; }
+
 // Lo que recibe addToCart del carrito.
 export function productoDeTarjeta(tarjeta) {
   return { id: tarjeta.id, nombre: tarjeta.nombre, precio: tarjeta.precio, image: tarjeta.image };
