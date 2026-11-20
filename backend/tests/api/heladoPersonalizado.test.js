@@ -259,6 +259,63 @@ describe('GET /api/admin/sales/:id/items', () => {
   });
 });
 
+describe('panel: el producto personalizado no se edita ni se borra', () => {
+  const PERSONALIZADO = { data: { id_producto: 14, tipo: 'personalizado' }, error: null };
+  const rutas = [
+    ['put', '/api/admin/products/14', { name: 'Otro', precio: 1, stock: 5 }],
+    ['delete', '/api/admin/products/14', undefined],
+    ['put', '/api/admin/products/14/price', { precio: 1 }],
+    ['put', '/api/admin/products/14/stock', { stock: 5 }],
+    ['put', '/api/admin/products/14/category', { categoria: 'Vegano' }],
+    ['put', '/api/admin/products/14/featured', { destacado: true }],
+    ['put', '/api/admin/products/14/image', { image: '/images/gelato_fresa.png' }],
+  ];
+
+  // La base no toca el personalizado porque cada escritura lleva el filtro (tipo null o distinto de
+  // 'personalizado'): la escritura no devuelve fila y el servidor responde 409 (no 404).
+  const FILTRO = ['or', 'tipo.is.null,tipo.neq.personalizado'];
+  const escrituras = () => [...fake.consultas('producto', 'update'), ...fake.consultas('producto', 'delete')];
+
+  it.each(rutas)('%s %s -> 409 con mensaje claro; la escritura lleva el filtro que protege al personalizado', async (metodo, url, cuerpo) => {
+    fake.responder('producto', 'select', PERSONALIZADO);
+    const peticion = request(app)[metodo](url).set(authAdmin());
+    const res = await (cuerpo ? peticion.send(cuerpo) : peticion);
+
+    expect(res.status).toBe(409);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toMatch(/helado personalizado/i);
+    expect(escrituras()).toHaveLength(1);
+    expect(escrituras()[0].filtros).toContainEqual(FILTRO);
+  });
+
+  it('un producto normal se sigue editando (sin lecturas de más)', async () => {
+    fake.responder('producto', 'update', { data: { id_producto: 5 }, error: null });
+
+    const res = await request(app).put('/api/admin/products/5/price').set(authAdmin()).send({ precio: 3000 });
+
+    expect(res.status).toBe(200);
+    expect(fake.consultas('producto', 'update')[0].filtros).toContainEqual(FILTRO);
+    expect(fake.consultas('producto', 'select')).toHaveLength(0);
+  });
+
+  it('un producto que no existe sigue dando 404', async () => {
+    fake.responder('producto', 'select', { data: null, error: null });
+
+    const res = await request(app).put('/api/admin/products/999/price').set(authAdmin()).send({ precio: 3000 });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('si la base no responde al revisar por qué no hubo fila -> 500', async () => {
+    fake.responder('producto', 'select', { data: null, error: { message: 'x' } });
+
+    const res = await request(app).put('/api/admin/products/5/price').set(authAdmin()).send({ precio: 3000 });
+
+    expect(res.status).toBe(500);
+    expect(res.body.ok).toBe(false);
+  });
+});
+
 describe('panel: el producto personalizado no aparece entre los productos', () => {
   it('se oculta de la lista de productos del panel', async () => {
     fake.responder('venta', 'select', { data: [], error: null });

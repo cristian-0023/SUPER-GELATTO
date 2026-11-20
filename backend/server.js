@@ -490,6 +490,16 @@ const makeQueryBuilder = (tableName) => {
       queryData = queryData.filter(item => values.includes(item[field]));
       return builder;
     },
+    // "col.is.null,col.neq.valor": se queda con las filas que cumplen ALGUNA condición (como PostgREST).
+    or: (expresion) => {
+      const condiciones = String(expresion).split(',').map((c) => c.split('.'));
+      const cumple = (item, [col, op, val]) =>
+        (op === 'is' && val === 'null' && item[col] == null)
+        || (op === 'eq' && String(item[col]) === val)
+        || (op === 'neq' && String(item[col]) !== val);
+      queryData = queryData.filter((item) => condiciones.some((c) => cumple(item, c)));
+      return builder;
+    },
     ilike: (field, value) => {
       // Como la base real: "\_", "\%" y "\\" son caracteres literales (escapados con correoParaIlike).
       const target = String(value || '').replace(/\\(.)/g, '$1').toLowerCase();
@@ -2445,17 +2455,37 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
   }
 });
 
+// El "Helado personalizado 3D" (producto.tipo = 'personalizado') no se edita ni se borra desde el panel:
+// su precio sale de componente_personalizado, no usa stock y registrar_venta lo necesita.
+// Cada escritura lleva el filtro SIN_PERSONALIZADO (la base nunca lo toca, sin carreras ni lecturas de más).
+// Solo si la escritura no tocó ninguna fila se pregunta por qué: personalizado -> 409; no existe -> 404.
+const SIN_PERSONALIZADO = 'tipo.is.null,tipo.neq.personalizado';
+const MENSAJE_PERSONALIZADO_PROTEGIDO = 'El helado personalizado no se edita desde el panel: sus precios están en la tabla de componentes y no usa stock.';
+
+async function responderSinFila(res, prodId) {
+  const { data, error } = await supabase
+    .from('producto')
+    .select('id_producto, tipo')
+    .eq('id_producto', prodId)
+    .maybeSingle();
+  if (falloSupabase(res, error, 'Error al revisar el producto.')) return;
+  if (data && data.tipo === 'personalizado') {
+    return res.status(409).json({ ok: false, message: MENSAJE_PERSONALIZADO_PROTEGIDO });
+  }
+  return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+}
+
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   const prodId = idPositivoValido(req.params.id);
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   try {
-    const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).select('id_producto');
+    const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).or(SIN_PERSONALIZADO).select('id_producto');
     // 23503 = clave foránea: el producto tiene ventas y la base no deja borrarlo.
     if (error && error.code === '23503') {
       return res.status(409).json({ ok: false, message: 'Este producto tiene ventas registradas y no se puede borrar.' });
     }
     if (falloSupabase(res, error, 'Error al eliminar el producto.')) return;
-    if (!data || data.length === 0) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!data || data.length === 0) return responderSinFila(res, prodId);
     return res.status(200).json({ ok: true, message: 'Producto eliminado correctamente.' });
   } catch (error) {
     console.error('Error al eliminar producto:', error);
@@ -2617,10 +2647,11 @@ app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
       .from('producto')
       .update({ imagen })
       .eq('id_producto', prodId)
+      .or(SIN_PERSONALIZADO)
       .select('id_producto')
       .maybeSingle();
     if (falloSupabase(res, error, 'Error al guardar la imagen.')) return;
-    if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!data) return responderSinFila(res, prodId);
     return res.status(200).json({ ok: true, message: 'Imagen actualizada con éxito.', id: prodId, image: imagen });
   } catch (error) {
     console.error('Error al guardar imagen:', error);
@@ -2640,10 +2671,11 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
       .from('producto')
       .update(datos)
       .eq('id_producto', prodId)
+      .or(SIN_PERSONALIZADO)
       .select(COLUMNAS_PRODUCTO_ADMIN)
       .maybeSingle();
     if (falloSupabase(res, error, 'Error al actualizar el producto o stock.')) return;
-    if (!updatedProduct) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!updatedProduct) return responderSinFila(res, prodId);
 
     // Sincronizar en tabla inventario si se actualizó el stock (el producto ya se guardó: solo se registra el fallo)
     if (datos.stock !== undefined) {
@@ -2681,10 +2713,11 @@ function rutaCampoProducto({ columna, limpiar, error, mensajeError, mensajeOk })
         .from('producto')
         .update({ [columna]: valor })
         .eq('id_producto', prodId)
+        .or(SIN_PERSONALIZADO)
         .select('id_producto')
         .maybeSingle();
       if (falloSupabase(res, dbErr, mensajeError)) return;
-      if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+      if (!data) return responderSinFila(res, prodId);
 
       const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
       if (fbItem) fbItem[columna] = valor;
