@@ -232,7 +232,7 @@ describe('4. fotos de los helados en la lista', () => {
 
   it('máximo 12 productos y solo activos', async () => {
     const muchos = Array.from({ length: 20 }, (_, i) => ({ id_producto: i + 1, nombre: `Sabor ${i + 1}`, precio: 1000 * (i + 1), imagen: `/images/s${i + 1}.png`, estado: i !== 0 }));
-    fake.responder('producto', 'select', { data: muchos, error: null });
+    prepararFake(muchos);
     guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores 🍦')];
     const res = await chat({ message: 'muéstrame el menú' }, tokenCliente());
     expect(res.body.productos).toHaveLength(12);
@@ -247,7 +247,7 @@ describe('4. fotos de los helados en la lista', () => {
     ['data:', 'data:image/png;base64,AAAA'],
     ['con usuario y clave', 'https://user:pass@cdn.example.com/a.png'],
   ])('imagen inválida (%s) llega como null', async (_c, imagen) => {
-    fake.responder('producto', 'select', { data: [{ id_producto: 9, nombre: 'Coco', precio: 7000, imagen, estado: true }], error: null });
+    prepararFake([{ id_producto: 9, nombre: 'Coco', precio: 7000, imagen, estado: true }]);
     guion = [pideHerramienta('getProducts'), texto('Sabores.')];
     const res = await chat({ message: 'menú' }, tokenCliente());
     expect(res.body.productos).toEqual([{ id: 9, nombre: 'Coco', precio: 7000, image: null }]);

@@ -20,6 +20,7 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
 const { handleChatbotRequest } = require('./chatbot');
+const { imagenProductoValida } = require('./imagenProducto');
 const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
 const { correoParaIlike } = require('./correoIlike');
 
@@ -2615,24 +2616,7 @@ function soloColumnasProductoAdmin(fila) {
 }
 
 // Imagen del producto: URL https:// (sin usuario ni clave) o ruta local que empieza con una sola "/" y sin "..".
-function imagenProductoValida(valor) {
-  if (typeof valor !== 'string') return null;
-  const img = valor.trim();
-  if (img.length < 1 || img.length > 2048) return null;
-  // Los espacios normales sí valen (hay imágenes como "caramelo salado.png"); no los controles ni "\".
-  if (/[\\\u0000-\u001f\u007f]/.test(img)) return null;
-  if (img.startsWith('/')) {
-    return img.startsWith('//') || img.includes('..') ? null : img;
-  }
-  try {
-    const url = new URL(img);
-    // Con usuario o clave (https://user:pass@...) se podría engañar a quien mira el enlace o filtrar datos.
-    if (url.username || url.password) return null;
-    return url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
-}
+// La regla vive en imagenProducto.js (la comparte Gelbot).
 
 // Cambiar la imagen del producto (Admin)
 app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {

@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Mic } from 'lucide-react';
+import { X, Send, Mic, Plus, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { getToken } from '../utils/api';
+import { armarTarjetasProductos, productoDeTarjeta, FOTO_POR_DEFECTO } from '../utils/tarjetasGelbot';
 
 const parseInlineStyles = (text) => {
   if (typeof text !== 'string') return text;
@@ -69,6 +70,8 @@ const Gelbot = ({ user }) => {
   const [input, setInput]       = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  // Tarjetas ya agregadas al carrito ("<idMensaje>-<idProducto>"), para mostrar el check.
+  const [agregados, setAgregados] = useState(() => new Set());
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
 
@@ -179,6 +182,8 @@ const Gelbot = ({ user }) => {
         sender:     'bot',
         action:     data.action,
         actionData: data.actionData,
+        // Tarjetas con foto (datos de la base, validados otra vez aquí).
+        productos:  armarTarjetasProductos(data.productos),
         // Acción que modifica datos: el servidor solo la propone; aquí el admin la confirma o la cancela.
         propuesta:  data.requiereConfirmacion && data.tokenConfirmacion
           ? { token: data.tokenConfirmacion, resumen: String(data.resumen || ''), estado: 'pendiente' }
@@ -206,6 +211,17 @@ const Gelbot = ({ user }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Tocar una tarjeta agrega ese helado al carrito (precio y foto vienen de la base).
+  const agregarDesdeTarjeta = (msgId, tarjeta) => {
+    addToCart(productoDeTarjeta(tarjeta), 1);
+    setAgregados(prev => new Set(prev).add(`${msgId}-${tarjeta.id}`));
+    setMessages(prev => [...prev, {
+      id: Date.now() + 1,
+      text: `¡**${tarjeta.nombre}** (${tarjeta.precioTexto}) añadido al carrito! 🍦`,
+      sender: 'bot'
+    }]);
   };
 
   // Responde a una propuesta del servidor: solo manda el token (nunca texto del chat) en una petición nueva.
@@ -301,6 +317,53 @@ const Gelbot = ({ user }) => {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* ── Tarjetas de sabores: foto, nombre y precio; tocar = agregar al carrito ── */}
+                  {msg.productos?.length > 0 && (
+                    <ul
+                      aria-label="Sabores disponibles"
+                      className="w-[95%] grid grid-cols-2 sm:grid-cols-3 gap-2"
+                    >
+                      {msg.productos.map((t) => {
+                        const agregado = agregados.has(`${msg.id}-${t.id}`);
+                        return (
+                          <li key={t.id}>
+                            <button
+                              type="button"
+                              onClick={() => agregarDesdeTarjeta(msg.id, t)}
+                              aria-label={`Agregar ${t.nombre}, ${t.precioTexto}, al carrito`}
+                              className="group w-full h-full flex flex-col text-left rounded-xl overflow-hidden bg-white/5 border border-white/10 hover:border-gold-premium/60 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark"
+                            >
+                              <span className="relative block aspect-[4/3] bg-black/40">
+                                <img
+                                  src={t.image}
+                                  alt={`Helado de ${t.nombre}`}
+                                  loading="lazy"
+                                  decoding="async"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    if (!e.currentTarget.src.endsWith(FOTO_POR_DEFECTO)) e.currentTarget.src = FOTO_POR_DEFECTO;
+                                  }}
+                                />
+                                <span
+                                  aria-hidden="true"
+                                  className={`absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center shadow-md shadow-black/40 transition-colors ${
+                                    agregado ? 'bg-green-500 text-background-dark' : 'bg-gold-premium text-background-dark'
+                                  }`}
+                                >
+                                  {agregado ? <Check size={16} strokeWidth={3} /> : <Plus size={16} strokeWidth={3} />}
+                                </span>
+                              </span>
+                              <span className="flex flex-col gap-0.5 p-2">
+                                <span className="text-xs font-semibold text-white leading-snug line-clamp-2">{t.nombre}</span>
+                                <span className="text-xs font-bold text-gold-premium tabular-nums">{t.precioTexto}</span>
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
 
                   {/* ── Tabla de Usuarios (Admin) ── */}

@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const Groq = require("groq-sdk");
 const { APIError: GroqAPIError } = require("groq-sdk/error");
+const { imagenProductoValida } = require("./imagenProducto");
 require('dotenv').config();
 
 let groq = null;
@@ -554,6 +555,19 @@ function textoAgregadoAlCarrito(p) {
   return `¡Excelente elección! 🍦 **${p.nombre}** (${formatearCOP(p.precio)}) fue añadido a tu carrito. ¿Deseas algo más?`;
 }
 
+// Tarjetas con foto para el chat: salen de la base (nunca del modelo), solo activos, máximo 12 y con la
+// URL de la imagen validada (https o ruta local; si no, null y el navegador pone una foto por defecto).
+const MAX_PRODUCTOS_TARJETAS = 12;
+const MENSAJE_SABORES = "Estos son nuestros sabores 🍦 Toca uno para agregarlo al carrito.";
+
+function productosParaTarjetas(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .filter((p) => p && p.estado !== false && Number.isInteger(Number(p.id_producto)) && typeof p.nombre === 'string')
+    .slice(0, MAX_PRODUCTOS_TARJETAS)
+    .map((p) => ({ id: p.id_producto, nombre: p.nombre, precio: p.precio, image: imagenProductoValida(p.imagen) }));
+}
+
 // Producto que recibe el carrito del navegador (mismo formato en el atajo y en addToCart).
 function productoParaCarrito(p) {
   return { id: p.id_producto, nombre: p.nombre, precio: p.precio, image: p.imagen, descripcion: p.descripcion };
@@ -780,6 +794,7 @@ USUARIO: ${userName} | role: "cliente"`;
       let propuesta       = null; // máximo 1 acción que modifica datos por mensaje
       let productoConsultado = null; // addToCart sin intención de compra: se informa, no se agrega
       let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
+      let productosTarjetas  = null; // getProducts ejecutado: tarjetas con foto (datos de la base)
 
       for (const toolCall of llamadasAEjecutar) {
         const functionName = toolCall.function.name;
@@ -792,6 +807,8 @@ USUARIO: ${userName} | role: "cliente"`;
 
           } else if (functionName === "getProducts") {
             functionResponse = await functions.getProducts(supabase);
+            // Tarjetas con foto solo para clientes y visitantes (el admin ve su informe).
+            if (!isAdmin && Array.isArray(functionResponse)) productosTarjetas = productosParaTarjetas(functionResponse);
 
           } else if (functionName === "getOrders") {
             // Siempre los pedidos del usuario del token, aunque el modelo pida otro userId.
@@ -933,24 +950,40 @@ USUARIO: ${userName} | role: "cliente"`;
       // MISMAS ya filtradas para el rol, con tool_choice "none" (prohíbe llamar herramientas:
       // https://console.groq.com/docs/api-reference). Si aun así llegan tool_calls, se ignoran: de esta
       // respuesta solo se usa el texto.
-      const second = await groq.chat.completions.create({
-        model: GROQ_MODEL,
-        messages,
-        tools: activeTools,
-        tool_choice: "none",
-        max_tokens: MAX_TOKENS_RESPUESTA,
-        temperature: 0.2,
-        ...OPCIONES_RAZONAMIENTO
-      });
+      const conTarjetas = productosTarjetas && productosTarjetas.length > 0;
+      if (conTarjetas) {
+        messages.push({ role: "system", content: "El cliente ya ve en pantalla tarjetas con la foto, el nombre y el precio de cada sabor. Responde con UNA frase corta y cálida, sin listar sabores ni precios." });
+      }
+
+      let second;
+      try {
+        second = await groq.chat.completions.create({
+          model: GROQ_MODEL,
+          messages,
+          tools: activeTools,
+          tool_choice: "none",
+          max_tokens: MAX_TOKENS_RESPUESTA,
+          temperature: 0.2,
+          ...OPCIONES_RAZONAMIENTO
+        });
+      } catch (error) {
+        // Con las tarjetas ya listas (datos de la base), el cliente igual ve los sabores.
+        if (!conTarjetas || !esErrorDeGroq(error)) throw error;
+        const { categoria, status, codigo } = clasificarErrorGroq(error);
+        console.error('chatbot: error de Groq en la segunda llamada', { categoria, status, codigo, modelo: GROQ_MODEL });
+        return res.json({ response: MENSAJE_SABORES, action: null, product: null, actionData: null, productos: productosTarjetas });
+      }
 
       avisarSiSeCorto(second);
-      const finalText = cleanText(second.choices?.[0]?.message?.content) || MENSAJE_RESPUESTA_VACIA;
+      const textoModelo = cleanText(second.choices?.[0]?.message?.content);
+      const finalText = textoModelo || (conTarjetas ? MENSAJE_SABORES : MENSAJE_RESPUESTA_VACIA);
 
       return res.json({
         response:   finalText,
         action:     actionToPerform,
         product:    productToBuy,
-        actionData: actionData
+        actionData: actionData,
+        ...(conTarjetas ? { productos: productosTarjetas } : {})
       });
     }
 
