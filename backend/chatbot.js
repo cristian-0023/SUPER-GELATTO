@@ -2,6 +2,10 @@ const crypto = require("crypto");
 const Groq = require("groq-sdk");
 const { APIError: GroqAPIError } = require("groq-sdk/error");
 const { imagenProductoValida } = require("./imagenProducto");
+const {
+  tieneIntencionDeCompra, hayNegacion, esConsulta, preguntaPrecio, esAfirmacion,
+  botOfrecioAgregar, botPreguntoCual, leerCantidad, buscarProductos,
+} = require("./gelbotIntencion");
 require('dotenv').config();
 
 let groq = null;
@@ -49,8 +53,8 @@ const esToolUseFailed = (error) => {
   return status === 400 && codigo === 'tool_use_failed';
 };
 
-// Primera llamada (con herramientas): si falla con tool_use_failed se reintenta UNA sola vez.
-async function primeraLlamadaConReintento(parametros) {
+// Llamada a Groq (primera o segunda): si falla con tool_use_failed se reintenta UNA sola vez.
+async function llamarConReintento(parametros) {
   try {
     return await groq.chat.completions.create(parametros);
   } catch (error) {
@@ -222,8 +226,8 @@ function validarNuevoProducto(args) {
 const functions = {
   getProducts: async (supabase) => {
     console.log("🏎️ Tool: getProducts");
-    const { data, error } = await supabase.from('producto').select('*').eq('estado', true);
-    return error ? { error: "No pude obtener los productos." } : data;
+    const { data, error } = await supabase.from('producto').select(COLUMNAS_PRODUCTO_CHAT).eq('estado', true);
+    return error ? { error: "No pude obtener los productos." } : (data || []).filter((p) => p && p.estado !== false);
   },
 
   // userId SIEMPRE es el del token (nunca lo que pida el modelo).
@@ -485,7 +489,8 @@ function limpiarDatosNoConfiables(valor) {
   return valor;
 }
 
-const HERRAMIENTAS_DATOS_DE_CLIENTES = ['getAllUsers', 'getAllOrders'];
+// getProducts también: nombres y descripciones de productos los escribe una persona en el panel.
+const HERRAMIENTAS_DATOS_DE_CLIENTES = ['getAllUsers', 'getAllOrders', 'getProducts'];
 
 // Texto que recibe el modelo como resultado de una herramienta.
 function resultadoParaModelo(nombre, respuesta) {
@@ -530,17 +535,29 @@ function cleanText(text) {
 
 
 // ── Cache de productos para respuesta rápida ─────────────────
+// 1 minuto de vida. Las rutas de admin que cambian productos la invalidan (invalidarCacheProductos).
+// Si Supabase falla al renovar, se sigue usando la lista anterior (nunca se guarda una lista vacía por error).
+const COLUMNAS_PRODUCTO_CHAT = 'id_producto, nombre, precio, descripcion, imagen, estado';
 let productCache = null;
 let productCacheTime = 0;
-const CACHE_TTL = 60000; // 1 minuto de caché
+const CACHE_TTL = 60000;
 
 async function getProductsCached(supabase) {
   const now = Date.now();
   if (productCache && (now - productCacheTime) < CACHE_TTL) return productCache;
-  const { data } = await supabase.from('producto').select('*').eq('estado', true);
-  productCache = data || [];
+  const { data, error } = await supabase.from('producto').select(COLUMNAS_PRODUCTO_CHAT).eq('estado', true);
+  if (error || !Array.isArray(data)) {
+    console.error('chatbot: no se pudo renovar el catálogo', { codigo: error?.code || null });
+    return productCache || [];
+  }
+  productCache = data.filter((p) => p && p.estado !== false);
   productCacheTime = now;
   return productCache;
+}
+
+function invalidarCacheProductos() {
+  productCache = null;
+  productCacheTime = 0;
 }
 
 // Precio en pesos colombianos como "$9.000" (sin el espacio que pone Intl con style:'currency').
@@ -551,14 +568,24 @@ function textoInfoProducto(p) {
   return `**${p.nombre}** cuesta **${formatearCOP(p.precio)}**. Si lo quieres, dime "agrégalo" y lo pongo en tu carrito 🍦`;
 }
 
-function textoAgregadoAlCarrito(p) {
+function textoAgregadoAlCarrito(p, cantidad = 1) {
+  if (cantidad > 1) {
+    return `¡Excelente elección! 🍦 ${cantidad} × **${p.nombre}** (${formatearCOP(p.precio)} c/u) añadidos a tu carrito. ¿Deseas algo más?`;
+  }
   return `¡Excelente elección! 🍦 **${p.nombre}** (${formatearCOP(p.precio)}) fue añadido a tu carrito. ¿Deseas algo más?`;
+}
+
+// Varios sabores coinciden (o ninguno claro): se pregunta cuál, sin precios ni agregar nada.
+function textoCualProducto(lista = []) {
+  if (!lista.length) return '¿Cuál sabor quieres? 🍦';
+  return `¿Cuál de estos quieres? ${lista.slice(0, 5).map((p) => `**${p.nombre}**`).join(', ')} 🍦`;
 }
 
 // Tarjetas con foto para el chat: salen de la base (nunca del modelo), solo activos, máximo 12 y con la
 // URL de la imagen validada (https o ruta local; si no, null y el navegador pone una foto por defecto).
 const MAX_PRODUCTOS_TARJETAS = 12;
 const MENSAJE_SABORES = "Estos son nuestros sabores 🍦 Toca uno para agregarlo al carrito.";
+const MENSAJE_RESPALDO_DATOS = "Aquí tienes la información que pediste 🍦";
 
 function productosParaTarjetas(lista) {
   if (!Array.isArray(lista)) return [];
@@ -568,74 +595,65 @@ function productosParaTarjetas(lista) {
     .map((p) => ({ id: p.id_producto, nombre: p.nombre, precio: p.precio, image: imagenProductoValida(p.imagen) }));
 }
 
-// Producto que recibe el carrito del navegador (mismo formato en el atajo y en addToCart).
+// Producto que recibe el carrito del navegador (el carrito no usa la descripción: no se manda).
 function productoParaCarrito(p) {
-  return { id: p.id_producto, nombre: p.nombre, precio: p.precio, image: p.imagen, descripcion: p.descripcion };
+  return { id: p.id_producto, nombre: p.nombre, precio: p.precio, image: imagenProductoValida(p.imagen) };
 }
 
-// ── Intención de compra (la usan el atajo y addToCart) ──────
-// Minúsculas y sin tildes: así \b (que solo entiende letras ASCII) funciona con "agrégame" o "añade".
-const normalizarTexto = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-// Verbos que siempre piden agregar o comprar.
-const VERBOS_DE_CARRITO = /\b(agreg\w*|anad\w*|compr[ao]\w*|comprar|llevo|pido|pide|pedir|ordeno|ordenar|carrito)\b/;
-// Verbos de deseo: cuentan solo si el mensaje no es una pregunta ("quiero saber cuánto cuesta" no es compra).
-// "¿Me das una fresa?" es un pedido amable: el signo de pregunta solo no la vuelve consulta.
-const VERBOS_DE_DESEO = /\b(quiero|quisiera|dame|deme|ponme|me das|me da|regala\w*|me gustaria|necesito|antoja|antojo)\b/;
-const PALABRAS_DE_PREGUNTA = /\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
+const respuestaAgregar = (p, cantidad) =>
+  ({ response: textoAgregadoAlCarrito(p, cantidad), action: 'addToCart', product: productoParaCarrito(p), quantity: cantidad });
+const respuestaCual = (lista) => ({ response: textoCualProducto(lista), action: null, product: null });
 
-function tieneIntencionDeCompra(mensaje) {
-  const t = normalizarTexto(mensaje);
-  return VERBOS_DE_CARRITO.test(t) || (VERBOS_DE_DESEO.test(t) && !PALABRAS_DE_PREGUNTA.test(t));
+// Último mensaje del bot en el historial (para entender "sí", "dale" o un sabor suelto).
+function ultimoMensajeDelBot(history) {
+  const turnos = Array.isArray(history) ? limpiarHistorial(history) : [];
+  for (let i = turnos.length - 1; i >= 0; i--) if (turnos[i].role === 'assistant') return turnos[i].content;
+  return '';
 }
 
-// ¿El nombre del producto aparece en el texto ya limpio? (por nombre completo o por una palabra de más de 3 letras)
-function coincideProducto(nombre, limpio) {
-  const name = normalizarTexto(nombre);
-  return name.includes(limpio) || limpio.includes(name) ||
-         name.split(/\s+/).some(word => word.length > 3 && limpio.includes(word));
+// ¿El cliente quiere agregar? Por sus palabras, o por un "sí"/sabor suelto justo después de que el bot
+// ofreció agregar o preguntó cuál.
+function quiereAgregar(message, textoBot) {
+  if (tieneIntencionDeCompra(message)) return true;
+  if (hayNegacion(message)) return false;
+  if (esAfirmacion(message) && (botOfrecioAgregar(textoBot) || botPreguntoCual(textoBot))) return true;
+  return botPreguntoCual(textoBot);
 }
 
-// ── Atajo de precios: "¿cuánto cuesta la fresa?" lo responde el servidor ──
-// Así el precio siempre sale de la base (el modelo llegó a inventar "$12.000" con el catálogo a la vista).
-// Solo si el mensaje nombra exactamente UN producto; si no, decide el modelo.
-const PALABRAS_DE_PRECIO = /\b(cuanto|cuesta|cuestan|precios?|vale|valen|valor)\b/;
-const RELLENO_PREGUNTA_PRECIO = /\b(cuanto|cuanta|cuesta|cuestan|precios?|vale|valen|valor|el|la|los|las|un|una|de|del|y|e|o|que|es|son|tiene|helados?|gelatos?|sabor|sabores|por|favor|porfa|me|dices|dime|sabes|saber|quiero|dame|cual|copa|vaso)\b/g;
+// ── Atajos sin modelo (clientes y visitantes) ─────────────────
+// Devuelven la respuesta lista, o null para que decida el modelo.
+async function atajosCliente(message, history, supabase) {
+  const textoBot = ultimoMensajeDelBot(history);
+  const cantidad = leerCantidad(message);
 
-async function tryFastPriceInfo(message, supabase) {
-  const texto = normalizarTexto(message);
-  if (!PALABRAS_DE_PRECIO.test(texto) || VERBOS_DE_CARRITO.test(texto)) return null;
-  const limpio = texto.replace(/[^a-z0-9\s]/g, ' ').replace(RELLENO_PREGUNTA_PRECIO, ' ').replace(/\s+/g, ' ').trim();
-  if (limpio.length < 3) return null;
-  const encontrados = (await getProductsCached(supabase)).filter(p => coincideProducto(p.nombre, limpio));
-  if (encontrados.length !== 1) return null;
-  return { response: textoInfoProducto(encontrados[0]), action: null, product: null };
-}
+  // 1. "sí" / "dale" / "agrégalo" después de una oferta: el producto es el que nombró el bot.
+  if (esAfirmacion(message) && (botOfrecioAgregar(textoBot) || botPreguntoCual(textoBot))) {
+    const encontrados = buscarProductos(textoBot, await getProductsCached(supabase));
+    return encontrados.length === 1 ? respuestaAgregar(encontrados[0], cantidad) : respuestaCual(encontrados);
+  }
 
-// ── Fast-path: detección directa de compra sin LLM ──────────
-async function tryFastCartAdd(message, supabase) {
-  if (!tieneIntencionDeCompra(message)) return null;
+  // 2. Precio de un sabor concreto: lo responde el servidor (el modelo llegó a inventar precios).
+  if (preguntaPrecio(message) && !tieneIntencionDeCompra(message)) {
+    const encontrados = buscarProductos(message, await getProductsCached(supabase));
+    if (encontrados.length === 1) return { response: textoInfoProducto(encontrados[0]), action: null, product: null };
+    if (encontrados.length > 1) return respuestaCual(encontrados);
+    return null;
+  }
 
-  // Si parece pregunta o exploración, no es compra directa
-  if (/\b(ver|menu|menú|sabores|catálogo|catalogo|opciones|hay|tienen|cu[aá]les|precios?|informaci[oó]n|info|cu[aá]nto)\b/i.test(message)) return null;
+  // 3. Un sabor suelto ("fresa", "una de fresa por favor") justo después de "¿cuál quieres?".
+  if (botPreguntoCual(textoBot) && !hayNegacion(message) && !esConsulta(message)) {
+    const encontrados = buscarProductos(message, await getProductsCached(supabase));
+    if (encontrados.length === 1) return respuestaAgregar(encontrados[0], cantidad);
+    if (encontrados.length > 1) return respuestaCual(encontrados);
+  }
 
-  const products = await getProductsCached(supabase);
-  if (!products.length) return null;
-
-  // Limpiar mensaje: quitar palabras de intención y artículos
-  const cleaned = message.trim().toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\b(quiero|dame|deme|me das|ponme|agregame|anademe|pedir|pido|quisiera|me gustaria|necesito|me antoja|comprar|ordenar|ordeno|llevo|me llevo|un|una|el|la|los|las|de|del|helado|gelato|sabor|por favor|porfa|porfavor|al carrito|para mi|para llevar|uno|copa|vaso)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (cleaned.length < 3) return null;
-
-  // Buscar coincidencia con producto
-  const found = products.find(p => coincideProducto(p.nombre, cleaned));
-
-  if (!found) return null;
-
-  return { response: textoAgregadoAlCarrito(found), action: 'addToCart', product: productoParaCarrito(found) };
+  // 4. Pedido directo ("agrégame dos fresas").
+  if (tieneIntencionDeCompra(message) && !esConsulta(message)) {
+    const encontrados = buscarProductos(message, await getProductsCached(supabase));
+    if (encontrados.length === 1) return respuestaAgregar(encontrados[0], cantidad);
+    if (encontrados.length > 1) return respuestaCual(encontrados);
+  }
+  return null;
 }
 
 // Confirma (o cancela) una propuesta. Solo un admin con sesión válida, dueño de la propuesta.
@@ -699,15 +717,10 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
       }
     }
 
-    // ── Fast-path para clientes: precio de un sabor o agregar al carrito, sin LLM ──
+    // ── Atajos para clientes (precio, "sí", sabor suelto, pedido directo), sin LLM ──
     if (!isAdmin) {
-      const precio = await tryFastPriceInfo(message, supabase);
-      if (precio) return res.json(precio);
-      const fastResult = await tryFastCartAdd(message, supabase);
-      if (fastResult) {
-        console.log(`⚡ Fast-path: ${fastResult.product.nombre} → carrito`);
-        return res.json(fastResult);
-      }
+      const atajo = await atajosCliente(message, history, supabase);
+      if (atajo) return res.json(atajo);
     }
 
     // Filtramos el mensaje de bienvenida y limitamos el historial (max 4 mensajes = 2 turnos)
@@ -788,7 +801,7 @@ USUARIO: ${userName} | role: "cliente"`;
 
     // ── Primera llamada al LLM ───────────────────────────────
     // parallel_tool_calls: false -> una herramienta por turno (gpt-oss no admite llamadas en paralelo).
-    let response = await primeraLlamadaConReintento({
+    let response = await llamarConReintento({
       model: GROQ_MODEL,
       messages,
       tools: activeTools,
@@ -817,6 +830,7 @@ USUARIO: ${userName} | role: "cliente"`;
       let productoConsultado = null; // addToCart sin intención de compra: se informa, no se agrega
       let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
       let productosTarjetas  = null; // getProducts ejecutado: tarjetas con foto (datos de la base)
+      let productosAmbiguos  = null; // addToCart con un nombre que coincide con varios sabores
 
       for (const toolCall of llamadasAEjecutar) {
         const functionName = toolCall.function.name;
@@ -887,31 +901,23 @@ USUARIO: ${userName} | role: "cliente"`;
             if (!args?.productName || typeof args.productName !== 'string') {
               functionResponse = { error: "Necesito saber qué helado deseas agregar al carrito." };
             } else {
-              // Obtenemos sabores actuales de la DB para validar
-              const { data: dbProducts } = await supabase.from('producto').select('*').eq('estado', true);
-              const query = args.productName.toLowerCase()
-                .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-              if (query.length < 3) {
-                functionResponse = { error: "El nombre del helado es muy corto o ambiguo." };
+              // Mismo catálogo en caché y misma búsqueda (palabra completa) que los atajos.
+              const encontrados = buscarProductos(args.productName.slice(0, 100), await getProductsCached(supabase));
+              const found = encontrados.length === 1 ? encontrados[0] : null;
+              if (encontrados.length > 1) {
+                productosAmbiguos = encontrados;
+                functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };
+              } else if (found && !quiereAgregar(message, ultimoMensajeDelBot(history))) {
+                // Defensa del servidor: el cliente solo preguntó, no se agrega (aunque el modelo lo pida).
+                productoConsultado = found;
+                functionResponse = { info: true, message: `El cliente solo preguntó por ${found.nombre}; no se agregó al carrito.` };
+              } else if (found) {
+                actionToPerform = 'addToCart';
+                productoAgregado = found;
+                productToBuy    = productoParaCarrito(found);
+                functionResponse = { success: true, message: `${found.nombre} listo para el carrito.` };
               } else {
-                const found = dbProducts?.find(p => {
-                  const name = p.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                  return name.includes(query) || query.includes(name);
-                });
-
-                if (found && !tieneIntencionDeCompra(message)) {
-                  // Defensa del servidor: el cliente solo preguntó, no se agrega (aunque el modelo lo pida).
-                  productoConsultado = found;
-                  functionResponse = { info: true, message: `El cliente solo preguntó por ${found.nombre}; no se agregó al carrito.` };
-                } else if (found) {
-                  actionToPerform = 'addToCart';
-                  productoAgregado = found;
-                  productToBuy    = productoParaCarrito(found);
-                  functionResponse = { success: true, message: `${found.nombre} listo para el carrito.` };
-                } else {
-                  functionResponse = { error: `No encontré "${args.productName}" en el catálogo.` };
-                }
+                functionResponse = { error: "No encontré ese sabor en el catálogo." };
               }
             }
 
@@ -950,7 +956,11 @@ USUARIO: ${userName} | role: "cliente"`;
       }
       // Se agregó al carrito: no hace falta la segunda llamada y el precio sale de la base.
       if (productoAgregado) {
-        return res.json({ response: textoAgregadoAlCarrito(productoAgregado), action: 'addToCart', product: productToBuy, actionData: null });
+        const cantidad = leerCantidad(message);
+        return res.json({ response: textoAgregadoAlCarrito(productoAgregado, cantidad), action: 'addToCart', product: productToBuy, quantity: cantidad, actionData: null });
+      }
+      if (productosAmbiguos) {
+        return res.json({ ...respuestaCual(productosAmbiguos), actionData: null });
       }
 
       // ── Segunda llamada: LLM procesa resultados de tools ────
@@ -979,7 +989,7 @@ USUARIO: ${userName} | role: "cliente"`;
 
       let second;
       try {
-        second = await groq.chat.completions.create({
+        second = await llamarConReintento({
           model: GROQ_MODEL,
           messages,
           tools: activeTools,
@@ -989,11 +999,18 @@ USUARIO: ${userName} | role: "cliente"`;
           ...OPCIONES_RAZONAMIENTO
         });
       } catch (error) {
-        // Con las tarjetas ya listas (datos de la base), el cliente igual ve los sabores.
-        if (!conTarjetas || !esErrorDeGroq(error)) throw error;
+        // Los datos ya salieron de la base: se entregan igual (tarjetas o tabla) con un texto de respaldo.
+        if (!esErrorDeGroq(error)) throw error;
         const { categoria, status, codigo } = clasificarErrorGroq(error);
         console.error('chatbot: error de Groq en la segunda llamada', { categoria, status, codigo, modelo: GROQ_MODEL });
-        return res.json({ response: MENSAJE_SABORES, action: null, product: null, actionData: null, productos: productosTarjetas });
+        let respaldo = MENSAJE_FALLA;
+        if (conTarjetas) respaldo = MENSAJE_SABORES;
+        else if (actionData) respaldo = MENSAJE_RESPALDO_DATOS;
+        else if (categoria === 'limite') respaldo = MENSAJE_DEMANDA;
+        return res.json({
+          response: respaldo, action: actionToPerform, product: productToBuy, actionData,
+          ...(conTarjetas ? { productos: productosTarjetas } : {})
+        });
       }
 
       avisarSiSeCorto(second);
@@ -1036,4 +1053,4 @@ USUARIO: ${userName} | role: "cliente"`;
   }
 }
 
-module.exports = { handleChatbotRequest, functions };
+module.exports = { handleChatbotRequest, functions, invalidarCacheProductos };

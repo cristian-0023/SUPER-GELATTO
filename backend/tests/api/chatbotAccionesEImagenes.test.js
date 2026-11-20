@@ -225,12 +225,19 @@ describe('3. el precio lo escribe el servidor', () => {
 
   it.each([
     ['ningún producto coincide', 'cuánto cuesta el de menta'],
-    ['varios productos coinciden', 'cuánto cuestan la fresa y el chocolate'],
     ['no menciona producto', 'cuánto cuestan los helados'],
   ])('si %s, la pregunta de precio pasa al modelo', async (_c, mensaje) => {
     guion = [texto('Te cuento los precios.')];
     await chat({ message: mensaje }, tokenCliente());
     expect(llamadasGroq).toHaveLength(1);
+  });
+
+  // Revisión: si coinciden varios sabores, el servidor pregunta cuál (sin dar precio ni llamar al modelo).
+  it('si varios productos coinciden, el servidor pregunta cuál sin dar precio', async () => {
+    const res = await chat({ message: 'cuánto cuestan la fresa y el chocolate' }, tokenCliente());
+    expect(llamadasGroq).toHaveLength(0);
+    expect(res.body.response).toMatch(/cu[aá]l/i);
+    expect(res.body.response).not.toMatch(/\$/);
   });
 
   it('el admin no usa el atajo de precios', async () => {
@@ -292,7 +299,8 @@ describe('4. fotos de los helados en la lista', () => {
   });
 
   it('si la segunda llamada falla, igual se muestran los sabores con un texto amable', async () => {
-    guion = [pideHerramienta('getProducts'), errorGroq(400, 'tool_use_failed')];
+    // la segunda llamada reintenta una vez: fallan las dos
+    guion = [pideHerramienta('getProducts'), errorGroq(400, 'tool_use_failed'), errorGroq(400, 'tool_use_failed')];
     const res = await chat({ message: 'qué sabores de helado tienen' }, tokenCliente());
     expect(res.body.productos).toHaveLength(3);
     expect(res.body.response).toMatch(/sabores/i);

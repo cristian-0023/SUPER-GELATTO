@@ -19,7 +19,7 @@ const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
-const { handleChatbotRequest } = require('./chatbot');
+const { handleChatbotRequest, invalidarCacheProductos } = require('./chatbot');
 const { imagenProductoValida } = require('./imagenProducto');
 const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
 const { correoParaIlike } = require('./correoIlike');
@@ -796,6 +796,15 @@ app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
+// Gelbot guarda el catálogo 1 minuto: cualquier cambio de productos desde el panel (crear, editar, borrar,
+// precio, estado, imagen...) lo invalida cuando la petición termina bien, para no ofrecer datos viejos.
+app.use('/api/admin/products', (req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => { if (res.statusCode < 400) invalidarCacheProductos(); });
+  }
   next();
 });
 
