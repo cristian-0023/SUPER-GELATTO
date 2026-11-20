@@ -9,7 +9,7 @@ import { Crown, Sparkles, ChevronRight, ChevronDown, Loader2, PlusCircle, MinusC
 import { formatPrice } from '../context/CartContext';
 import { useSuperPoints } from '../context/SuperPointsContext';
 import { pedirPuntos } from '../utils/superPointsApi';
-import { progresoDelCliente, describirMovimiento, puntosConSigno } from '../utils/superPoints';
+import { progresoDelCliente, mostrarAvisoNivel, describirMovimiento, puntosConSigno } from '../utils/superPoints';
 
 const numero = new Intl.NumberFormat('es-CO');
 const ICONO_MOVIMIENTO = {
@@ -164,9 +164,11 @@ const SuperPointsCard = () => {
         <p className="text-white/50 text-xs sm:text-sm mt-2">
           Al pagar puedes cubrir hasta <strong className="text-white">{puntos.pctMax} %</strong> de tu compra con puntos.
         </p>
-        <p className="text-white/50 text-xs sm:text-sm mt-2">
-          Tu nivel depende de los puntos que tienes hoy: si los usas, puede bajar.
-        </p>
+        {mostrarAvisoNivel(puntos) && (
+          <p className="text-white/50 text-xs sm:text-sm mt-2">
+            Tu nivel depende de los puntos que tienes hoy: si los usas, puede bajar.
+          </p>
+        )}
       </div>
 
       {/* Historial */}

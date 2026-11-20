@@ -1,7 +1,7 @@
 // Cuentas de Super Points de la página (frontend/src/utils/superPoints.js). Los valores (5 pesos por punto,
 // 100 pesos para ganar, niveles y topes) llegan del servidor: aquí se pasan como datos, no están fijos en el código.
 import { describe, it, expect } from 'vitest';
-import { calcularCanje, puntosAGanar, progresoNivel, progresoDelCliente, describirMovimiento, puntosConSigno } from '../../../frontend/src/utils/superPoints.js';
+import { calcularCanje, puntosAGanar, progresoNivel, progresoDelCliente, mostrarAvisoNivel, describirMovimiento, puntosConSigno } from '../../../frontend/src/utils/superPoints.js';
 
 const niveles = [
   { nombre: 'Lover', min: 0, max: 100, pct: 5 },
@@ -149,6 +149,16 @@ describe('progresoDelCliente', () => {
   it('sin resumen o sin niveles no inventa nada', () => {
     expect(progresoDelCliente(null, niveles).actual.nombre).toBe('Lover');
     expect(progresoDelCliente({ saldo: 300 }, undefined)).toEqual({ actual: null, siguiente: null, porcentaje: 0 });
+  });
+});
+
+describe('mostrarAvisoNivel', () => {
+  it('el aviso de que el nivel puede bajar solo aparece con saldo mayor que 0', () => {
+    expect(mostrarAvisoNivel({ saldo: 1 })).toBe(true);
+    expect(mostrarAvisoNivel({ saldo: 0, ganados: 500 })).toBe(false);
+    expect(mostrarAvisoNivel({ saldo: -3 })).toBe(false);
+    expect(mostrarAvisoNivel(null)).toBe(false);
+    expect(mostrarAvisoNivel({ saldo: '50' })).toBe(false);
   });
 });
 
