@@ -136,6 +136,8 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
     ['quiero saber cuánto cuesta la fresa'],
     ['dame el precio de la fresa'],
     ['¿qué ingredientes tiene la fresa?'],
+    // pregunta de precio que el atajo de precios no resuelve: llega al modelo y la frena el servidor
+    ['cuánto cuesta el rojito de frutas'],
   ])('"%s": aunque el modelo llame a addToCart, NO se agrega y se responde con la info del producto', async (mensaje) => {
     guion = [pideHerramienta('addToCart', { productName: 'Fresa' }), texto('Fresa agregada.')];
     const res = await chat({ message: mensaje }, tokenCliente());
@@ -151,6 +153,10 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
     ['quiero una fresa'],
     ['dame un chocolate belga'],
     ['me llevo la fresa'],
+    // pedidos amables con signos de pregunta (muy comunes en Colombia)
+    ['¿Me das una fresa?'],
+    ['¿me regalas una fresa salvaje?'],
+    ['¿me da un chocolate belga, por favor?'],
   ])('"%s": sí se agrega al carrito con el producto real de la base', async (mensaje) => {
     guion = [pideHerramienta('addToCart', { productName: /choco/i.test(mensaje) ? 'Chocolate Belga' : 'Fresa Salvaje' }), texto('Listo.')];
     const res = await chat({ message: mensaje }, tokenCliente());
@@ -165,11 +171,11 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
     expect(res.body.product).toMatchObject({ id: 1, nombre: 'Fresa Salvaje', precio: 9000 });
   });
 
-  it('el atajo sin modelo NO agrega cuando solo se pregunta el precio', async () => {
+  it('el atajo sin modelo NO agrega cuando solo se pregunta el precio (lo responde el atajo de precios)', async () => {
     guion = [texto('La Fresa Salvaje cuesta $9.000.')];
     const res = await chat({ message: 'cuánto cuesta la fresa' }, tokenCliente());
-    expect(llamadasGroq).toHaveLength(1);
-    expect(res.body.action).not.toBe('addToCart');
+    expect(llamadasGroq).toHaveLength(0);
+    expect(res.body.action ?? null).toBeNull();
   });
 
   it.each([['anónimo', () => ({})], ['cliente', tokenCliente]])('%s: el prompt pide addToCart solo con pedido explícito', async (_r, cabeceras) => {
@@ -205,6 +211,32 @@ describe('3. el precio lo escribe el servidor', () => {
     const res = await chat({ message: 'cuánto cuesta la fresa' }, tokenCliente());
     expect(res.body.response).toContain('$9.000');
     expect(res.body.response).not.toMatch(/12\.000/);
+  });
+
+  it.each([['anónimo', () => ({})], ['cliente', tokenCliente]])('%s: "Cuánto cuesta el helado de fresa" lo responde el servidor con $9.000, sin modelo', async (_r, cabeceras) => {
+    guion = [texto('**Fresa** cuesta **$12.000 COP**')];
+    const res = await chat({ message: 'Cuánto cuesta el helado de fresa' }, cabeceras());
+    expect(llamadasGroq).toHaveLength(0);
+    expect(res.body.response).toContain('Fresa Salvaje');
+    expect(res.body.response).toContain('$9.000');
+    expect(res.body.response).not.toMatch(/12\.000/);
+    expect(res.body.action ?? null).toBeNull();
+  });
+
+  it.each([
+    ['ningún producto coincide', 'cuánto cuesta el de menta'],
+    ['varios productos coinciden', 'cuánto cuestan la fresa y el chocolate'],
+    ['no menciona producto', 'cuánto cuestan los helados'],
+  ])('si %s, la pregunta de precio pasa al modelo', async (_c, mensaje) => {
+    guion = [texto('Te cuento los precios.')];
+    await chat({ message: mensaje }, tokenCliente());
+    expect(llamadasGroq).toHaveLength(1);
+  });
+
+  it('el admin no usa el atajo de precios', async () => {
+    guion = [texto('Fresa Salvaje: $9.000.')];
+    await chat({ message: 'cuánto cuesta la fresa' }, tokenAdmin());
+    expect(llamadasGroq).toHaveLength(1);
   });
 
   it('el catálogo del prompt trae los precios reales de la base', async () => {
