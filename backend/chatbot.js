@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const Groq = require("groq-sdk");
+const { APIError: GroqAPIError } = require("groq-sdk/error");
 require('dotenv').config();
 
 let groq = null;
@@ -10,6 +11,55 @@ if (process.env.GROQ_API_KEY) {
     console.warn('⚠️ No se pudo inicializar el cliente Groq:', e.message);
   }
 }
+
+// ── Modelo de Groq ───────────────────────────────────────────
+// Groq retiró llama-3.1-8b-instant (2026-08-16); su reemplazo oficial es openai/gpt-oss-20b.
+// Se puede cambiar con GROQ_MODEL sin tocar el código. Un valor raro se ignora.
+const MODELO_GROQ_POR_DEFECTO = "openai/gpt-oss-20b";
+function resolverModeloGroq(valor) {
+  const limpio = typeof valor === 'string' ? valor.trim() : '';
+  return /^[A-Za-z0-9][A-Za-z0-9._\/:-]{0,99}$/.test(limpio) ? limpio : MODELO_GROQ_POR_DEFECTO;
+}
+const GROQ_MODEL = resolverModeloGroq(process.env.GROQ_MODEL);
+// gpt-oss razona antes de responder: con esfuerzo bajo gasta menos y responde antes.
+// Solo esos modelos aceptan 'low' (otros podrían rechazar el parámetro).
+const OPCIONES_RAZONAMIENTO = GROQ_MODEL.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {};
+const MAX_TOKENS_RESPUESTA = 1024; // incluye margen para el razonamiento de gpt-oss
+
+// Clasifica un error de groq-sdk (APIError: .status y .error = cuerpo JSON {error:{code,...}}).
+function clasificarErrorGroq(error) {
+  const status = typeof error?.status === 'number' ? error.status : null;
+  const codigo = error?.error?.error?.code ?? error?.error?.code ?? null;
+  let categoria = 'otro';
+  if (codigo === 'model_decommissioned' || codigo === 'model_not_found' || status === 404) categoria = 'modelo';
+  else if (status === 401 || codigo === 'invalid_api_key') categoria = 'llave';
+  else if (status === 429 || codigo === 'rate_limit_exceeded') categoria = 'limite';
+  return { categoria, status, codigo: typeof codigo === 'string' ? codigo.slice(0, 60) : null };
+}
+
+const esErrorDeGroq = (error) => error instanceof GroqAPIError || typeof error?.status === 'number';
+
+// Quita del texto de un error la llave y el mensaje del usuario, y lo recorta (para el log).
+function textoSeguroParaLog(texto, mensajeUsuario, max) {
+  let limpio = String(texto || '');
+  const ocultar = [process.env.GROQ_API_KEY, typeof mensajeUsuario === 'string' ? mensajeUsuario : ''];
+  for (const secreto of ocultar) {
+    if (secreto && secreto.length >= 4) limpio = limpio.split(secreto).join('[oculto]');
+  }
+  return limpio.slice(0, max);
+}
+
+// Si el modelo se quedó sin tokens, la respuesta llega cortada: se avisa en el log (sin el contenido).
+function avisarSiSeCorto(respuesta) {
+  if (respuesta?.choices?.[0]?.finish_reason === 'length') {
+    console.warn('chatbot: respuesta cortada por límite de tokens', { modelo: GROQ_MODEL });
+  }
+}
+
+const MENSAJE_SIN_ASISTENTE = "El asistente no está disponible en este momento. Inténtalo más tarde 🍦.";
+const MENSAJE_FALLA = "Estoy teniendo una falla técnica momentánea 🔧. Inténtalo de nuevo en un minuto.";
+const MENSAJE_DEMANDA = "¡Ups! Hay mucha demanda en este momento 🍦. Inténtalo de nuevo en unos segundos.";
+const MENSAJE_RESPUESTA_VACIA = "Disculpa, no logré armar una respuesta. ¿Puedes repetir tu pregunta? 🍦";
 
 // ── Herramientas del LLM ─────────────────────────────────────
 const tools = [
@@ -443,6 +493,8 @@ function limpiarHistorial(history) {
 // ── Limpiador de respuestas ───────────────────────────────────
 function cleanText(text) {
   return (text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "") // razonamiento dentro del contenido (modelos que "piensan")
+    .replace(/<think>[\s\S]*$/i, "")            // <think> sin cierre: se descarta todo lo que sigue
     .replace(/\[TIPO\s*\d+[^\]]*\]/gi, "")
     .replace(/```[a-z]*\s*[\s\S]*?```/gi, "") // Elimina cualquier bloque de código markdown (como ```sql ... ```)
     .replace(/`[^`\n]*?`(?:\s*;)*/gi, "") // Elimina cualquier fragmento de código en línea entre comillas invertidas
@@ -654,16 +706,25 @@ USUARIO: ${userName} | role: "cliente"`;
       { role: "user", content: message }
     ];
 
+    if (!groq) {
+      console.error('chatbot: GROQ_API_KEY no configurada');
+      return res.json({ response: MENSAJE_SIN_ASISTENTE });
+    }
+
     // ── Primera llamada al LLM ───────────────────────────────
+    // parallel_tool_calls: false -> una herramienta por turno (gpt-oss no admite llamadas en paralelo).
     let response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       messages,
       tools: activeTools,
       tool_choice: "auto",
-      max_tokens: 300,
-      temperature: 0.1
+      parallel_tool_calls: false,
+      max_tokens: MAX_TOKENS_RESPUESTA,
+      temperature: 0.1,
+      ...OPCIONES_RAZONAMIENTO
     });
 
+    avisarSiSeCorto(response);
     let responseMessage = response.choices[0].message;
     const toolCalls = responseMessage.tool_calls;
 
@@ -671,7 +732,8 @@ USUARIO: ${userName} | role: "cliente"`;
     if (toolCalls && toolCalls.length > 0) {
       // Tope por respuesta: lo que pase de MAX_TOOL_CALLS ni se ejecuta ni se le cuenta al modelo.
       const llamadasAEjecutar = toolCalls.slice(0, MAX_TOOL_CALLS);
-      messages.push({ ...responseMessage, tool_calls: llamadasAEjecutar });
+      // Mensaje armado a mano: no se reenvía el `reasoning` de gpt-oss (no es un campo de entrada válido para él).
+      messages.push({ role: "assistant", content: responseMessage.content ?? null, tool_calls: llamadasAEjecutar });
 
       let actionToPerform = null;
       let productToBuy    = null;
@@ -819,13 +881,15 @@ USUARIO: ${userName} | role: "cliente"`;
       });
 
       const second = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
+        model: GROQ_MODEL,
         messages,
-        max_tokens: 300,
-        temperature: 0.2
+        max_tokens: MAX_TOKENS_RESPUESTA,
+        temperature: 0.2,
+        ...OPCIONES_RAZONAMIENTO
       });
 
-      const finalText = cleanText(second.choices[0].message.content);
+      avisarSiSeCorto(second);
+      const finalText = cleanText(second.choices?.[0]?.message?.content) || MENSAJE_RESPUESTA_VACIA;
 
       return res.json({
         response:   finalText,
@@ -836,7 +900,7 @@ USUARIO: ${userName} | role: "cliente"`;
     }
 
     // ── Respuesta directa (sin tools) ────────────────────────
-    const cleanResponse = cleanText(responseMessage.content);
+    const cleanResponse = cleanText(responseMessage.content) || MENSAJE_RESPUESTA_VACIA;
 
     // Detección de despedida para cerrar el chat automáticamente
     const isFarewell = /^(gracias|muchas gracias|adiós|adios|chao|hasta luego|nos vemos|bye)\b/i.test(message.trim());
@@ -847,12 +911,18 @@ USUARIO: ${userName} | role: "cliente"`;
     });
 
   } catch (error) {
-    console.error("❌ Error chatbot:", error);
-    if (error?.message?.includes('429')) {
-      res.json({ response: "¡Ups! Hay mucha demanda en este momento 🍦. Inténtalo de nuevo en unos segundos." });
-    } else {
-      res.json({ response: "Estoy teniendo una falla técnica momentánea 🔧. Inténtalo de nuevo en un minuto." });
+    // Nunca la llave ni el texto del usuario en el log.
+    if (esErrorDeGroq(error)) {
+      const { categoria, status, codigo } = clasificarErrorGroq(error);
+      console.error('chatbot: error de Groq', { categoria, status, codigo, modelo: GROQ_MODEL, tipo: error?.name || null });
+      return res.json({ response: categoria === 'limite' ? MENSAJE_DEMANDA : MENSAJE_FALLA });
     }
+    console.error('chatbot: error interno', {
+      nombre: error?.name || 'Error',
+      mensaje: textoSeguroParaLog(error?.message, message, 200),
+      pila: textoSeguroParaLog(error?.stack, message, 1000)
+    });
+    res.json({ response: MENSAJE_FALLA });
   }
 }
 
