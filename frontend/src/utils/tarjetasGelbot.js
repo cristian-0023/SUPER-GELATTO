@@ -37,8 +37,13 @@ export function armarTarjetasProductos(productos) {
   return tarjetas;
 }
 
-// Cantidad que manda el servidor (pendiente).
-export function cantidadParaCarrito() { return 0; }
+// Cantidad que manda el servidor (`quantity`): entero de 1 a 10; cualquier otra cosa cuenta como 1.
+export const MAX_CANTIDAD = 10;
+export function cantidadParaCarrito(valor) {
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n < 1) return 1;
+  return Math.min(MAX_CANTIDAD, n);
+}
 
 // Lo que recibe addToCart del carrito.
 export function productoDeTarjeta(tarjeta) {

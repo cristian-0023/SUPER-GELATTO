@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, Mic, Plus, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { getToken } from '../utils/api';
-import { armarTarjetasProductos, productoDeTarjeta, FOTO_POR_DEFECTO } from '../utils/tarjetasGelbot';
+import { armarTarjetasProductos, productoDeTarjeta, cantidadParaCarrito, FOTO_POR_DEFECTO } from '../utils/tarjetasGelbot';
 
 const parseInlineStyles = (text) => {
   if (typeof text !== 'string') return text;
@@ -73,6 +73,9 @@ const Gelbot = ({ user }) => {
   // Tarjetas ya agregadas al carrito ("<idMensaje>-<idProducto>"), para mostrar el check.
   const [agregados, setAgregados] = useState(() => new Set());
   const messagesEndRef = useRef(null);
+  // Ids de mensaje con un contador (dos mensajes en el mismo milisegundo no chocan).
+  const siguienteId = useRef(2);
+  const nuevoId = () => siguienteId.current++;
   const recognitionRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -127,7 +130,7 @@ const Gelbot = ({ user }) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const userMsg = { id: Date.now(), text: input, sender: 'user' };
+    const userMsg = { id: nuevoId(), text: input, sender: 'user' };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
@@ -157,7 +160,7 @@ const Gelbot = ({ user }) => {
 
       // 400 (mensaje inválido) y 429 (demasiados mensajes) traen un mensaje en español para mostrar.
       if ((response.status === 400 || response.status === 429) && data.message) {
-        setMessages(prev => [...prev, { id: Date.now() + 1, text: data.message, sender: 'bot' }]);
+        setMessages(prev => [...prev, { id: nuevoId(), text: data.message, sender: 'bot' }]);
         return;
       }
       if (!response.ok) {
@@ -168,7 +171,7 @@ const Gelbot = ({ user }) => {
 
       // Acción: añadir producto al carrito
       if (data.action === 'addToCart' && data.product) {
-        addToCart(data.product, 1);
+        addToCart(data.product, cantidadParaCarrito(data.quantity));
         // Añadimos un mensaje de confirmación si el bot no dio texto
         if (!data.response) {
           data.response = `¡${data.product.nombre} añadido al carrito! 🍦`;
@@ -177,7 +180,7 @@ const Gelbot = ({ user }) => {
 
       // Guardar mensaje del bot con metadatos de acción
       const botMsg = {
-        id:         Date.now() + 1,
+        id:         nuevoId(),
         text:       data.response || (data.action ? '' : '...'),
         sender:     'bot',
         action:     data.action,
@@ -204,7 +207,7 @@ const Gelbot = ({ user }) => {
     } catch (error) {
       console.error("Error en el chat:", error);
       setMessages(prev => [...prev, {
-        id:     Date.now() + 1,
+        id:     nuevoId(),
         text:   'Ups, algo salió mal. Inténtalo de nuevo en un momento.',
         sender: 'bot'
       }]);
@@ -214,11 +217,14 @@ const Gelbot = ({ user }) => {
   };
 
   // Tocar una tarjeta agrega ese helado al carrito (precio y foto vienen de la base).
+  // Una tarjeta ya agregada ignora más toques (evita el doble toque en el celular).
   const agregarDesdeTarjeta = (msgId, tarjeta) => {
+    const clave = `${msgId}-${tarjeta.id}`;
+    if (agregados.has(clave)) return;
     addToCart(productoDeTarjeta(tarjeta), 1);
-    setAgregados(prev => new Set(prev).add(`${msgId}-${tarjeta.id}`));
+    setAgregados(prev => new Set(prev).add(clave));
     setMessages(prev => [...prev, {
-      id: Date.now() + 1,
+      id: nuevoId(),
       text: `¡**${tarjeta.nombre}** (${tarjeta.precioTexto}) añadido al carrito! 🍦`,
       sender: 'bot'
     }]);
@@ -247,7 +253,7 @@ const Gelbot = ({ user }) => {
     } finally {
       setIsLoading(false);
     }
-    setMessages(prev => [...prev, { id: Date.now() + 1, text: texto, sender: 'bot' }]);
+    setMessages(prev => [...prev, { id: nuevoId(), text: texto, sender: 'bot' }]);
   };
 
   return (
@@ -279,7 +285,7 @@ const Gelbot = ({ user }) => {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4" role="log" aria-live="polite" aria-label="Conversación con Gelbot">
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex flex-col gap-2 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
                   
@@ -332,13 +338,16 @@ const Gelbot = ({ user }) => {
                             <button
                               type="button"
                               onClick={() => agregarDesdeTarjeta(msg.id, t)}
-                              aria-label={`Agregar ${t.nombre}, ${t.precioTexto}, al carrito`}
-                              className="group w-full h-full flex flex-col text-left rounded-xl overflow-hidden bg-white/5 border border-white/10 hover:border-gold-premium/60 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark"
+                              aria-label={agregado ? `${t.nombre}, ${t.precioTexto}, agregado al carrito` : `Agregar ${t.nombre}, ${t.precioTexto}, al carrito`}
+                              aria-disabled={agregado || undefined}
+                              className={`group w-full h-full flex flex-col text-left rounded-xl overflow-hidden bg-white/5 border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark ${
+                                agregado ? 'border-green-500/50 cursor-default' : 'border-white/10 hover:border-gold-premium/60 hover:bg-white/10'
+                              }`}
                             >
                               <span className="relative block aspect-[4/3] bg-black/40">
                                 <img
                                   src={t.image}
-                                  alt={`Helado de ${t.nombre}`}
+                                  alt=""
                                   loading="lazy"
                                   decoding="async"
                                   className="w-full h-full object-cover"
