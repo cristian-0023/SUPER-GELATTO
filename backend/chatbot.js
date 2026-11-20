@@ -545,8 +545,18 @@ async function getProductsCached(supabase) {
 // Precio en pesos colombianos como "$9.000" (sin el espacio que pone Intl con style:'currency').
 const formatearCOP = (valor) => '$' + new Intl.NumberFormat('es-CO').format(Number(valor) || 0);
 
+// Textos con precio: siempre los arma el servidor con el precio de la base (nunca el número del modelo).
 function textoInfoProducto(p) {
   return `**${p.nombre}** cuesta **${formatearCOP(p.precio)}**. Si lo quieres, dime "agrégalo" y lo pongo en tu carrito 🍦`;
+}
+
+function textoAgregadoAlCarrito(p) {
+  return `¡Excelente elección! 🍦 **${p.nombre}** (${formatearCOP(p.precio)}) fue añadido a tu carrito. ¿Deseas algo más?`;
+}
+
+// Producto que recibe el carrito del navegador (mismo formato en el atajo y en addToCart).
+function productoParaCarrito(p) {
+  return { id: p.id_producto, nombre: p.nombre, precio: p.precio, image: p.imagen, descripcion: p.descripcion };
 }
 
 // ── Intención de compra (la usan el atajo y addToCart) ──────
@@ -591,19 +601,7 @@ async function tryFastCartAdd(message, supabase) {
 
   if (!found) return null;
 
-  const precio = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(found.precio);
-
-  return {
-    response: `¡Excelente elección! 🍦 **${found.nombre}** (${precio}) fue añadido a tu carrito. ¿Deseas algo más?`,
-    action: 'addToCart',
-    product: {
-      id: found.id_producto,
-      nombre: found.nombre,
-      precio: found.precio,
-      image: found.imagen,
-      descripcion: found.descripcion
-    }
-  };
+  return { response: textoAgregadoAlCarrito(found), action: 'addToCart', product: productoParaCarrito(found) };
 }
 
 // Confirma (o cancela) una propuesta. Solo un admin con sesión válida, dueño de la propuesta.
@@ -699,7 +697,7 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
     if (!isAdmin) {
       const prods = await getProductsCached(supabase);
       catalogText = prods.length
-        ? '\nCATÁLOGO DISPONIBLE:\n' + prods.map(p => `• ${p.nombre} - $${new Intl.NumberFormat('es-CO').format(p.precio)} COP`).join('\n')
+        ? '\nCATÁLOGO DISPONIBLE:\n' + prods.map(p => `• ${p.nombre} - ${formatearCOP(p.precio)} COP`).join('\n')
         : '';
     }
 
@@ -781,6 +779,7 @@ USUARIO: ${userName} | role: "cliente"`;
       let actionData      = null;
       let propuesta       = null; // máximo 1 acción que modifica datos por mensaje
       let productoConsultado = null; // addToCart sin intención de compra: se informa, no se agrega
+      let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
 
       for (const toolCall of llamadasAEjecutar) {
         const functionName = toolCall.function.name;
@@ -868,13 +867,8 @@ USUARIO: ${userName} | role: "cliente"`;
                   functionResponse = { info: true, message: `El cliente solo preguntó por ${found.nombre}; no se agregó al carrito.` };
                 } else if (found) {
                   actionToPerform = 'addToCart';
-                  productToBuy    = {
-                    id: found.id_producto,
-                    nombre: found.nombre,
-                    precio: found.precio,
-                    image: found.imagen,
-                    descripcion: found.descripcion
-                  };
+                  productoAgregado = found;
+                  productToBuy    = productoParaCarrito(found);
                   functionResponse = { success: true, message: `${found.nombre} listo para el carrito.` };
                 } else {
                   functionResponse = { error: `No encontré "${args.productName}" en el catálogo.` };
@@ -914,6 +908,10 @@ USUARIO: ${userName} | role: "cliente"`;
       // El cliente preguntó por un producto: la respuesta la arma el servidor con los datos de la base.
       if (productoConsultado && !actionToPerform) {
         return res.json({ response: textoInfoProducto(productoConsultado), action: null, product: null, actionData: null });
+      }
+      // Se agregó al carrito: no hace falta la segunda llamada y el precio sale de la base.
+      if (productoAgregado) {
+        return res.json({ response: textoAgregadoAlCarrito(productoAgregado), action: 'addToCart', product: productToBuy, actionData: null });
       }
 
       // ── Segunda llamada: LLM procesa resultados de tools ────
