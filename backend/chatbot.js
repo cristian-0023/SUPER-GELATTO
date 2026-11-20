@@ -579,12 +579,36 @@ const normalizarTexto = (t) => String(t || '').toLowerCase().normalize('NFD').re
 // Verbos que siempre piden agregar o comprar.
 const VERBOS_DE_CARRITO = /\b(agreg\w*|anad\w*|compr[ao]\w*|comprar|llevo|pido|pide|pedir|ordeno|ordenar|carrito)\b/;
 // Verbos de deseo: cuentan solo si el mensaje no es una pregunta ("quiero saber cuánto cuesta" no es compra).
-const VERBOS_DE_DESEO = /\b(quiero|quisiera|dame|deme|ponme|me das|me gustaria|necesito|antoja|antojo)\b/;
-const PALABRAS_DE_PREGUNTA = /\?|\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
+// "¿Me das una fresa?" es un pedido amable: el signo de pregunta solo no la vuelve consulta.
+const VERBOS_DE_DESEO = /\b(quiero|quisiera|dame|deme|ponme|me das|me da|regala\w*|me gustaria|necesito|antoja|antojo)\b/;
+const PALABRAS_DE_PREGUNTA = /\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
 
 function tieneIntencionDeCompra(mensaje) {
   const t = normalizarTexto(mensaje);
   return VERBOS_DE_CARRITO.test(t) || (VERBOS_DE_DESEO.test(t) && !PALABRAS_DE_PREGUNTA.test(t));
+}
+
+// ¿El nombre del producto aparece en el texto ya limpio? (por nombre completo o por una palabra de más de 3 letras)
+function coincideProducto(nombre, limpio) {
+  const name = normalizarTexto(nombre);
+  return name.includes(limpio) || limpio.includes(name) ||
+         name.split(/\s+/).some(word => word.length > 3 && limpio.includes(word));
+}
+
+// ── Atajo de precios: "¿cuánto cuesta la fresa?" lo responde el servidor ──
+// Así el precio siempre sale de la base (el modelo llegó a inventar "$12.000" con el catálogo a la vista).
+// Solo si el mensaje nombra exactamente UN producto; si no, decide el modelo.
+const PALABRAS_DE_PRECIO = /\b(cuanto|cuesta|cuestan|precios?|vale|valen|valor)\b/;
+const RELLENO_PREGUNTA_PRECIO = /\b(cuanto|cuanta|cuesta|cuestan|precios?|vale|valen|valor|el|la|los|las|un|una|de|del|y|e|o|que|es|son|tiene|helados?|gelatos?|sabor|sabores|por|favor|porfa|me|dices|dime|sabes|saber|quiero|dame|cual|copa|vaso)\b/g;
+
+async function tryFastPriceInfo(message, supabase) {
+  const texto = normalizarTexto(message);
+  if (!PALABRAS_DE_PRECIO.test(texto) || VERBOS_DE_CARRITO.test(texto)) return null;
+  const limpio = texto.replace(/[^a-z0-9\s]/g, ' ').replace(RELLENO_PREGUNTA_PRECIO, ' ').replace(/\s+/g, ' ').trim();
+  if (limpio.length < 3) return null;
+  const encontrados = (await getProductsCached(supabase)).filter(p => coincideProducto(p.nombre, limpio));
+  if (encontrados.length !== 1) return null;
+  return { response: textoInfoProducto(encontrados[0]), action: null, product: null };
 }
 
 // ── Fast-path: detección directa de compra sin LLM ──────────
@@ -607,11 +631,7 @@ async function tryFastCartAdd(message, supabase) {
   if (cleaned.length < 3) return null;
 
   // Buscar coincidencia con producto
-  const found = products.find(p => {
-    const name = p.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return name.includes(cleaned) || cleaned.includes(name) ||
-           name.split(/\s+/).some(word => word.length > 3 && cleaned.includes(word));
-  });
+  const found = products.find(p => coincideProducto(p.nombre, cleaned));
 
   if (!found) return null;
 
@@ -679,8 +699,10 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
       }
     }
 
-    // ── Fast-path para clientes: agregar al carrito sin LLM ──
+    // ── Fast-path para clientes: precio de un sabor o agregar al carrito, sin LLM ──
     if (!isAdmin) {
+      const precio = await tryFastPriceInfo(message, supabase);
+      if (precio) return res.json(precio);
       const fastResult = await tryFastCartAdd(message, supabase);
       if (fastResult) {
         console.log(`⚡ Fast-path: ${fastResult.product.nombre} → carrito`);
