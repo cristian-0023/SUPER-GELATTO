@@ -76,6 +76,20 @@ describe('tabla de componentes y producto personalizado', () => {
     expect(e2.code).toBe('23514');
   });
 
+  it('un componente no puede costar $0 (precio > 0)', async () => {
+    const e = await errorDe(() => db.exec("insert into public.componente_personalizado (id, tipo, nombre, precio) values ('gratis', 'topping', 'Gratis', 0)"));
+    expect(e.code).toBe('23514');
+  });
+
+  it('si el check de precio quedó con otra definición (precio >= 0), volver a correr la migración lo corrige', async () => {
+    await db.exec(`
+      alter table public.componente_personalizado drop constraint componente_personalizado_precio_check;
+      alter table public.componente_personalizado add constraint componente_personalizado_precio_check check (precio >= 0);`);
+    await db.exec(leer(RUTA_PERSONALIZADO));
+    const e = await errorDe(() => db.exec("insert into public.componente_personalizado (id, tipo, nombre, precio) values ('gratis', 'topping', 'Gratis', 0)"));
+    expect(e.code).toBe('23514');
+  });
+
   it('las reglas (máximo de sabores y toppings) viven en la base', async () => {
     const r = (await db.query('select public.helado_personalizado_reglas() as r')).rows[0].r;
     expect(r).toEqual({ max_sabores: 3, max_toppings: 3 });

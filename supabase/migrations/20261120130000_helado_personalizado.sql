@@ -54,13 +54,24 @@ begin
       check (tipo = any (array['envase', 'sabor', 'topping']::text[]));
   end if;
 
+  -- Ningún componente es gratis (precio > 0). Si el check existe con otra definición (por ejemplo
+  -- una versión anterior con precio >= 0), se reemplaza; si ya es el correcto, no se toca.
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'componente_personalizado_precio_check'
+      and conrelid = 'public.componente_personalizado'::regclass
+      and pg_get_constraintdef(oid) not like '%precio > (0)%'
+  ) then
+    alter table public.componente_personalizado drop constraint componente_personalizado_precio_check;
+  end if;
+
   if not exists (
     select 1 from pg_constraint
     where conname = 'componente_personalizado_precio_check'
       and conrelid = 'public.componente_personalizado'::regclass
   ) then
     alter table public.componente_personalizado
-      add constraint componente_personalizado_precio_check check (precio >= 0);
+      add constraint componente_personalizado_precio_check check (precio > 0);
   end if;
 end $$;
 
