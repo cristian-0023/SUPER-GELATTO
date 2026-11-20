@@ -33,6 +33,8 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //    google-auth-library (OAuth2Client.verifyIdToken): las pruebas NUNCA llaman a Google de verdad.
 //  - groq: async (parametros) => respuesta. Reemplaza a groq-sdk (chat.completions.create): las pruebas
 //    NUNCA llaman a Groq de verdad. Sin esta opción, cualquier llamada al modelo lanza un error.
+//  - groqApiKey: valor de GROQ_API_KEY (ficticio por defecto; '' = sin configurar: chatbot.js no crea cliente).
+//  - groqModel: valor de GROQ_MODEL ('' por defecto = usa el modelo por defecto; así no se lee de un .env local).
 //  - limiteChatbot: tope de peticiones por minuto a /api/chatbot (por defecto muy alto).
 //  - limiteTripo: tope de generaciones 3D por admin y por hora (crear con prompt y regenerate-3d; por defecto muy alto).
 //  - limiteLogin: tope de intentos por ventana en login, google-login, register, forgot-password y
@@ -49,7 +51,7 @@ export const GOOGLE_CLIENT_ID_PRUEBA = 'cliente-google-de-prueba.apps.googleuser
 //  - tripoCdnHosts: valor de TRIPO_CDN_HOSTS (hosts de los que se descargan los modelos; '' = sin lista).
 export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000, produccion = false, render = false, correo = null,
   jwtSecret = JWT_SECRET_PRUEBA, googleClientId = GOOGLE_CLIENT_ID_PRUEBA, adminEmails = '', superAdmin = '',
-  simulacion = false, verificadorGoogle = null, groq = null, limiteChatbot = 100000, limiteLogin = 100000, limiteTripo = 100000,
+  simulacion = false, verificadorGoogle = null, groq = null, groqApiKey = 'groq-llave-falsa-de-prueba', groqModel = '', limiteChatbot = 100000, limiteLogin = 100000, limiteTripo = 100000,
   tripoApiKey = 'tripo-llave-falsa-de-prueba', tripoCdnHosts = '', vercel = false, soloLlavePublica = false,
   frontendUrl = '', smtp = false, esperaEnlaceMs = 0, maxEnlacesDia = 100000 } = {}) {
   // Cadena vacía (no delete): así dotenv no vuelve a leerlas de un .env local.
@@ -63,7 +65,8 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   process.env.RECUPERACION_ESPERA_MS = String(esperaEnlaceMs);
   process.env.RECUPERACION_MAX_DIA = String(maxEnlacesDia);
   // Llave ficticia (no vacía) para que chatbot.js cree el cliente; el cliente es el falso de abajo.
-  process.env.GROQ_API_KEY = 'groq-llave-falsa-de-prueba';
+  process.env.GROQ_API_KEY = groqApiKey;
+  process.env.GROQ_MODEL = groqModel;
   process.env.TRIPO_API_KEY = tripoApiKey;
   process.env.TRIPO_CDN_HOSTS = tripoCdnHosts;
   process.env.FRONTEND_URL = frontendUrl;
