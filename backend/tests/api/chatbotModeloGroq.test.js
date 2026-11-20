@@ -98,10 +98,10 @@ describe('compatibilidad con gpt-oss', () => {
     expect(llamadasGroq[0].parallel_tool_calls).toBe(false);
   });
 
-  it('la segunda llamada (sin herramientas) no lleva parallel_tool_calls', async () => {
+  it('la segunda llamada (tool_choice none) no lleva parallel_tool_calls', async () => {
     guion = [pideHerramienta('getProducts'), texto('Tenemos Fresa.')];
     await chat({ message: 'qué productos hay' });
-    expect(llamadasGroq[1].tools).toBeUndefined();
+    expect(llamadasGroq[1].tool_choice).toBe('none');
     expect(llamadasGroq[1].parallel_tool_calls).toBeUndefined();
   });
 

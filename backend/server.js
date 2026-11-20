@@ -19,7 +19,8 @@ const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
-const { handleChatbotRequest } = require('./chatbot');
+const { handleChatbotRequest, invalidarCacheProductos } = require('./chatbot');
+const { imagenProductoValida } = require('./imagenProducto');
 const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
 const { correoParaIlike } = require('./correoIlike');
 
@@ -795,6 +796,15 @@ app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
+// Gelbot guarda el catálogo 1 minuto: cualquier cambio de productos desde el panel (crear, editar, borrar,
+// precio, estado, imagen...) lo invalida cuando la petición termina bien, para no ofrecer datos viejos.
+app.use('/api/admin/products', (req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => { if (res.statusCode < 400) invalidarCacheProductos(); });
+  }
   next();
 });
 
@@ -2615,24 +2625,7 @@ function soloColumnasProductoAdmin(fila) {
 }
 
 // Imagen del producto: URL https:// (sin usuario ni clave) o ruta local que empieza con una sola "/" y sin "..".
-function imagenProductoValida(valor) {
-  if (typeof valor !== 'string') return null;
-  const img = valor.trim();
-  if (img.length < 1 || img.length > 2048) return null;
-  // Los espacios normales sí valen (hay imágenes como "caramelo salado.png"); no los controles ni "\".
-  if (/[\\\u0000-\u001f\u007f]/.test(img)) return null;
-  if (img.startsWith('/')) {
-    return img.startsWith('//') || img.includes('..') ? null : img;
-  }
-  try {
-    const url = new URL(img);
-    // Con usuario o clave (https://user:pass@...) se podría engañar a quien mira el enlace o filtrar datos.
-    if (url.username || url.password) return null;
-    return url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
-}
+// La regla vive en imagenProducto.js (la comparte Gelbot).
 
 // Cambiar la imagen del producto (Admin)
 app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
