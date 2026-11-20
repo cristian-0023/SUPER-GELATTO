@@ -193,3 +193,75 @@ describe('errores de Groq: mensaje amable al cliente y categoría en el log', ()
     expect(log).not.toContain('dato-privado-del-usuario-9137');
   });
 });
+
+describe('mejoras de revisión', () => {
+  let chat;
+  beforeAll(() => { chat = servidor(); });
+  beforeEach(() => {
+    for (const n of ['log', 'warn', 'error']) vi.mocked(console[n]).mockClear();
+  });
+  const conFin = (respuesta, finish_reason) => ({ choices: [{ ...respuesta.choices[0], finish_reason }] });
+
+  it('cleanText quita los bloques <think>...</think> (sin distinguir mayúsculas)', async () => {
+    guion = [texto('<THINK>razonamiento interno secreto</Think>Hola, ¿qué helado te provoca?')];
+    const res = await chat({ message: 'hola' });
+    expect(res.body.response).toBe('Hola, ¿qué helado te provoca?');
+  });
+
+  it('cleanText quita un <think> suelto sin cierre y todo lo que viene después', async () => {
+    guion = [texto('Tenemos Fresa. <think>y ahora pienso en algo interno')];
+    const res = await chat({ message: 'hola' });
+    expect(res.body.response).toBe('Tenemos Fresa.');
+  });
+
+  it('el texto de message.reasoning nunca llega al cliente', async () => {
+    guion = [
+      pideHerramienta('getProducts', {}, { reasoning: 'RAZON-UNO-oculta' }),
+      texto('Tenemos Fresa.', { reasoning: 'RAZON-DOS-oculta' }),
+    ];
+    const res = await chat({ message: 'qué productos hay' });
+    expect(JSON.stringify(res.body)).not.toMatch(/RAZON-(UNO|DOS)-oculta/);
+    guion = [texto('Hola.', { reasoning: 'RAZON-TRES-oculta' })];
+    const directa = await chat({ message: 'hola' });
+    expect(JSON.stringify(directa.body)).not.toMatch(/RAZON-TRES-oculta/);
+  });
+
+  it('con un modelo que no es gpt-oss NO se envía reasoning_effort', async () => {
+    const chatLlama = servidor({ groqModel: 'llama-3.3-70b-versatile' });
+    guion = [pideHerramienta('getProducts'), texto('Tenemos Fresa.')];
+    await chatLlama({ message: 'qué productos hay' });
+    expect(llamadasGroq).toHaveLength(2);
+    expect(llamadasGroq[0]).not.toHaveProperty('reasoning_effort');
+    expect(llamadasGroq[1]).not.toHaveProperty('reasoning_effort');
+  });
+
+  it.each([
+    ['primera llamada', () => [conFin(texto('Hola a medias'), 'length')]],
+    ['segunda llamada', () => [pideHerramienta('getProducts'), conFin(texto('Tenemos Fre'), 'length')]],
+  ])('finish_reason "length" en la %s se registra en el log con el modelo y sin el contenido', async (_caso, crearGuion) => {
+    guion = crearGuion();
+    await chat({ message: MENSAJE_PRIVADO });
+    const registro = [...errores(), ...vi.mocked(console.warn).mock.calls]
+      .find((args) => args[0] === 'chatbot: respuesta cortada por límite de tokens');
+    expect(registro, 'debe registrar la respuesta cortada').toBeTruthy();
+    expect(registro[1]).toMatchObject({ modelo: MODELO_POR_DEFECTO });
+    const log = todoElLog();
+    expect(log).not.toMatch(/Hola a medias|Tenemos Fre/);
+    expect(log).not.toContain('dato-privado-del-usuario-9137');
+  });
+
+  it('un error que no es de Groq se registra como "chatbot: error interno" sin llave ni texto del usuario', async () => {
+    guion = [new TypeError(`fallo raro con ${LLAVE_FALSA} y ${MENSAJE_PRIVADO} ${'x'.repeat(400)}`)];
+    const res = await chat({ message: MENSAJE_PRIVADO });
+    expect(res.body.response).toMatch(/falla técnica momentánea/);
+    expect(errores().find((args) => args[0] === 'chatbot: error de Groq')).toBeUndefined();
+    const registro = errores().find((args) => args[0] === 'chatbot: error interno');
+    expect(registro, 'debe registrar "chatbot: error interno"').toBeTruthy();
+    expect(registro[1].nombre).toBe('TypeError');
+    expect(registro[1].mensaje.length).toBeLessThanOrEqual(200);
+    expect(typeof registro[1].pila).toBe('string');
+    const log = todoElLog();
+    expect(log).not.toContain(LLAVE_FALSA);
+    expect(log).not.toContain('dato-privado-del-usuario-9137');
+  });
+});
