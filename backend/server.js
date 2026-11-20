@@ -587,19 +587,21 @@ if (!supabase) {
       { nombre: 'Master', min: 1001, max: null, pct: 20 }
     ]
   };
-  // Versión simulada de super_points_resumen (misma forma de respuesta).
+  // Versión simulada de super_points_resumen (misma forma de respuesta). Como en la base (regla del
+  // 2026-11-19), el nivel sale del SALDO actual; `ganados` es solo informativo.
   const mockResumenPuntos = ({ p_id_usuario }) => {
     const movs = mockDb.super_points.filter((m) => m.id_usuario === p_id_usuario);
     const revertidas = new Set(movs.filter((m) => m.tipo === 'revertido').map((m) => m.id_venta));
     const saldo = movs.reduce((suma, m) => suma + m.puntos_generados, 0);
     const ganados = movs.filter((m) => m.tipo === 'ganado' && !revertidas.has(m.id_venta))
       .reduce((suma, m) => suma + m.puntos_generados, 0);
+    const base = Math.max(saldo, 0);
     const niveles = MOCK_REGLAS_PUNTOS.niveles;
-    const nivel = [...niveles].reverse().find((n) => n.min <= ganados);
-    const siguiente = niveles.find((n) => n.min > ganados);
+    const nivel = [...niveles].reverse().find((n) => n.min <= base);
+    const siguiente = niveles.find((n) => n.min > base);
     return {
       saldo, ganados, nivel: nivel.nombre, pct_max: nivel.pct, valor_saldo: saldo * MOCK_REGLAS_PUNTOS.valor_punto,
-      puntos_para_siguiente: siguiente ? siguiente.min - ganados : 0, siguiente_nivel: siguiente ? siguiente.nombre : null
+      puntos_para_siguiente: siguiente ? siguiente.min - base : 0, siguiente_nivel: siguiente ? siguiente.nombre : null
     };
   };
   // Versión simulada de cambiar_estado_venta: solo cambia el estado (el modo simulado no mueve puntos aquí).

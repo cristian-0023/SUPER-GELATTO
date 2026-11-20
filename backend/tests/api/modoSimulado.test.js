@@ -92,6 +92,22 @@ describe('modo simulado (sin Supabase): Super Points', () => {
     expect(mios.body.movimientos[0]).toMatchObject({ tipo: 'ganado', puntos: 250 });
   });
 
+  it('el nivel sale del saldo actual: canjear puntos puede bajarlo (regla del 2026-11-19)', async () => {
+    const compra = await request(app).post('/api/payments/process').set(sesionDe(58))
+      .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 4 }] }); // 50000 -> 500 puntos (Fan)
+    expect(compra.body.puntos).toMatchObject({ ganados: 500, saldo: 500 });
+
+    // 12500 con 250 puntos (tope Fan = 250): paga 11250 y gana 112 -> saldo 362, ganados 612
+    const canje = await request(app).post('/api/payments/process').set(sesionDe(58))
+      .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 1 }], puntosUsar: 250 });
+    expect(canje.body.ok).toBe(true);
+    expect(canje.body.puntos).toMatchObject({ usados: 250, ganados: 112, saldo: 362 });
+
+    const mios = await request(app).get('/api/me/points').set(sesionDe(58));
+    // Por puntos ganados (612) sería Pro; por saldo (362) es Fan.
+    expect(mios.body).toMatchObject({ saldo: 362, ganados: 612, nivel: 'Fan', pctMax: 10, puntosParaSiguiente: 139, siguienteNivel: 'Pro' });
+  });
+
   it('canjear más puntos de los que tiene -> 400 sin aprobar', async () => {
     const res = await request(app).post('/api/payments/process').set(sesionDe(56))
       .send({ method: 'NEQUI', bank: 'Nequi', items: [{ id: 1, quantity: 1 }], puntosUsar: 10 });
