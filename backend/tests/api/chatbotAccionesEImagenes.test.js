@@ -128,3 +128,57 @@ describe('1. segunda llamada sin tool_use_failed', () => {
     expect(res.body.response).toMatch(MENSAJE_FALLA);
   });
 });
+
+describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
+  it.each([
+    ['cuánto cuesta la fresa'],
+    ['Cuánto cuesta el helado de fresa'],
+    ['quiero saber cuánto cuesta la fresa'],
+    ['dame el precio de la fresa'],
+    ['¿qué ingredientes tiene la fresa?'],
+  ])('"%s": aunque el modelo llame a addToCart, NO se agrega y se responde con la info del producto', async (mensaje) => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa' }), texto('Fresa agregada.')];
+    const res = await chat({ message: mensaje }, tokenCliente());
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).toMatch(/Fresa Salvaje/);
+  });
+
+  it.each([
+    ['agrégame una fresa'],
+    ['Agregame la fresa salvaje porfa'],
+    ['añade una fresa al carrito'],
+    ['quiero una fresa'],
+    ['dame un chocolate belga'],
+    ['me llevo la fresa'],
+  ])('"%s": sí se agrega al carrito con el producto real de la base', async (mensaje) => {
+    guion = [pideHerramienta('addToCart', { productName: /choco/i.test(mensaje) ? 'Chocolate Belga' : 'Fresa Salvaje' }), texto('Listo.')];
+    const res = await chat({ message: mensaje }, tokenCliente());
+    expect(res.body.action).toBe('addToCart');
+    expect([1, 2]).toContain(res.body.product.id);
+  });
+
+  it('el atajo sin modelo reconoce "agrégame una fresa" (sin llamar a Groq)', async () => {
+    const res = await chat({ message: 'agrégame una fresa' }, tokenCliente());
+    expect(llamadasGroq).toHaveLength(0);
+    expect(res.body.action).toBe('addToCart');
+    expect(res.body.product).toMatchObject({ id: 1, nombre: 'Fresa Salvaje', precio: 9000 });
+  });
+
+  it('el atajo sin modelo NO agrega cuando solo se pregunta el precio', async () => {
+    guion = [texto('La Fresa Salvaje cuesta $9.000.')];
+    const res = await chat({ message: 'cuánto cuesta la fresa' }, tokenCliente());
+    expect(llamadasGroq).toHaveLength(1);
+    expect(res.body.action).not.toBe('addToCart');
+  });
+
+  it.each([['anónimo', () => ({})], ['cliente', tokenCliente]])('%s: el prompt pide addToCart solo con pedido explícito', async (_r, cabeceras) => {
+    guion = [texto('Hola.')];
+    await chat({ message: 'hola' }, cabeceras());
+    const sistema = llamadasGroq[0].messages[0].content;
+    expect(sistema).not.toMatch(/INMEDIATAMENTE/);
+    expect(sistema).not.toMatch(/NO preguntes confirmaci[oó]n/i);
+    expect(sistema).toMatch(/addToCart SOLO cuando/i);
+    expect(sistema).toMatch(/agr[eé]game/i);
+  });
+});
