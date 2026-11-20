@@ -9,7 +9,15 @@
   --color-pastel-blue: #b2e2f2;
   --color-pastel-green: #c1f0c1;
   --color-pastel-lavender: #e6e6fa;
-  
+
+  /* Superficies sólidas color cacao (chat Gelbot) y textos crema con contraste AA sobre ellas */
+  --color-cacao-950: #110c09;
+  --color-cacao-900: #17110d;
+  --color-cacao-800: #211813;
+  --color-cacao-700: #2c211a;
+  --color-crema: #f5ede3;
+  --color-crema-suave: #cbbba9;
+
   --font-playfair: "Playfair Display", serif;
   --font-poppins: Poppins, sans-serif;
   
