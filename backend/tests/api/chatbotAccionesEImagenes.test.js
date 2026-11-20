@@ -182,3 +182,37 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
     expect(sistema).toMatch(/agr[eé]game/i);
   });
 });
+
+describe('3. el precio lo escribe el servidor', () => {
+  it('addToCart: aunque el modelo diga "$12.000", el cliente lee el precio real "$9.000"', async () => {
+    // "el rojito de frutas" no lo resuelve el atajo: pasa por el modelo.
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('**Fresa** cuesta **$12.000 COP** y ya está en tu carrito.')];
+    const res = await chat({ message: 'quiero el rojito de frutas' }, tokenCliente());
+    expect(res.body.action).toBe('addToCart');
+    expect(res.body.product).toMatchObject({ id: 1, precio: 9000 });
+    expect(res.body.response).toContain('Fresa Salvaje');
+    expect(res.body.response).toContain('$9.000');
+    expect(res.body.response).not.toMatch(/12\.000/);
+  });
+
+  it('el atajo sin modelo escribe el precio como "$9.000"', async () => {
+    const res = await chat({ message: 'agrégame una fresa' }, tokenCliente());
+    expect(res.body.response).toContain('$9.000');
+  });
+
+  it('pregunta de precio con addToCart del modelo: el texto lleva el precio real "$9.000"', async () => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa' }), texto('Fresa cuesta $12.000.')];
+    const res = await chat({ message: 'cuánto cuesta la fresa' }, tokenCliente());
+    expect(res.body.response).toContain('$9.000');
+    expect(res.body.response).not.toMatch(/12\.000/);
+  });
+
+  it('el catálogo del prompt trae los precios reales de la base', async () => {
+    guion = [texto('Hola.')];
+    await chat({ message: 'hola' }, tokenCliente());
+    const sistema = llamadasGroq[0].messages[0].content;
+    expect(sistema).toContain('Fresa Salvaje - $9.000');
+    expect(sistema).toContain('Chocolate Belga - $12.000');
+    expect(sistema).toContain('Mango Biche - $8.500');
+  });
+});
