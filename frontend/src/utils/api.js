@@ -32,7 +32,7 @@ export function clearSessionAndRedirect() {
  *  - Prepends BASE_URL to relative paths
  *  - Adds `Content-Type: application/json` by default
  *  - Attaches `Authorization: Bearer <token>` when a token exists
- *  - Calls clearSessionAndRedirect() on 401 responses
+ *  - Calls clearSessionAndRedirect() on 401 responses only (a 403 is returned to the caller)
  *
  * @param {string} path  - API path (e.g. '/api/admin/dashboard')
  * @param {RequestInit} options - Standard fetch options
@@ -54,7 +54,9 @@ export async function apiFetch(path, options = {}) {
     headers,
   });
 
-  if (response.status === 401 || response.status === 403) {
+  // Solo 401 significa sesión vencida o inválida. Un 403 es "no tienes permiso para esto": la sesión
+  // sigue y la respuesta vuelve a quien llamó para que muestre el mensaje del servidor.
+  if (response.status === 401) {
     clearSessionAndRedirect();
   }
 

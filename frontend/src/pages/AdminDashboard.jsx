@@ -16,6 +16,9 @@ import { soloVentasCobradas } from '../utils/ingresos';
 import { armarCuerpoProducto, mapearProductoGuardado, armarCuerpoAlta, productoCreadoParaPanel, IMAGENES_PREDETERMINADAS } from '../utils/editorProductos';
 import { leerEntero, decidirTrasGuardar, cambiarProducto } from '../utils/edicionRapida';
 import { useCart } from '../context/CartContext';
+import { puedeEditarRol } from '../utils/permisosUsuarios';
+import { decidirAnteErrorPanel, mensajeDeError } from '../utils/respuestaAdmin';
+import { borrarSesion } from '../utils/sesion';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -569,6 +572,16 @@ const AdminDashboard = ({ user, onLogout }) => {
     setIsQrVerified(true);
   };
 
+  // La sesión es válida pero ya no es de administrador (403 de requireAdmin): se avisa, se borra la
+  // sesión y se sale a la portada, en vez de dejar el panel trabado.
+  const salirDelPanelSinPermiso = (mensaje) => {
+    if (showToast) showToast(mensaje, 'error');
+    if (onLogout) onLogout();
+    else borrarSesion();
+    navigate('/', { replace: true });
+  };
+  const MENSAJE_SIN_PERMISO = 'Tu cuenta ya no tiene permisos de administrador.';
+
   const fetchDashboardData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -581,7 +594,14 @@ const AdminDashboard = ({ user, onLogout }) => {
         throw new Error('Sesión de verificación QR expirada.');
       }
       
-      if (!res.ok) throw new Error('Error al obtener datos');
+      if (!res.ok) {
+        const cuerpoError = await res.json().catch(() => ({}));
+        if (decidirAnteErrorPanel(res.status) === 'sin-permiso') {
+          salirDelPanelSinPermiso(mensajeDeError(cuerpoError, MENSAJE_SIN_PERMISO));
+          return;
+        }
+        throw new Error(mensajeDeError(cuerpoError, 'Error al obtener datos'));
+      }
       const data = await res.json();
       
       // Obtener productos saltándose la caché del CDN (30 s): el admin ve sus cambios al instante
@@ -744,10 +764,18 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // Consulta del estado del modelo 3D de un producto (null si el servidor no respondió bien).
+  // Consulta del estado del modelo 3D de un producto para el sondeo. Si el servidor falla de forma
+  // pasajera (500 o más) devuelve null y el sondeo vuelve a preguntar; ante otro error avisa y devuelve
+  // { estado: 'error' } para que el sondeo pare.
   const consultarModelo3D = async (productId) => {
     const res = await apiFetch(`/api/admin/products/${productId}/model-3d`);
-    return res.ok ? res.json() : null;
+    if (res.ok) return res.json();
+    const decision = decidirAnteErrorPanel(res.status);
+    if (decision === 'reintentable') return null;
+    const cuerpoError = await res.json().catch(() => ({}));
+    if (decision === 'sin-permiso') salirDelPanelSinPermiso(mensajeDeError(cuerpoError, MENSAJE_SIN_PERMISO));
+    else if (decision === 'error' && showToast) showToast(mensajeDeError(cuerpoError, 'No se pudo consultar el modelo 3D.'), 'error');
+    return { estado: 'error' };
   };
 
   // Sondeo para chequear si el modelo 3D está listo (3 s; 10 s mientras el servidor lo guarda)
@@ -778,9 +806,15 @@ const AdminDashboard = ({ user, onLogout }) => {
       if (res.ok) {
         const model = await res.json();
         setProductModel(model);
+      } else {
+        const decision = decidirAnteErrorPanel(res.status);
+        const cuerpoError = await res.json().catch(() => ({}));
+        if (decision === 'sin-permiso') salirDelPanelSinPermiso(mensajeDeError(cuerpoError, MENSAJE_SIN_PERMISO));
+        else if (decision !== 'sesion-vencida' && showToast) showToast(mensajeDeError(cuerpoError, 'No se pudo cargar el modelo 3D.'), 'error');
       }
     } catch (err) {
       console.error(err);
+      if (showToast) showToast('Error de conexión al cargar el modelo 3D.', 'error');
     } finally {
       setLoadingModel(false);
     }
@@ -813,7 +847,10 @@ const AdminDashboard = ({ user, onLogout }) => {
             setRegenStatus('listo');
             fetchDashboardData();
           },
-          alError: () => setRegenStatus('error'),
+          alError: () => {
+            setRegenStatus('error');
+            if (showToast) showToast('No se pudo regenerar el modelo 3D.', 'error');
+          },
         });
       } else {
         if (showToast) showToast(data.message || 'Error al iniciar regeneración.', 'error');
@@ -1234,11 +1271,10 @@ const AdminDashboard = ({ user, onLogout }) => {
                     const isTargetSuperAdmin = u.es_super_admin === true || u.rol === 'super_admin';
                     const isTargetAdmin = u.rol === 'admin';
 
-                    // Modificación de Rol:
+                    // Modificación de Rol (misma regla que el servidor, ver utils/permisosUsuarios):
                     // 1. Nadie puede cambiar el rol del Super Admin principal.
-                    // 2. Si el objetivo es Administrador, SOLO el Super Admin puede cambiar su rol.
-                    // 3. Si el objetivo es Cliente, cualquier Administrador puede ascenderlo a admin.
-                    const canEditRole = !isTargetSuperAdmin && (!isTargetAdmin || isCurrentUserSuperAdmin);
+                    // 2. SOLO el Super Admin cambia roles: ascender un cliente a admin o bajar un admin a cliente.
+                    const canEditRole = puedeEditarRol({ esObjetivoSuperAdmin: isTargetSuperAdmin, soySuperAdmin: isCurrentUserSuperAdmin });
 
                     // Eliminación de Usuario:
                     // 1. Nadie puede eliminar la cuenta principal del Super Admin.
@@ -1265,7 +1301,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             value={u.rol || 'cliente'}
                             disabled={!canEditRole || actionLoading === `role-${userId}`}
                             onChange={(e) => handleUpdateRole(userId, e.target.value)}
-                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo la cuenta de Super Admin puede cambiar el rol de un administrador') : 'Cambiar rol'}
+                            title={!canEditRole ? (isTargetSuperAdmin ? 'Cuenta principal protegida' : 'Solo el Super Admin puede cambiar roles') : 'Cambiar rol'}
                             className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none transition-all ${
                               !canEditRole ? 'opacity-60 cursor-not-allowed ' : 'cursor-pointer '
                             }${
