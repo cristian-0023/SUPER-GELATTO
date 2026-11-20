@@ -10,6 +10,9 @@ import {
   ALTO_MAX_PANEL,
   MARGEN_PANEL,
   ALTO_MIN_PANEL,
+  debeCerrarConEscape,
+  hayPropuestaPendiente,
+  debeDevolverFoco,
 } from '../../../frontend/src/utils/panelGelbot.js';
 
 describe('esPantallaMovil', () => {
