@@ -1,9 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { X, Send, Mic, Plus, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { getToken } from '../utils/api';
 import { armarTarjetasProductos, productoDeTarjeta, cantidadParaCarrito, FOTO_POR_DEFECTO } from '../utils/tarjetasGelbot';
+import { medidasPanel, debeCerrarConEscape, debeDevolverFoco } from '../utils/panelGelbot';
+
+// Medidas actuales de la ventana. alto = vista de diseño (no cambia con el teclado); altoVisible y
+// desplazamientoVisible (visualViewport) cambian cuando se abre el teclado del celular.
+const leerVentana = () => (typeof window === 'undefined' ? {} : {
+  ancho: window.innerWidth,
+  alto: document.documentElement.clientHeight || window.innerHeight,
+  altoVisible: window.visualViewport?.height,
+  desplazamientoVisible: window.visualViewport?.offsetTop,
+});
+
+const ANILLO_FOCO = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-cacao-950';
 
 const parseInlineStyles = (text) => {
   if (typeof text !== 'string') return text;
@@ -77,14 +90,73 @@ const Gelbot = ({ user }) => {
   const siguienteId = useRef(2);
   const nuevoId = () => siguienteId.current++;
   const recognitionRef = useRef(null);
+  const inputRef = useRef(null);
+  const botonFlotanteRef = useRef(null);
+  const yaSeAbrio = useRef(false);
+  const panelRef = useRef(null);
+  const devolverFoco = useRef(false);
+  const mensajesRef = useRef(messages);
+  mensajesRef.current = messages;
+  // Temporizadores del auto-cierre (despedida): se limpian si el componente se desmonta.
+  const temporizadores = useRef([]);
+  useEffect(() => () => temporizadores.current.forEach(clearTimeout), []);
+  const reducirMovimiento = useReducedMotion();
+  const [ventana, setVentana] = useState(leerVentana);
+  const medidas = medidasPanel(ventana);
+  const esMovil = medidas.modo === 'movil';
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: reducirMovimiento ? 'auto' : 'smooth', block: 'end' });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    if (isOpen) scrollToBottom();
+  }, [messages, isLoading, isOpen]);
+
+  // Panel abierto: seguir el tamaño de la ventana (y del teclado), cerrar con Escape y llevar el foco al campo.
+  // Al cerrarlo, el foco vuelve al botón flotante solo si estaba en el panel (no en la primera carga ni si
+  // el usuario ya está en otra parte de la página, por ejemplo tras el auto-cierre).
+  useEffect(() => {
+    if (!isOpen) {
+      if (yaSeAbrio.current && devolverFoco.current) botonFlotanteRef.current?.focus();
+      devolverFoco.current = false;
+      return undefined;
+    }
+    yaSeAbrio.current = true;
+    const actualizar = () => setVentana(leerVentana());
+    // Escape no cierra con una confirmación de admin pendiente ni si otro diálogo ya lo atendió.
+    const alTeclear = (e) => {
+      if (!debeCerrarConEscape(e, mensajesRef.current)) return;
+      e.preventDefault();
+      setIsOpen(false);
+    };
+    actualizar();
+    window.addEventListener('resize', actualizar);
+    window.visualViewport?.addEventListener('resize', actualizar);
+    window.visualViewport?.addEventListener('scroll', actualizar);
+    document.addEventListener('keydown', alTeclear);
+    const enfocar = requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+    return () => {
+      devolverFoco.current = debeDevolverFoco({ activo: document.activeElement, panel: panelRef.current, body: document.body });
+      cancelAnimationFrame(enfocar);
+      window.removeEventListener('resize', actualizar);
+      window.visualViewport?.removeEventListener('resize', actualizar);
+      window.visualViewport?.removeEventListener('scroll', actualizar);
+      document.removeEventListener('keydown', alTeclear);
+    };
+  }, [isOpen]);
+
+  // En el celular el panel ocupa toda la pantalla: el resto de la app queda inerte (el foco no se escapa
+  // detrás del chat). El panel vive fuera de #root (portal), así que no se ve afectado. Al cerrar se restaura.
+  const modal = isOpen && medidas.modal;
+  useEffect(() => {
+    if (!modal) return undefined;
+    const raiz = document.getElementById('root');
+    if (!raiz) return undefined;
+    const anterior = raiz.inert;
+    raiz.inert = true;
+    return () => { raiz.inert = anterior; };
+  }, [modal]);
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -196,12 +268,12 @@ const Gelbot = ({ user }) => {
 
       // Acción: cerrar chat automáticamente (despedida)
       if (data.action === 'closeChat') {
-        setTimeout(() => {
+        temporizadores.current.push(setTimeout(() => {
           setIsOpen(false);
-          setTimeout(() => {
+          temporizadores.current.push(setTimeout(() => {
             setMessages([welcomeMsg(user)]);
-          }, 500);
-        }, 3500);
+          }, 500));
+        }, 3500));
       }
 
     } catch (error) {
@@ -256,59 +328,106 @@ const Gelbot = ({ user }) => {
     setMessages(prev => [...prev, { id: nuevoId(), text: texto, sender: 'bot' }]);
   };
 
+  // Escritorio: panel compacto abajo a la derecha que crece con el contenido hasta un máximo que nunca llega
+  // a la barra superior. Celular: toda la pantalla debajo de la barra (la barra y el carrito siguen a la vista):
+  // top = barra y bottom = 0; solo con el teclado abierto se fija el alto del área visible.
+  const estiloPanel = esMovil
+    ? (medidas.alto === undefined
+        ? { top: medidas.arriba, bottom: medidas.abajo, left: 0, right: 0 }
+        : { top: medidas.arriba, height: medidas.alto, left: 0, right: 0 })
+    : { width: medidas.ancho, maxHeight: medidas.altoMax, bottom: medidas.abajo, right: 24, transformOrigin: 'bottom right' };
+
+  const animacion = reducirMovimiento
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
+    : {
+        initial: { opacity: 0, y: esMovil ? 24 : 12, scale: esMovil ? 1 : 0.97 },
+        animate: { opacity: 1, y: 0, scale: 1 },
+        exit: { opacity: 0, y: esMovil ? 24 : 8, scale: esMovil ? 1 : 0.98, transition: { duration: 0.15, ease: 'easeIn' } },
+        transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
+      };
+
+  const burbujaBot = 'bg-cacao-700 text-crema border border-white/[0.06] rounded-2xl rounded-bl-md';
+  const cajaAdmin = 'w-full bg-cacao-950 border border-gold-premium/15 rounded-xl overflow-hidden mt-1 text-xs';
+  const cabeceraAdmin = 'px-3 py-2 bg-cacao-800 border-b border-gold-premium/10 flex justify-between items-center';
+
   return (
-    <div className="fixed bottom-6 right-6 z-[60]">
-      <AnimatePresence>
+    <>
+      {createPortal(<AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 20 }}
-            className="absolute bottom-20 right-0 w-80 sm:w-[400px] glass-card shadow-2xl overflow-hidden flex flex-col h-[500px]"
+          <motion.section
+            ref={panelRef}
+            key="panel-gelbot"
+            id="gelbot-panel"
+            data-gelbot-panel=""
+            role="dialog"
+            aria-modal={medidas.modal ? 'true' : 'false'}
+            aria-labelledby="gelbot-titulo"
+            style={estiloPanel}
+            {...animacion}
+            className={`fixed z-[60] flex flex-col overflow-hidden text-left bg-cacao-900 ${
+              esMovil
+                ? 'border-t border-gold-premium/20'
+                : 'rounded-2xl border border-gold-premium/20 shadow-[0_24px_60px_-18px_rgba(0,0,0,0.8)]'
+            }`}
           >
-            {/* Header */}
-            <div className="p-4 bg-gold-premium/10 border-b border-white/10 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-background-dark flex items-center justify-center overflow-hidden border-2 border-gold-premium shadow-lg">
-                  <img src="/images/gelbot-logo.png" alt="Gelbot" className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white uppercase tracking-wider">Gelbot</h4>
-                  <p className="text-[10px] text-green-400 font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" /> En línea
-                  </p>
+            {/* Encabezado */}
+            <header className="flex flex-none items-center justify-between gap-3 pl-4 pr-2 py-3 bg-cacao-950 border-b border-gold-premium/15">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="relative flex-none">
+                  <img
+                    src="/images/gelbot-logo.png"
+                    alt=""
+                    className="w-10 h-10 rounded-full object-cover bg-background-dark ring-1 ring-gold-premium/70"
+                  />
+                  <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-cacao-950" />
+                </span>
+                <div className="min-w-0 leading-tight">
+                  <h2 id="gelbot-titulo" className="text-lg font-semibold text-crema tracking-[-0.01em]">Gelbot</h2>
+                  <p className="text-xs text-emerald-300">En línea · Asistente de Super Gelatto</p>
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="p-2 text-white/30 hover:text-white transition-colors">
-                <X size={20} />
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                aria-label="Cerrar chat"
+                className={`flex-none w-11 h-11 rounded-full flex items-center justify-center text-crema-suave hover:text-crema hover:bg-white/[0.06] transition-colors ${ANILLO_FOCO}`}
+              >
+                <X size={20} aria-hidden="true" />
               </button>
-            </div>
+            </header>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4" role="log" aria-live="polite" aria-label="Conversación con Gelbot">
+            {/* Mensajes */}
+            <div
+              className="flex-auto min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4"
+              role="log"
+              aria-live="polite"
+              aria-label="Conversación con Gelbot"
+            >
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex flex-col gap-2 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                  
+
                   {/* Burbuja de texto */}
-                  <div className={`max-w-[90%] p-3 rounded-2xl text-sm ${
-                    msg.sender === 'user'
-                      ? 'bg-gold-premium text-background-dark font-medium rounded-tr-none'
-                      : 'bg-white/5 border border-white/10 text-white rounded-tl-none'
-                  }`}>
-                    {msg.sender === 'user' ? msg.text : renderMessageText(msg.text)}
-                  </div>
+                  {(msg.sender === 'user' || msg.text) && (
+                    <div className={`max-w-[85%] px-3.5 py-2.5 text-sm leading-relaxed break-words ${
+                      msg.sender === 'user'
+                        ? 'bg-gold-premium text-background-dark font-medium rounded-2xl rounded-br-md'
+                        : burbujaBot
+                    }`}>
+                      {msg.sender === 'user' ? msg.text : renderMessageText(msg.text)}
+                    </div>
+                  )}
 
                   {/* ── Confirmación de acción (Admin): texto como texto, nunca como HTML ── */}
                   {msg.propuesta && (
-                    <div className="max-w-[90%] bg-black/60 border border-gold-premium/40 rounded-xl p-3 text-xs flex flex-col gap-2">
-                      <span className="text-white/90">{msg.propuesta.resumen}</span>
+                    <div className="max-w-[90%] bg-cacao-950 border border-gold-premium/40 rounded-xl p-3 text-xs flex flex-col gap-2">
+                      <span className="text-crema">{msg.propuesta.resumen}</span>
                       {msg.propuesta.estado === 'pendiente' && (
                         <div className="flex gap-2">
                           <button
                             type="button"
                             disabled={isLoading}
                             onClick={() => responderPropuesta(msg.id, msg.propuesta.token, true)}
-                            className="px-3 py-1 rounded-full bg-gold-premium text-background-dark font-bold disabled:opacity-50"
+                            className={`min-h-11 px-4 rounded-full bg-gold-premium text-background-dark font-bold hover:bg-gold-light transition-colors disabled:opacity-50 ${ANILLO_FOCO}`}
                           >
                             Confirmar
                           </button>
@@ -316,7 +435,7 @@ const Gelbot = ({ user }) => {
                             type="button"
                             disabled={isLoading}
                             onClick={() => responderPropuesta(msg.id, msg.propuesta.token, false)}
-                            className="px-3 py-1 rounded-full bg-white/10 text-white/80 hover:text-white disabled:opacity-50"
+                            className={`min-h-11 px-4 rounded-full bg-cacao-700 text-crema hover:bg-cacao-800 border border-white/10 transition-colors disabled:opacity-50 ${ANILLO_FOCO}`}
                           >
                             Cancelar
                           </button>
@@ -329,7 +448,7 @@ const Gelbot = ({ user }) => {
                   {msg.productos?.length > 0 && (
                     <ul
                       aria-label="Sabores disponibles"
-                      className="w-[95%] grid grid-cols-2 sm:grid-cols-3 gap-2"
+                      className="w-full grid grid-cols-2 gap-2.5"
                     >
                       {msg.productos.map((t) => {
                         const agregado = agregados.has(`${msg.id}-${t.id}`);
@@ -340,32 +459,32 @@ const Gelbot = ({ user }) => {
                               onClick={() => agregarDesdeTarjeta(msg.id, t)}
                               aria-label={agregado ? `${t.nombre}, ${t.precioTexto}, agregado al carrito` : `Agregar ${t.nombre}, ${t.precioTexto}, al carrito`}
                               aria-disabled={agregado || undefined}
-                              className={`group w-full h-full flex flex-col text-left rounded-xl overflow-hidden bg-white/5 border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-premium focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark ${
-                                agregado ? 'border-green-500/50 cursor-default' : 'border-white/10 hover:border-gold-premium/60 hover:bg-white/10'
+                              className={`group w-full h-full flex flex-col text-left rounded-xl overflow-hidden bg-cacao-800 border transition-colors ${ANILLO_FOCO} ${
+                                agregado ? 'border-emerald-400/50 cursor-default' : 'border-white/[0.06] hover:border-gold-premium/60 hover:bg-cacao-700'
                               }`}
                             >
-                              <span className="relative block aspect-[4/3] bg-black/40">
+                              <span className="relative block aspect-[4/3] bg-cacao-950 overflow-hidden">
                                 <img
                                   src={t.image}
                                   alt=""
                                   loading="lazy"
                                   decoding="async"
-                                  className="w-full h-full object-cover"
+                                  className="w-full h-full object-cover transition-transform duration-500 ease-out motion-safe:group-hover:scale-[1.04]"
                                   onError={(e) => {
                                     if (!e.currentTarget.src.endsWith(FOTO_POR_DEFECTO)) e.currentTarget.src = FOTO_POR_DEFECTO;
                                   }}
                                 />
                                 <span
                                   aria-hidden="true"
-                                  className={`absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center shadow-md shadow-black/40 transition-colors ${
-                                    agregado ? 'bg-green-500 text-background-dark' : 'bg-gold-premium text-background-dark'
+                                  className={`absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center shadow-[0_4px_10px_-2px_rgba(0,0,0,0.6)] transition-colors ${
+                                    agregado ? 'bg-emerald-400 text-background-dark' : 'bg-gold-premium text-background-dark'
                                   }`}
                                 >
                                   {agregado ? <Check size={16} strokeWidth={3} /> : <Plus size={16} strokeWidth={3} />}
                                 </span>
                               </span>
-                              <span className="flex flex-col gap-0.5 p-2">
-                                <span className="text-xs font-semibold text-white leading-snug line-clamp-2">{t.nombre}</span>
+                              <span className="flex flex-col gap-0.5 px-2.5 py-2">
+                                <span className="text-[13px] font-semibold text-crema leading-snug line-clamp-2">{t.nombre}</span>
                                 <span className="text-xs font-bold text-gold-premium tabular-nums">{t.precioTexto}</span>
                               </span>
                             </button>
@@ -377,14 +496,14 @@ const Gelbot = ({ user }) => {
 
                   {/* ── Tabla de Usuarios (Admin) ── */}
                   {msg.action === 'showUsersTable' && msg.actionData && (
-                    <div className="w-[95%] bg-black/60 border border-white/20 rounded-xl overflow-hidden mt-1 text-xs shadow-lg shadow-black/50">
-                      <div className="p-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
-                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">👥 Usuarios</span>
-                        <span className="text-white/50 text-[10px]">{msg.actionData.length} registros</span>
+                    <div className={cajaAdmin}>
+                      <div className={cabeceraAdmin}>
+                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">Usuarios</span>
+                        <span className="text-crema-suave text-[11px] tabular-nums">{msg.actionData.length} registros</span>
                       </div>
                       <div className="max-h-[200px] overflow-y-auto">
                         <table className="w-full text-left border-collapse">
-                          <thead className="bg-white/5 text-white/70 sticky top-0">
+                          <thead className="bg-cacao-800 text-crema-suave sticky top-0">
                             <tr>
                               <th className="p-2 font-medium">Nombre</th>
                               <th className="p-2 font-medium">Rol</th>
@@ -392,16 +511,16 @@ const Gelbot = ({ user }) => {
                           </thead>
                           <tbody>
                             {msg.actionData.map((u, idx) => (
-                              <tr key={idx} className="border-t border-white/5 hover:bg-white/5 transition-colors">
-                                <td className="p-2 text-white/90">
+                              <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.04] transition-colors">
+                                <td className="p-2 text-crema">
                                   {u.nombre}
-                                  <div className="text-[9px] text-white/40 font-mono truncate max-w-[130px]">{u.email}</div>
+                                  <div className="text-[10px] text-crema-suave truncate max-w-[170px]">{u.email}</div>
                                 </td>
                                 <td className="p-2">
-                                  <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider ${
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider ${
                                     u.rol === 'admin'
                                       ? 'bg-gold-premium/20 text-gold-premium'
-                                      : 'bg-white/10 text-white/60'
+                                      : 'bg-white/10 text-crema-suave'
                                   }`}>
                                     {u.rol}
                                   </span>
@@ -416,14 +535,14 @@ const Gelbot = ({ user }) => {
 
                   {/* ── Tabla de Ventas (Admin) ── */}
                   {msg.action === 'showSalesTable' && msg.actionData && (
-                    <div className="w-[95%] bg-black/60 border border-white/20 rounded-xl overflow-hidden mt-1 text-xs shadow-lg shadow-black/50">
-                      <div className="p-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
-                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">💰 Últimas Ventas</span>
-                        <span className="text-white/50 text-[10px]">{msg.actionData.length} registros</span>
+                    <div className={cajaAdmin}>
+                      <div className={cabeceraAdmin}>
+                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">Últimas ventas</span>
+                        <span className="text-crema-suave text-[11px] tabular-nums">{msg.actionData.length} registros</span>
                       </div>
                       <div className="max-h-[220px] overflow-y-auto">
                         <table className="w-full text-left border-collapse">
-                          <thead className="bg-white/5 text-white/70 sticky top-0">
+                          <thead className="bg-cacao-800 text-crema-suave sticky top-0">
                             <tr>
                               <th className="p-2 font-medium">Cliente</th>
                               <th className="p-2 font-medium">Total</th>
@@ -432,19 +551,19 @@ const Gelbot = ({ user }) => {
                           </thead>
                           <tbody>
                             {msg.actionData.map((s, idx) => (
-                              <tr key={idx} className="border-t border-white/5 hover:bg-white/5 transition-colors">
-                                <td className="p-2 text-white/90">
+                              <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.04] transition-colors">
+                                <td className="p-2 text-crema">
                                   {s.usuario?.nombre || 'Cliente'}
-                                  <div className="text-[9px] text-white/40 font-mono truncate max-w-[110px]">
+                                  <div className="text-[10px] text-crema-suave truncate max-w-[120px]">
                                     {s.usuario?.email || (String(s.id_usuario || '').slice(0, 8) + '...')}
                                   </div>
                                 </td>
-                                <td className="p-2 font-bold text-green-400">
+                                <td className="p-2 font-bold text-emerald-300 tabular-nums">
                                   {new Intl.NumberFormat('es-CO', {
                                     style: 'currency', currency: 'COP', minimumFractionDigits: 0
                                   }).format(s.total)}
                                 </td>
-                                <td className="p-2 text-white/50">
+                                <td className="p-2 text-crema-suave tabular-nums">
                                   {new Date(s.fecha).toLocaleDateString('es-CO', {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                                   })}
@@ -459,17 +578,17 @@ const Gelbot = ({ user }) => {
 
                   {/* ── Tabla Dinámica (Admin) ── */}
                   {msg.action === 'showTable' && Array.isArray(msg.actionData) && msg.actionData.length > 0 && (
-                    <div className="w-[95%] bg-black/60 border border-white/20 rounded-xl overflow-hidden mt-1 text-[11px] shadow-lg shadow-black/50">
-                      <div className="p-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
-                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">📊 Consulta Base de Datos</span>
-                        <span className="text-white/50 text-[10px]">{msg.actionData.length} filas</span>
+                    <div className={`${cajaAdmin} text-[11px]`}>
+                      <div className={cabeceraAdmin}>
+                        <span className="font-bold text-gold-premium uppercase tracking-wider text-[10px]">Consulta a la base de datos</span>
+                        <span className="text-crema-suave text-[11px] tabular-nums">{msg.actionData.length} filas</span>
                       </div>
                       <div className="max-h-[220px] overflow-x-auto overflow-y-auto">
                         <table className="w-full text-left border-collapse min-w-[320px]">
-                          <thead className="bg-white/10 text-white/80 sticky top-0">
+                          <thead className="bg-cacao-800 text-crema-suave sticky top-0">
                             <tr>
                               {Object.keys(msg.actionData[0]).map((header) => (
-                                <th key={header} className="p-2 font-semibold capitalize border-b border-white/10 text-[9px] tracking-wider uppercase">
+                                <th key={header} className="p-2 font-semibold border-b border-white/10 text-[10px] tracking-wider uppercase">
                                   {header.replace(/_/g, ' ')}
                                 </th>
                               ))}
@@ -477,7 +596,7 @@ const Gelbot = ({ user }) => {
                           </thead>
                           <tbody>
                             {msg.actionData.map((row, idx) => (
-                              <tr key={idx} className="border-t border-white/5 hover:bg-white/5 transition-colors">
+                              <tr key={idx} className="border-t border-white/5 hover:bg-white/[0.04] transition-colors">
                                 {Object.values(row).map((val, cellIdx) => {
                                   let displayVal = val;
                                   if (typeof val === 'boolean') {
@@ -487,7 +606,7 @@ const Gelbot = ({ user }) => {
                                   } else if (typeof val === 'object') {
                                     displayVal = JSON.stringify(val);
                                   }
-                                  
+
                                   const keyName = Object.keys(row)[cellIdx].toLowerCase();
                                   const isCountField = /ventas|pedidos|usuarios|clientes|productos|cantidad|count|numero|num|id/i.test(keyName);
                                   if (typeof val === 'number' && !isCountField && (keyName.includes('total') || keyName.includes('precio') || keyName.includes('salario') || keyName.includes('ingresos') || keyName.includes('puntos'))) {
@@ -501,7 +620,7 @@ const Gelbot = ({ user }) => {
                                   }
 
                                   return (
-                                    <td key={cellIdx} className="p-2 text-white/95 truncate max-w-[150px]" title={String(displayVal)}>
+                                    <td key={cellIdx} className="p-2 text-crema truncate max-w-[150px] tabular-nums" title={String(displayVal)}>
                                       {displayVal}
                                     </td>
                                   );
@@ -517,14 +636,14 @@ const Gelbot = ({ user }) => {
                 </div>
               ))}
 
-              {/* Indicador de carga */}
+              {/* Indicador de "escribiendo" */}
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl rounded-tl-none">
-                    <div className="flex gap-1">
-                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full animate-bounce" />
-                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full animate-bounce [animation-delay:0.2s]" />
-                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full animate-bounce [animation-delay:0.4s]" />
+                  <div className={`${burbujaBot} px-4 py-3`} aria-label="Gelbot está escribiendo" role="status">
+                    <div className="flex gap-1.5" aria-hidden="true">
+                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full motion-safe:animate-pulse" />
+                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full motion-safe:animate-pulse [animation-delay:0.2s]" />
+                      <span className="w-1.5 h-1.5 bg-gold-premium rounded-full motion-safe:animate-pulse [animation-delay:0.4s]" />
                     </div>
                   </div>
                 </div>
@@ -532,51 +651,65 @@ const Gelbot = ({ user }) => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
-            <form onSubmit={handleSend} className="p-4 border-t border-white/10 flex gap-2 bg-background-dark/50 items-center">
+            {/* Campo de texto: pegado abajo, respeta la zona segura del celular */}
+            <form
+              onSubmit={handleSend}
+              className="flex flex-none items-center gap-2 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-cacao-950 border-t border-gold-premium/15"
+            >
               <button
                 type="button"
                 onClick={toggleListening}
-                className={`p-2 rounded-full transition-colors flex-shrink-0 ${
-                  isListening ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-white/5 text-white/50 hover:text-white'
-                }`}
+                aria-label={isListening ? 'Detener micrófono' : 'Hablar con el micrófono'}
+                aria-pressed={isListening}
                 title={isListening ? 'Detener micrófono' : 'Usar micrófono'}
+                className={`flex-none w-11 h-11 rounded-full flex items-center justify-center transition-colors ${ANILLO_FOCO} ${
+                  isListening ? 'bg-red-500/15 text-red-400 motion-safe:animate-pulse' : 'bg-cacao-800 text-crema-suave hover:text-crema hover:bg-cacao-700'
+                }`}
               >
-                <Mic size={18} />
+                <Mic size={18} aria-hidden="true" />
               </button>
               <input
+                ref={inputRef}
                 type="text"
+                aria-label="Escribe tu mensaje para Gelbot"
                 placeholder={isListening ? 'Escuchando...' : 'Pregunta algo...'}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 text-sm focus:outline-none focus:border-gold-premium/50"
+                className="flex-1 min-w-0 h-11 rounded-full bg-cacao-800 border border-white/10 px-4 text-base sm:text-sm text-crema placeholder:text-crema-suave caret-gold-premium transition-colors focus:outline-none focus-visible:border-gold-premium/70 focus-visible:ring-2 focus-visible:ring-gold-premium/30"
               />
               <button
                 type="submit"
-                className="p-2 bg-gold-premium rounded-full text-background-dark hover:scale-105 transition-transform"
+                aria-label="Enviar mensaje"
+                disabled={!input.trim() || isLoading}
+                className={`flex-none w-11 h-11 rounded-full flex items-center justify-center bg-gold-premium text-background-dark transition-colors hover:bg-gold-light disabled:bg-cacao-800 disabled:text-crema-suave/80 disabled:cursor-not-allowed ${ANILLO_FOCO}`}
               >
-                <Send size={18} />
+                <Send size={18} aria-hidden="true" />
               </button>
             </form>
-          </motion.div>
+          </motion.section>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
 
-      {/* Botón flotante */}
-      <motion.button
-        whileHover={{ scale: 1.1, rotate: 5 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-20 h-20 rounded-full bg-background-dark shadow-[0_0_30px_rgba(212,175,55,0.4)] flex items-center justify-center z-50 overflow-hidden group border-2 border-gold-premium relative p-0"
+      {/* Botón flotante: abre el chat; mientras está abierto se oculta (se cierra con la X o con Escape) */}
+      <button
+        ref={botonFlotanteRef}
+        type="button"
+        data-gelbot-toggle=""
+        onClick={() => setIsOpen(true)}
+        aria-label="Abrir chat con Gelbot"
+        aria-expanded={isOpen}
+        aria-controls="gelbot-panel"
+        aria-hidden={isOpen || undefined}
+        tabIndex={isOpen ? -1 : 0}
+        inert={isOpen || undefined}
+        title="Chatea con Gelbot"
+        className={`fixed right-6 bottom-[max(1.5rem,env(safe-area-inset-bottom))] z-[60] w-16 h-16 p-0 rounded-full overflow-hidden bg-background-dark border-2 border-gold-premium shadow-[0_12px_28px_-10px_rgba(0,0,0,0.8)] transition-[opacity,transform,box-shadow] duration-200 ease-out hover:shadow-[0_14px_32px_-10px_rgba(212,175,55,0.45)] motion-safe:hover:scale-105 motion-safe:active:scale-95 focus:outline-none focus-visible:ring-4 focus-visible:ring-gold-premium/50 ${
+          isOpen ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'
+        }`}
       >
-        <div className="absolute inset-0 bg-gold-premium/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300 z-10" />
-        <img
-          src="/images/gelbot-logo.png"
-          alt="Gelbot Toggle"
-          className="w-full h-full object-cover relative z-0 scale-100 group-hover:scale-110 transition-transform duration-500"
-        />
-      </motion.button>
-    </div>
+        <img src="/images/gelbot-logo.png" alt="" className="w-full h-full object-cover" />
+      </button>
+    </>
   );
 };
 
