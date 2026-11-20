@@ -59,7 +59,31 @@ describe('GelatoBuilder3D: helado personalizado pagable', () => {
   it('arma la línea con armarItemPersonalizado y muestra precios de /api/personalizado/precios', () => {
     expect(fuente).toMatch(/armarItemPersonalizado\(/);
     expect(fuente).toMatch(/precioPersonalizado\(/);
-    expect(fuente).toMatch(/['"`]\/api\/personalizado\/precios['"`]/);
+    // La ruta se pide en el hook compartido con el checkout.
+    expect(leerFuente('utils/usePreciosPersonalizado.js')).toMatch(/['"`]\/api\/personalizado\/precios['"`]/);
+  });
+});
+
+describe('GelatoBuilder3D: precios y límites de la base', () => {
+  it('usa el hook de precios, los límites de la base y el estado del botón (cargando / reintentar)', () => {
+    expect(fuente).toMatch(/usePreciosPersonalizado\(/);
+    expect(fuente).toMatch(/limitesArmador\(/);
+    expect(fuente).toMatch(/estadoAgregar\(/);
+    expect(fuente).toMatch(/reintentar/);
+    expect(fuente).not.toMatch(/const MAX_SCOOPS = 3/);
+    expect(fuente).not.toMatch(/const MAX_TOPPINGS = 3/);
+  });
+});
+
+describe('CheckoutPage: recalcula los personalizados con precios recién pedidos', () => {
+  const checkout = () => leerFuente('pages/CheckoutPage.jsx');
+  it('pide los precios y recalcula antes del total y del tope de puntos', () => {
+    expect(checkout()).toMatch(/usePreciosPersonalizado\(/);
+    expect(checkout()).toMatch(/recalcularCarrito\(/);
+    expect(checkout()).toMatch(/subtotal:\s*recalculo\.subtotal/);
+  });
+  it('si la ruta falla avisa que el total final lo confirma el servidor', () => {
+    expect(checkout()).toMatch(/el total final lo confirma el servidor/i);
   });
 });
 

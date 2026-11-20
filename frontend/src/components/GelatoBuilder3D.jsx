@@ -8,7 +8,8 @@ import { useCart, formatPrice } from '../context/CartContext';
 import { apiFetch } from '../utils/api';
 import { modelosAPrecargar } from '../utils/precargaModelos';
 import { registrarCarga, quitarCarga, textoDeCarga, estadoPorError, textoFallo } from '../utils/piezas3d';
-import { armarItemPersonalizado, precioPersonalizado } from '../utils/personalizado';
+import { armarItemPersonalizado, precioPersonalizado, limitesArmador, estadoAgregar } from '../utils/personalizado';
+import { usePreciosPersonalizado } from '../utils/usePreciosPersonalizado';
 
 // Silence THREE.Clock, WebGLProgram & DirectX X4122 shader precision warnings
 if (typeof window !== 'undefined') {
@@ -20,8 +21,6 @@ if (typeof window !== 'undefined') {
 }
 
 const BASE_PATH = '/360';
-const MAX_SCOOPS = 3;
-const MAX_TOPPINGS = 3;
 const SCOOP_HEIGHT = 0.7;   // vertical spacing between scoops (compact)
 
 // Topping transforms to cluster them beautifully at the center top
@@ -319,24 +318,19 @@ const GelatoBuilder3D = ({ user }) => {
   }, []);
   const textoEstado = textoDeCarga(cargas);
 
-  // Precios de la base (tabla componente_personalizado). Mientras cargan, o si fallan, se usa el respaldo
-  // (igual a la semilla de la base). El total que se cobra lo calcula siempre el servidor.
-  const [componentes, setComponentes] = useState(null);
-  useEffect(() => {
-    let vigente = true;
-    apiFetch('/api/personalizado/precios')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (vigente && data?.ok && Array.isArray(data.componentes)) setComponentes(data.componentes);
-      })
-      .catch((err) => console.warn('No se pudieron cargar los precios del helado personalizado:', err));
-    return () => { vigente = false; };
-  }, []);
+  // Precios y límites de la base (tabla componente_personalizado). Hasta que cargan no se puede agregar
+  // al carrito; los límites usan 3 y 3 solo mientras cargan. El total que se cobra lo calcula el servidor.
+  const { estado: estadoPrecios, precios, reintentar } = usePreciosPersonalizado();
+  const componentes = precios?.componentes ?? null;
+  const { maxSabores: MAX_SCOOPS, maxToppings: MAX_TOPPINGS } = limitesArmador(precios);
 
   const seleccion = { envase: container, sabores: selectedScoops, toppings: selectedToppings };
-  const total = precioPersonalizado(seleccion, componentes);
+  const excedeLimites = selectedScoops.length > MAX_SCOOPS || selectedToppings.length > MAX_TOPPINGS;
+  const total = excedeLimites ? null : precioPersonalizado(seleccion, componentes);
+  const agregar = estadoAgregar({ estado: estadoPrecios, precio: total });
 
   const handleAddToCart = () => {
+    if (!agregar.puede) return;
     // SECURITY CHECK: Solo registrados en DB pueden comprar
     if (!user?.id) {
       if (showToast) showToast('¡Vaya! Necesitas una cuenta registrada para realizar pedidos. Te llevamos al registro 🍦', 'info');
@@ -370,7 +364,7 @@ const GelatoBuilder3D = ({ user }) => {
         }
       }
     });
-    if (customProduct.precio === null) {
+    if (!customProduct) {
       if (showToast) showToast('No pudimos calcular el precio de tu creación. Recarga la página e inténtalo de nuevo.', 'error');
       return;
     }
@@ -671,13 +665,29 @@ const GelatoBuilder3D = ({ user }) => {
 
               <div className="mt-4 pt-4 border-t border-white/8">
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={agregar.puede ? { scale: 1.02 } : undefined}
+                  whileTap={agregar.puede ? { scale: 0.98 } : undefined}
                   onClick={handleAddToCart}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-background-dark font-bold text-sm uppercase tracking-widest shadow-lg shadow-amber-400/20 hover:shadow-amber-400/40 transition-shadow flex items-center justify-center gap-2"
+                  disabled={!agregar.puede}
+                  aria-describedby={agregar.mensaje ? 'estado-precios-armador' : undefined}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-background-dark font-bold text-sm uppercase tracking-widest shadow-lg shadow-amber-400/20 hover:shadow-amber-400/40 transition-shadow flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-amber-400/20"
                 >
-                  Confirmar y Añadir{total !== null ? ` (${formatPrice(total)})` : ''} <ShoppingCart size={18} />
+                  Confirmar y Añadir{agregar.puede ? ` (${formatPrice(total)})` : ''} <ShoppingCart size={18} />
                 </motion.button>
+                {agregar.mensaje && (
+                  <p id="estado-precios-armador" aria-live="polite" className="mt-2 flex items-center justify-center gap-2 text-xs text-white/70">
+                    {agregar.mensaje}
+                    {agregar.reintentar && (
+                      <button
+                        type="button"
+                        onClick={reintentar}
+                        className="font-semibold text-amber-300 underline underline-offset-2 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300 rounded"
+                      >
+                        Reintentar
+                      </button>
+                    )}
+                  </p>
+                )}
               </div>
             </div>
           </div>
