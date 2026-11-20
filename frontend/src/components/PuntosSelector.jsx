@@ -84,6 +84,9 @@ const PuntosSelector = ({ resumen, calculo, elegidos, onChange, puntosAGanar, di
           {puntosAGanar > 0 && (
             <p className="text-xs text-white/40">Con esta compra ganarás +{numero.format(puntosAGanar)} puntos.</p>
           )}
+          {puntos > 0 && (
+            <p className="text-xs text-white/40">Tu nivel se calcula con los puntos que te quedan: usarlos puede bajarlo.</p>
+          )}
         </>
       )}
     </section>
