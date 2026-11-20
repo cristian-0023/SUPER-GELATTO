@@ -16,12 +16,11 @@ const raizSupabase = resolve(aqui, '../../../supabase');
 // Misma URL que pone cargarServidor en SUPABASE_URL: las URLs públicas de Storage salen de ella.
 const URL_SUPABASE_FALSA = 'http://supabase.fake.local';
 
-export function cargarColumnas() {
-  const columnas = {};
-  const esquema = readFileSync(resolve(raizSupabase, 'schema_base_2026-10-25.sql'), 'utf8');
-  const reTabla = /create table public\.(\w+)\s*\(([\s\S]*?)\n\);/gi;
+// Lee los CREATE TABLE de un SQL y agrega sus columnas a `columnas`.
+function leerTablas(sql, columnas) {
+  const reTabla = /create table (?:if not exists )?public\.(\w+)\s*\(([\s\S]*?)\r?\n\);/gi;
   let m;
-  while ((m = reTabla.exec(esquema))) {
+  while ((m = reTabla.exec(sql))) {
     const cols = new Set();
     for (const linea of m[2].split('\n')) {
       const palabra = linea.trim().split(/\s+/)[0];
@@ -30,10 +29,17 @@ export function cargarColumnas() {
     }
     columnas[m[1]] = cols;
   }
-  // Columnas añadidas por las migraciones.
+}
+
+export function cargarColumnas() {
+  const columnas = {};
+  leerTablas(readFileSync(resolve(raizSupabase, 'schema_base_2026-10-25.sql'), 'utf8'), columnas);
+  let m;
+  // Tablas creadas y columnas añadidas por las migraciones.
   const dirMig = resolve(raizSupabase, 'migrations');
   for (const f of readdirSync(dirMig).filter((n) => n.endsWith('.sql'))) {
     const sql = readFileSync(resolve(dirMig, f), 'utf8');
+    leerTablas(sql, columnas);
     const reAdd = /alter table public\.(\w+)\s+add column(?: if not exists)?\s+(\w+)/gi;
     while ((m = reAdd.exec(sql))) columnas[m[1]]?.add(m[2]);
   }
