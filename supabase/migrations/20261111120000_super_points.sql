@@ -1,4 +1,10 @@
 -- =====================================================================================
+-- !!! AVISO (2026-11-19) !!! La regla del NIVEL de esta migración (por puntos GANADOS) fue
+-- REEMPLAZADA por 20261120120000_nivel_por_saldo.sql (el nivel sale del SALDO actual).
+-- Si se vuelve a correr ESTA migración sola, su "create or replace" de super_points_resumen
+-- PISA la regla nueva sin avisar. Después de correrla, correr SIEMPRE también
+-- supabase/migrations/20261120120000_nivel_por_saldo.sql.
+-- =====================================================================================
 -- Migración 20261111120000_super_points
 -- Objetivo: Super Points reales. Cada compra cobrada da puntos y los puntos se canjean por
 -- descuento según el nivel del cliente.
@@ -140,6 +146,8 @@ $$;
 --   ganados = puntos 'ganado' de ventas que NO fueron revertidas (deciden el nivel)
 -- Devuelve: {saldo, ganados, nivel, pct_max, valor_saldo, puntos_para_siguiente, siguiente_nivel}
 -- (en Master: puntos_para_siguiente = 0 y siguiente_nivel = null)
+-- !!! AVISO: REEMPLAZADA por 20261120120000_nivel_por_saldo.sql (nivel por SALDO). Volver a
+-- correr esta migración sola PISA la regla nueva: correr después 20261120120000_nivel_por_saldo.
 -- -------------------------------------------------------------------------------------
 create or replace function public.super_points_resumen(p_id_usuario bigint)
 returns jsonb
