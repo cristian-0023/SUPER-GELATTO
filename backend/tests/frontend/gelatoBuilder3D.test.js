@@ -45,3 +45,61 @@ describe('GelatoBuilder3D: errores por pieza', () => {
     expect(limites.length).toBe(3);
   });
 });
+
+// Helado personalizado pagable: la línea del carrito lleva la composición y el precio sale de la base.
+const leerFuente = (rel) => fs.readFileSync(path.resolve(__dirname, '../../../frontend/src', rel), 'utf8');
+
+describe('GelatoBuilder3D: helado personalizado pagable', () => {
+  it('ya no inventa un producto custom-<fecha> ni calcula el precio con números fijos', () => {
+    expect(fuente).not.toMatch(/custom-\$\{Date\.now\(\)\}/);
+    expect(fuente).not.toMatch(/basePrice\s*=\s*10000/);
+    expect(fuente).not.toMatch(/\*\s*2000/);
+  });
+
+  it('arma la línea con armarItemPersonalizado y muestra precios de /api/personalizado/precios', () => {
+    expect(fuente).toMatch(/armarItemPersonalizado\(/);
+    expect(fuente).toMatch(/precioPersonalizado\(/);
+    // La ruta se pide en el hook compartido con el checkout.
+    expect(leerFuente('utils/usePreciosPersonalizado.js')).toMatch(/['"`]\/api\/personalizado\/precios['"`]/);
+  });
+});
+
+describe('GelatoBuilder3D: precios y límites de la base', () => {
+  it('usa el hook de precios, los límites de la base y el estado del botón (cargando / reintentar)', () => {
+    expect(fuente).toMatch(/usePreciosPersonalizado\(/);
+    expect(fuente).toMatch(/limitesArmador\(/);
+    expect(fuente).toMatch(/estadoAgregar\(/);
+    expect(fuente).toMatch(/reintentar/);
+    expect(fuente).not.toMatch(/const MAX_SCOOPS = 3/);
+    expect(fuente).not.toMatch(/const MAX_TOPPINGS = 3/);
+  });
+});
+
+describe('CheckoutPage: recalcula los personalizados con precios recién pedidos', () => {
+  const checkout = () => leerFuente('pages/CheckoutPage.jsx');
+  it('pide los precios y recalcula antes del total y del tope de puntos', () => {
+    expect(checkout()).toMatch(/usePreciosPersonalizado\(/);
+    expect(checkout()).toMatch(/recalcularCarrito\(/);
+    expect(checkout()).toMatch(/subtotal:\s*recalculo\.subtotal/);
+  });
+  it('si la ruta falla avisa que el total final lo confirma el servidor', () => {
+    expect(checkout()).toMatch(/el total final lo confirma el servidor/i);
+  });
+});
+
+describe('carrito, checkout y panel muestran la composición', () => {
+  it('el carrito limpia los personalizados viejos al cargar', () => {
+    expect(leerFuente('context/CartContext.jsx')).toMatch(/limpiarCarritoGuardado\(/);
+  });
+
+  it('el carrito y el checkout muestran el detalle del personalizado', () => {
+    expect(leerFuente('components/CartDrawer.jsx')).toMatch(/item\.detalle/);
+    expect(leerFuente('pages/CheckoutPage.jsx')).toMatch(/item\.detalle/);
+  });
+
+  it('el panel pide el detalle de una venta con su composición', () => {
+    const panel = leerFuente('pages/AdminDashboard.jsx');
+    expect(panel).toMatch(/\/api\/admin\/sales\/\$\{[^}]+\}\/items/);
+    expect(panel).toMatch(/describirPersonalizacion\(/);
+  });
+});

@@ -8,9 +8,19 @@ import PaymentGateway from '../components/PaymentGateway';
 import PuntosSelector from '../components/PuntosSelector';
 import { useSuperPoints } from '../context/SuperPointsContext';
 import { calcularCanje, puntosAGanar } from '../utils/superPoints';
+import { recalcularCarrito } from '../utils/personalizado';
+import { usePreciosPersonalizado } from '../utils/usePreciosPersonalizado';
 
 const CheckoutPage = ({ user }) => {
-  const { cart, totalPrice, clearCart } = useCart();
+  const { cart: carritoGuardado, clearCart } = useCart();
+  // Los helados personalizados se recalculan con precios recién pedidos a la base ANTES del total y del
+  // tope de puntos. Si la ruta falla se muestran los del carrito y se avisa que el servidor confirma el total.
+  const { estado: estadoPrecios, precios, reintentar: reintentarPrecios } = usePreciosPersonalizado();
+  const recalculo = recalcularCarrito(carritoGuardado, precios?.componentes ?? null);
+  const cart = recalculo.cart;
+  const totalPrice = recalculo.subtotal;
+  const hayPersonalizados = cart.some((item) => item.tipo === 'personalizado');
+  const esperandoPrecios = hayPersonalizados && estadoPrecios === 'cargando';
   const navigate = useNavigate();
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentResult, setPaymentResult] = useState(null);
@@ -49,7 +59,7 @@ const CheckoutPage = ({ user }) => {
   // Sin reglas o sin saldo (no cargaron) no hay selector y el pago funciona igual, sin puntos.
   const hayPuntos = Boolean(reglas && resumen);
   const calculo = calcularCanje({
-    subtotal: totalPrice,
+    subtotal: recalculo.subtotal,
     saldo: resumen?.saldo,
     pctMax: resumen?.pctMax,
     valorPunto: reglas?.valorPunto,
@@ -245,10 +255,10 @@ const CheckoutPage = ({ user }) => {
 
               <button 
                 type="submit"
-                disabled={cart.length === 0 || !isFormValid}
-                className={`w-full py-5 rounded-full font-bold text-lg transition-all flex items-center justify-center gap-3 shadow-lg ${!isFormValid ? 'opacity-40 cursor-not-allowed bg-white/10 text-white/30' : 'bg-gold-premium text-background-dark hover:scale-[1.02] shadow-gold-premium/20'}`}
+                disabled={cart.length === 0 || !isFormValid || esperandoPrecios || recalculo.invalidos > 0}
+                className={`w-full py-5 rounded-full font-bold text-lg transition-all flex items-center justify-center gap-3 shadow-lg ${!isFormValid || esperandoPrecios || recalculo.invalidos > 0 ? 'opacity-40 cursor-not-allowed bg-white/10 text-white/30' : 'bg-gold-premium text-background-dark hover:scale-[1.02] shadow-gold-premium/20'}`}
               >
-                Continuar al Pago ({formatPrice(calculo.total)})
+                {esperandoPrecios ? 'Actualizando precios…' : `Continuar al Pago (${formatPrice(calculo.total)})`}
               </button>
             </form>
           </div>
@@ -268,14 +278,30 @@ const CheckoutPage = ({ user }) => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-bold text-white truncate">{item.nombre || item.name}</h4>
-                      <div className="flex justify-between items-center mt-1">
-                        <span className="text-xs text-white/40">{item.quantity} x {formatPrice(item.precio || item.price)}</span>
-                        <span className="text-sm font-bold text-gold-premium">{formatPrice((item.quantity * (item.precio || item.price)))}</span>
-                      </div>
+                      {item.detalle && (
+                        <p className="text-xs text-white/60 leading-snug mt-0.5">{item.detalle}</p>
+                      )}
+                      {item.noDisponible ? (
+                        <p className="text-xs text-red-400 mt-1">Ya no está disponible: quítalo del carrito y ármalo de nuevo.</p>
+                      ) : (
+                        <div className="flex justify-between items-center mt-1">
+                          <span className="text-xs text-white/40">{item.quantity} x {formatPrice(item.precio || item.price)}</span>
+                          <span className="text-sm font-bold text-gold-premium">{formatPrice((item.quantity * (item.precio || item.price)))}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
+
+              {!recalculo.confirmado && estadoPrecios === 'error' && (
+                <p className="mb-6 text-xs text-white/70 leading-relaxed" aria-live="polite">
+                  No pudimos actualizar los precios del helado personalizado: el total final lo confirma el servidor al pagar.{' '}
+                  <button type="button" onClick={reintentarPrecios} className="font-semibold text-gold-premium underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold-premium rounded">
+                    Reintentar
+                  </button>
+                </p>
+              )}
 
               {hayPuntos && cart.length > 0 && (
                 <div className="mb-6">

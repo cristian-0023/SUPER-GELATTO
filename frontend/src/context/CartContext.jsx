@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { limpiarCarritoGuardado } from '../utils/personalizado';
 
 const CartContext = createContext();
 
@@ -22,7 +23,14 @@ export const CartProvider = ({ children, user }) => {
   useEffect(() => {
     const storageKey = userId ? `superGelatto_cart_${userId}` : 'superGelatto_cart_guest';
     const saved = localStorage.getItem(storageKey);
-    setCart(saved ? JSON.parse(saved) : []);
+    // Los personalizados viejos (sin composición) el servidor ya no los acepta: se quitan aquí.
+    let guardado = [];
+    try {
+      guardado = saved ? JSON.parse(saved) : [];
+    } catch {
+      guardado = [];
+    }
+    setCart(limpiarCarritoGuardado(guardado));
     setIsLoaded(true);
   }, [userId]);
 

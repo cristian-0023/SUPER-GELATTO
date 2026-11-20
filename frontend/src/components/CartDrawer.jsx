@@ -60,6 +60,9 @@ const CartDrawer = ({ isOpen, onClose }) => {
                         <Trash2 size={14} />
                       </button>
                     </div>
+                    {item.detalle && (
+                      <p className="text-xs text-white/60 leading-snug mb-1 line-clamp-2" title={item.detalle}>{item.detalle}</p>
+                    )}
                     <p className="text-[10px] text-white/40 mb-2">{formatPrice(item.precio || item.price)} c/u</p>
                     
                     <div className="flex justify-between items-center mt-2">

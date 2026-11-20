@@ -32,3 +32,19 @@ describe('fakeSupabase: firmas de rpc con parámetros opcionales', () => {
     expect((await fake.client.rpc('cambiar_estado_venta', { p_id_venta: 1, p_estado: 'Pagado' })).error).toBeNull();
   });
 });
+
+describe('fakeSupabase: tablas y columnas del helado personalizado', () => {
+  it('conoce las tablas creadas por migraciones y rechaza columnas inventadas en ellas (PGRST204)', async () => {
+    const fake = crearFakeSupabase();
+    expect([...(fake.columnas.componente_personalizado || [])].sort()).toEqual(['activo', 'id', 'nombre', 'precio', 'tipo']);
+    expect(fake.columnas.detalle_venta.has('personalizacion')).toBe(true);
+    const { error } = await fake.client.from('componente_personalizado').insert({ id: 'x', precio_falso: 1 });
+    expect(error?.code).toBe('PGRST204');
+  });
+
+  it('conoce la función helado_personalizado_reglas (sin parámetros)', async () => {
+    const fake = crearFakeSupabase();
+    fake.responderRpc('helado_personalizado_reglas', { data: { max_sabores: 3 }, error: null });
+    expect((await fake.client.rpc('helado_personalizado_reglas')).error).toBeNull();
+  });
+});

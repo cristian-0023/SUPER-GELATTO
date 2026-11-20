@@ -408,8 +408,20 @@ const mockDb = {
   ],
   rostros_admin: [],
   venta: [],
-  super_points: []
+  detalle_venta: [],
+  super_points: [],
+  // Solo modo simulado: copia de la semilla de 20261120130000_helado_personalizado (en la base real, la tabla manda).
+  componente_personalizado: [
+    ['cone', 'envase', 'Cono', 8000], ['cup', 'envase', 'Copa', 8000], ['glass', 'envase', 'Vaso', 8000],
+    ['vanilla', 'sabor', 'Vainilla', 2000], ['chocolate', 'sabor', 'Chocolate', 2000], ['fresa', 'sabor', 'Fresa', 2000],
+    ['mango', 'sabor', 'Mango', 2000], ['menta', 'sabor', 'Menta', 2000], ['mora', 'sabor', 'Mora', 2000],
+    ['cherry', 'topping', 'Cereza', 1000], ['chips', 'topping', 'Chips', 1000], ['coco', 'topping', 'Coco', 1000],
+    ['cream', 'topping', 'Crema', 1000], ['gummies', 'topping', 'Gomitas', 1000], ['nuts', 'topping', 'Nueces', 1000],
+    ['sprinkles', 'topping', 'Sprinkles', 1000], ['syrup', 'topping', 'Jarabe', 1000]
+  ].map(([id, tipo, nombre, precio]) => ({ id, tipo, nombre, precio, activo: true }))
 };
+const MOCK_REGLAS_PERSONALIZADO = { max_sabores: 3, max_toppings: 3 };
+const MOCK_ID_PERSONALIZADO = 14;
 
 const makeQueryBuilder = (tableName) => {
   let queryData = [...(mockDb[tableName] || [])];
@@ -476,6 +488,16 @@ const makeQueryBuilder = (tableName) => {
     },
     in: (field, values) => {
       queryData = queryData.filter(item => values.includes(item[field]));
+      return builder;
+    },
+    // "col.is.null,col.neq.valor": se queda con las filas que cumplen ALGUNA condición (como PostgREST).
+    or: (expresion) => {
+      const condiciones = String(expresion).split(',').map((c) => c.split('.'));
+      const cumple = (item, [col, op, val]) =>
+        (op === 'is' && val === 'null' && item[col] == null)
+        || (op === 'eq' && String(item[col]) === val)
+        || (op === 'neq' && String(item[col]) !== val);
+      queryData = queryData.filter((item) => condiciones.some((c) => cumple(item, c)));
       return builder;
     },
     ilike: (field, value) => {
@@ -616,6 +638,27 @@ if (!supabase) {
     };
   };
 
+  // Versión simulada del cálculo del personalizado (mismas reglas que registrar_venta en la base):
+  // 1 envase, 1..3 sabores y 0..3 toppings sin repetir, todos existentes, activos y del tipo correcto.
+  // Devuelve { precio, personalizacion } o null si no es válido.
+  const mockPrecioPersonalizado = (it) => {
+    const sabores = Array.isArray(it.sabores) ? it.sabores : [];
+    const toppings = Array.isArray(it.toppings) ? it.toppings : [];
+    const sinRepetir = (lista) => new Set(lista).size === lista.length;
+    if (sabores.length < 1 || sabores.length > MOCK_REGLAS_PERSONALIZADO.max_sabores
+        || toppings.length > MOCK_REGLAS_PERSONALIZADO.max_toppings || !sinRepetir(sabores) || !sinRepetir(toppings)) return null;
+    const buscar = (id, tipo) => {
+      const c = mockDb.componente_personalizado.find((x) => x.id === id && x.tipo === tipo && x.activo);
+      return c ? { id: c.id, nombre: c.nombre, precio: c.precio } : null;
+    };
+    const envase = buscar(it.envase, 'envase');
+    const elegidosSabores = sabores.map((id) => buscar(id, 'sabor'));
+    const elegidosToppings = toppings.map((id) => buscar(id, 'topping'));
+    if (!envase || elegidosSabores.includes(null) || elegidosToppings.includes(null)) return null;
+    const precio = [envase, ...elegidosSabores, ...elegidosToppings].reduce((suma, c) => suma + c.precio, 0);
+    return { precio, personalizacion: { envase, sabores: elegidosSabores, toppings: elegidosToppings } };
+  };
+
   // Versión simulada de la función registrar_venta de la base: misma forma de respuesta
   // ({id_venta,total,subtotal,estado,items,puntos_*}) y mismos errores de negocio, con el catálogo local.
   // El precio sale del catálogo, nunca del cliente. (No descuenta stock: es solo para modo simulado.)
@@ -625,9 +668,19 @@ if (!supabase) {
     if (!Array.isArray(p_items) || p_items.length === 0) return falla('CARRITO_VACIO');
     if (p_items.length > MAX_ITEMS_CARRITO) return falla('CARRITO_DEMASIADO_GRANDE');
     const items = [];
+    const personalizados = [];
     for (const it of p_items) {
       const cantidad = it && it.cantidad;
       if (!Number.isInteger(cantidad) || cantidad < 1) return falla('CANTIDAD_INVALIDA');
+      if (it.tipo === 'personalizado') {
+        const p = mockPrecioPersonalizado(it);
+        if (!p) return falla('PERSONALIZADO_INVALIDO');
+        personalizados.push({
+          id_producto: MOCK_ID_PERSONALIZADO, nombre: 'Helado personalizado 3D', cantidad,
+          precio_unitario: p.precio, subtotal: p.precio * cantidad, personalizacion: p.personalizacion
+        });
+        continue;
+      }
       const prod = FALLBACK_PRODUCTS.find((p) => p.id_producto === (it && it.id_producto));
       if (!prod) return falla('PRODUCTO_NO_EXISTE');
       if (prod.estado === false) return falla('PRODUCTO_INACTIVO');
@@ -639,6 +692,8 @@ if (!supabase) {
         subtotal: prod.precio * cantidad
       });
     }
+    // Como la base: primero los productos normales y después cada personalizado en su propia línea.
+    items.push(...personalizados);
     const subtotal = items.reduce((suma, i) => suma + i.subtotal, 0);
     // Super Points: mismas reglas que la base (saldo, tope por nivel, piso al ganar).
     if (!Number.isInteger(p_puntos_usar) || p_puntos_usar < 0) return falla('PUNTOS_INVALIDOS');
@@ -655,6 +710,12 @@ if (!supabase) {
     const ganados = pagado && p_id_usuario != null ? Math.floor(total / MOCK_REGLAS_PUNTOS.pesos_por_punto) : 0;
     const id_venta = mockDb.venta.length + 1;
     mockDb.venta.push({ id_venta, id_usuario: p_id_usuario ?? null, total, estado: p_estado, fecha: new Date().toISOString(), puntos_usados: usados, descuento_puntos: descuento });
+    for (const i of items) {
+      mockDb.detalle_venta.push({
+        id_detalle_venta: mockDb.detalle_venta.length + 1, id_venta, id_producto: i.id_producto, nombre: i.nombre,
+        cantidad: i.cantidad, precio_unitario: i.precio_unitario, personalizacion: i.personalizacion || null
+      });
+    }
     const fecha_generacion = new Date().toISOString();
     if (usados > 0) mockDb.super_points.push({ id_usuario: p_id_usuario, id_venta, tipo: 'canjeado', puntos_generados: -usados, fecha_generacion });
     if (ganados > 0) mockDb.super_points.push({ id_usuario: p_id_usuario, id_venta, tipo: 'ganado', puntos_generados: ganados, fecha_generacion });
@@ -669,6 +730,7 @@ if (!supabase) {
     rpc: (name, args) => {
       if (name === 'registrar_venta') return Promise.resolve(mockRegistrarVenta(args));
       if (name === 'super_points_reglas') return Promise.resolve({ data: MOCK_REGLAS_PUNTOS, error: null });
+      if (name === 'helado_personalizado_reglas') return Promise.resolve({ data: MOCK_REGLAS_PERSONALIZADO, error: null });
       if (name === 'super_points_resumen') return Promise.resolve({ data: mockResumenPuntos(args), error: null });
       if (name === 'cambiar_estado_venta') return Promise.resolve(mockCambiarEstadoVenta(args));
       return Promise.resolve({ data: [], error: null });
@@ -1985,11 +2047,12 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     // En modo simulado (sin Supabase) la base simulada ya sirve ese catálogo.
     const { data: prodData, error: prodErr } = await supabase
       .from('producto')
-      .select('id_producto, nombre, precio, descripcion, imagen, categoria, destacado, stock')
+      .select('id_producto, nombre, precio, descripcion, imagen, categoria, destacado, stock, tipo')
       .order('id_producto', { ascending: true });
     if (falloSupabase(res, prodErr, 'Error al obtener los productos del panel.')) return;
 
-    const products = (prodData || []).map(p => ({
+    // El "Helado personalizado 3D" no se edita aquí: su precio sale de componente_personalizado y no usa stock.
+    const products = (prodData || []).filter((p) => p.tipo !== 'personalizado').map(p => ({
       id: p.id_producto,
       name: p.nombre,
       precio: p.precio,
@@ -2246,6 +2309,31 @@ app.put('/api/admin/sales/:id/status', requireAdmin, async (req, res) => {
   }
 });
 
+// Detalle de una venta para el panel (se pide al abrir la venta, no con todo el panel): producto,
+// cantidad, precio cobrado y, si es un helado personalizado, su composición.
+app.get('/api/admin/sales/:id/items', requireAdmin, async (req, res) => {
+  const idVenta = idVentaValido(req.params.id);
+  if (!idVenta) {
+    return res.status(400).json({ ok: false, message: 'El número de venta no es válido.' });
+  }
+  const { data, error } = await supabase
+    .from('detalle_venta')
+    .select('id_detalle_venta, cantidad, precio_unitario, personalizacion, producto(nombre)')
+    .eq('id_venta', idVenta)
+    .order('id_detalle_venta', { ascending: true })
+    .limit(MAX_ITEMS_CARRITO);
+  if (falloSupabase(res, error, 'Error al obtener el detalle de la venta.')) return;
+  return res.status(200).json({
+    ok: true,
+    items: (data || []).map((d) => ({
+      nombre: (d.producto && d.producto.nombre) || d.nombre || 'Producto',
+      cantidad: d.cantidad,
+      precio_unitario: Number(d.precio_unitario),
+      personalizacion: d.personalizacion || null
+    }))
+  });
+});
+
 // Las ventas se registran SOLO en /api/payments/process (función registrar_venta, precios de la base).
 // Las antiguas POST /api/orders y POST /api/sales se eliminaron: ninguna pantalla las usaba y guardaban
 // ventas sin sesión, con el total que mandaba el navegador.
@@ -2367,17 +2455,37 @@ app.post('/api/admin/products', requireAdmin, cuerpoGrande, limitadorTripo, asyn
   }
 });
 
+// El "Helado personalizado 3D" (producto.tipo = 'personalizado') no se edita ni se borra desde el panel:
+// su precio sale de componente_personalizado, no usa stock y registrar_venta lo necesita.
+// Cada escritura lleva el filtro SIN_PERSONALIZADO (la base nunca lo toca, sin carreras ni lecturas de más).
+// Solo si la escritura no tocó ninguna fila se pregunta por qué: personalizado -> 409; no existe -> 404.
+const SIN_PERSONALIZADO = 'tipo.is.null,tipo.neq.personalizado';
+const MENSAJE_PERSONALIZADO_PROTEGIDO = 'El helado personalizado no se edita desde el panel: sus precios están en la tabla de componentes y no usa stock.';
+
+async function responderSinFila(res, prodId) {
+  const { data, error } = await supabase
+    .from('producto')
+    .select('id_producto, tipo')
+    .eq('id_producto', prodId)
+    .maybeSingle();
+  if (falloSupabase(res, error, 'Error al revisar el producto.')) return;
+  if (data && data.tipo === 'personalizado') {
+    return res.status(409).json({ ok: false, message: MENSAJE_PERSONALIZADO_PROTEGIDO });
+  }
+  return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+}
+
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   const prodId = idPositivoValido(req.params.id);
   if (prodId === null) return res.status(400).json({ ok: false, message: 'Identificador de producto no válido.' });
   try {
-    const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).select('id_producto');
+    const { data, error } = await supabase.from('producto').delete().eq('id_producto', prodId).or(SIN_PERSONALIZADO).select('id_producto');
     // 23503 = clave foránea: el producto tiene ventas y la base no deja borrarlo.
     if (error && error.code === '23503') {
       return res.status(409).json({ ok: false, message: 'Este producto tiene ventas registradas y no se puede borrar.' });
     }
     if (falloSupabase(res, error, 'Error al eliminar el producto.')) return;
-    if (!data || data.length === 0) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!data || data.length === 0) return responderSinFila(res, prodId);
     return res.status(200).json({ ok: true, message: 'Producto eliminado correctamente.' });
   } catch (error) {
     console.error('Error al eliminar producto:', error);
@@ -2539,10 +2647,11 @@ app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
       .from('producto')
       .update({ imagen })
       .eq('id_producto', prodId)
+      .or(SIN_PERSONALIZADO)
       .select('id_producto')
       .maybeSingle();
     if (falloSupabase(res, error, 'Error al guardar la imagen.')) return;
-    if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!data) return responderSinFila(res, prodId);
     return res.status(200).json({ ok: true, message: 'Imagen actualizada con éxito.', id: prodId, image: imagen });
   } catch (error) {
     console.error('Error al guardar imagen:', error);
@@ -2562,10 +2671,11 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
       .from('producto')
       .update(datos)
       .eq('id_producto', prodId)
+      .or(SIN_PERSONALIZADO)
       .select(COLUMNAS_PRODUCTO_ADMIN)
       .maybeSingle();
     if (falloSupabase(res, error, 'Error al actualizar el producto o stock.')) return;
-    if (!updatedProduct) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+    if (!updatedProduct) return responderSinFila(res, prodId);
 
     // Sincronizar en tabla inventario si se actualizó el stock (el producto ya se guardó: solo se registra el fallo)
     if (datos.stock !== undefined) {
@@ -2603,10 +2713,11 @@ function rutaCampoProducto({ columna, limpiar, error, mensajeError, mensajeOk })
         .from('producto')
         .update({ [columna]: valor })
         .eq('id_producto', prodId)
+        .or(SIN_PERSONALIZADO)
         .select('id_producto')
         .maybeSingle();
       if (falloSupabase(res, dbErr, mensajeError)) return;
-      if (!data) return res.status(404).json({ ok: false, message: 'El producto no existe.' });
+      if (!data) return responderSinFila(res, prodId);
 
       const fbItem = FALLBACK_PRODUCTS.find(p => p.id_producto === prodId);
       if (fbItem) fbItem[columna] = valor;
@@ -2805,7 +2916,9 @@ const ERRORES_VENTA = {
   USUARIO_NO_EXISTE: { status: 400, message: 'Tu sesión ya no es válida, vuelve a iniciar sesión.' },
   PUNTOS_INVALIDOS: { status: 400, message: 'La cantidad de puntos a usar no es válida.' },
   PUNTOS_INSUFICIENTES: { status: 400, message: 'No tienes suficientes Super Points para ese canje. Actualiza la página e inténtalo de nuevo.' },
-  PUNTOS_EXCEDEN_TOPE: { status: 400, message: 'Tu nivel no permite pagar tanto de esta compra con puntos. Elige menos puntos.' }
+  PUNTOS_EXCEDEN_TOPE: { status: 400, message: 'Tu nivel no permite pagar tanto de esta compra con puntos. Elige menos puntos.' },
+  PERSONALIZADO_INVALIDO: { status: 400, message: 'Tu helado personalizado no es válido. Ármalo de nuevo en el creador 3D.' },
+  PERSONALIZADO_NO_DISPONIBLE: { status: 400, message: 'El helado personalizado no está disponible en este momento.' }
 };
 const ERROR_VENTA_GENERICO = { status: 500, message: 'No pudimos registrar tu pedido. Intenta de nuevo más tarde.' };
 
@@ -2838,6 +2951,12 @@ function validarCarrito(items) {
   }
   const validos = [];
   for (const it of items) {
+    if (it && it.tipo === 'personalizado') {
+      const linea = validarLineaPersonalizada(it);
+      if (linea.error) return { error: linea.error };
+      validos.push(linea.item);
+      continue;
+    }
     const idProducto = Number(it && (it.id_producto || it.id));
     const bruta = it && typeof it.quantity === 'string' && it.quantity.trim() !== '' ? Number(it.quantity) : it && it.quantity;
     if (!Number.isInteger(idProducto) || idProducto <= 0) {
@@ -2849,6 +2968,40 @@ function validarCarrito(items) {
     validos.push({ id_producto: idProducto, cantidad: bruta });
   }
   return { items: validos };
+}
+
+// Helado personalizado 3D: aquí solo se revisa la FORMA (tipos y largos). Que cada id exista, esté
+// activo, sea del tipo correcto, los máximos (3 sabores y 3 toppings) y el precio los decide la base.
+const ID_COMPONENTE = /^[a-z0-9_-]{1,40}$/;
+const MAX_IDS_POR_LISTA = 10;
+
+const esListaDeIds = (lista, minimo) =>
+  Array.isArray(lista) && lista.length >= minimo && lista.length <= MAX_IDS_POR_LISTA
+  && lista.every((id) => typeof id === 'string' && ID_COMPONENTE.test(id));
+
+// Devuelve { item:{tipo,envase,sabores,toppings,cantidad} } o { error }. Precio, foto, nombre o id que
+// mande el navegador NO pasan: la base pone el precio.
+function validarLineaPersonalizada(it) {
+  const toppings = it.toppings === undefined ? [] : it.toppings;
+  if (typeof it.envase !== 'string' || !ID_COMPONENTE.test(it.envase)
+      || !esListaDeIds(it.sabores, 1) || !esListaDeIds(toppings, 0)) {
+    return { error: ERRORES_VENTA.PERSONALIZADO_INVALIDO.message };
+  }
+  const cantidad = typeof it.quantity === 'string' && it.quantity.trim() !== '' ? Number(it.quantity) : it.quantity;
+  if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > MAX_CANTIDAD_ITEM) {
+    return { error: `La cantidad de cada producto debe ser un número entero entre 1 y ${MAX_CANTIDAD_ITEM}.` };
+  }
+  return { item: { tipo: 'personalizado', envase: it.envase, sabores: [...it.sabores], toppings: [...toppings], cantidad } };
+}
+
+// "Cono · Vainilla, Mora · Toppings: Cereza" (para el recibo). Texto plano: escapar antes de meterlo en HTML.
+function describirPersonalizacion(p) {
+  if (!p || typeof p !== 'object') return '';
+  const nombres = (lista) => (Array.isArray(lista) ? lista : []).map((c) => c && c.nombre).filter(Boolean).join(', ');
+  const partes = [p.envase && p.envase.nombre, nombres(p.sabores)];
+  const toppings = nombres(p.toppings);
+  if (toppings) partes.push(`Toppings: ${toppings}`);
+  return partes.filter(Boolean).join(' · ');
 }
 
 function escapeHtml(valor) {
@@ -2967,7 +3120,8 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
     name: i.nombre,
     quantity: i.cantidad,
     price: i.precio_unitario,
-    subtotal: i.subtotal
+    subtotal: i.subtotal,
+    ...(i.personalizacion ? { personalizacion: i.personalizacion } : {})
   }));
 
   // ── Construir objeto de transacción ─────────────────────────
@@ -2998,7 +3152,7 @@ app.post('/api/payments/process', requireAuth, limitadorPagos, async (req, res) 
       if (user && user.email) {
         const deliveryTime = Math.floor(Math.random() * (45 - 30 + 1) + 30);
         const itemsHtml = resolvedItems.length > 0
-          ? `<ul>${resolvedItems.map(item => `<li><strong>${escapeHtml(item.name)}</strong> x ${item.quantity} - $${Number(item.price).toLocaleString('es-CO')}</li>`).join('')}</ul>`
+          ? `<ul>${resolvedItems.map(item => `<li><strong>${escapeHtml(item.name)}</strong> x ${item.quantity} - $${Number(item.price).toLocaleString('es-CO')}${item.personalizacion ? `<br><span style="color: #705d00; font-size: 13px;">${escapeHtml(describirPersonalizacion(item.personalizacion))}</span>` : ''}</li>`).join('')}</ul>`
           : '<p>Detalles del pedido procesados exitosamente.</p>';
         const emailTransporter = await getTransporter();
         const fromEmail = process.env.SMTP_USER || 'no-reply@supergelatto.com';
@@ -3091,6 +3245,25 @@ app.get('/api/points/rules', async (req, res) => {
     pesosPorPunto: reglas.pesos_por_punto,
     valorPunto: reglas.valor_punto,
     niveles: reglas.niveles
+  });
+});
+
+// Precios y límites del helado personalizado 3D (público): la página los muestra y la base cobra con los
+// mismos, así hay una sola fuente. Caché de 5 minutos: un cambio de precio en la tabla se ve a lo sumo
+// 5 minutos después en la página; el cobro siempre usa el precio actual de la base.
+app.get('/api/personalizado/precios', async (req, res) => {
+  const [componentes, reglas] = await Promise.all([
+    supabase.from('componente_personalizado').select('id, tipo, nombre, precio').eq('activo', true).order('id', { ascending: true }),
+    supabase.rpc('helado_personalizado_reglas')
+  ]);
+  if (falloSupabase(res, componentes.error, 'No pudimos cargar los precios del helado personalizado.')) return;
+  if (falloSupabase(res, reglas.error || (reglas.data ? null : { message: 'sin reglas' }), 'No pudimos cargar los precios del helado personalizado.')) return;
+  res.set('Cache-Control', 'public, max-age=300, s-maxage=300');
+  return res.status(200).json({
+    ok: true,
+    maxSabores: reglas.data.max_sabores,
+    maxToppings: reglas.data.max_toppings,
+    componentes: (componentes.data || []).map((c) => ({ id: c.id, tipo: c.tipo, nombre: c.nombre, precio: Number(c.precio) }))
   });
 });
 

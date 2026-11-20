@@ -123,6 +123,53 @@ describe('modo simulado (sin Supabase): Super Points', () => {
   });
 });
 
+// Helado personalizado 3D en modo simulado: mismos precios y reglas que la semilla de la base.
+describe('modo simulado (sin Supabase): helado personalizado', () => {
+  const helado = (extra = {}) => ({ tipo: 'personalizado', envase: 'cup', sabores: ['vanilla', 'mora'], toppings: ['cherry'], quantity: 1, price: 1, ...extra });
+  const authAdminSim = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 1, rol: 'admin' })}` });
+
+  it('cobra el personalizado con los precios simulados e ignora el precio del cliente', async () => {
+    const res = await pagar([helado({ quantity: 2 }), { id: 1, quantity: 1, price: 1 }]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.total).toBe(2 * 13000 + 12500);
+    expect(res.body.transaction.items.map((i) => i.name)).toEqual(['Fresa Salvaje', 'Helado personalizado 3D']);
+    expect(res.body.transaction.items[1].personalizacion.sabores.map((s) => s.nombre)).toEqual(['Vainilla', 'Mora']);
+  });
+
+  it('un componente que no existe -> 400, no aprobado', async () => {
+    const res = await pagar([helado({ toppings: ['oro'] })]);
+
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('demasiados sabores o repetidos -> 400', async () => {
+    expect((await pagar([helado({ sabores: ['vanilla', 'mora', 'fresa', 'mango'] })])).status).toBe(400);
+    expect((await pagar([helado({ sabores: ['vanilla', 'vanilla'] })])).status).toBe(400);
+  });
+
+  it('la ruta de precios responde con la tabla simulada', async () => {
+    const res = await request(app).get('/api/personalizado/precios');
+
+    expect(res.status).toBe(200);
+    expect(res.body.maxSabores).toBe(3);
+    expect(res.body.maxToppings).toBe(3);
+    expect(res.body.componentes).toHaveLength(17);
+  });
+
+  it('el admin ve el detalle de una venta simulada con la composición', async () => {
+    const pago = await pagar([helado()]);
+    const res = await request(app).get(`/api/admin/sales/${pago.body.id_venta}/items`).set(authAdminSim());
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0]).toMatchObject({ nombre: 'Helado personalizado 3D', cantidad: 1, precio_unitario: 13000 });
+    expect(res.body.items[0].personalizacion.envase.nombre).toBe('Copa');
+  });
+});
+
 describe('modo simulado (sin Supabase): login con "_" en el correo', () => {
   it('quien se registra con "_" puede iniciar sesión (ilike entiende el escape de comodines)', async () => {
     const datos = { name: 'Ana', lastName: 'Sim', email: 'ana_sim@example.com', password: 'Clave123!', confirmPassword: 'Clave123!' };
