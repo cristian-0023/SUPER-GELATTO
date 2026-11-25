@@ -294,6 +294,17 @@ describe('6. pedido y pregunta en el mismo mensaje: se agrega lo pedido y la fic
     expect(body.response).toContain(FICHAS[1][0]);
     expect(body.response).toMatch(AVISO);
   });
+  it.each([['dame una fresa sin azúcar, ¿tiene leche?'], ['dame una fresa sin azúcar, ¿lleva huevo?']])('"%s": el "sin azúcar" no tapa la pregunta', async (frase) => {
+    const body = await enviar(frase);
+    expect(body.action).toBe('addToCart');
+    expect(body.response).toContain(FICHAS[1][0]);
+  });
+  it('si pide un sabor y pregunta por otro, no se agrega ni se arma un "sí": se muestra de qué sabores hay ficha', async () => {
+    const body = await enviar('dame un mango, ¿la fresa tiene leche?');
+    esperaPrudente(body);
+    expect(body.response).toContain('**Fresa Salvaje**');
+    expect(body.response).toContain('**Mango Tropical**');
+  });
   it.each([['texto inventado', [texto(INVENTO)]], ['getProducts y texto inventado', [pideHerramienta('getProducts'), texto(INVENTO)]]])(
     'si el modelo responde con %s, sale la ficha y no su texto', async (_c, guion) => {
       const body = await enviar('agrégame una fresa, ¿qué ingredientes contiene?', { guion });
@@ -385,7 +396,7 @@ describe('9. nombres raros de la base y velocidad', () => {
   const MIL = (t) => t.repeat(Math.ceil(1000 / t.length)).slice(0, 1000);
   it.each([
     ['soy alergico a la '], ['alergia a la leche y '], ['tiene leche y '], ['tiene nada de '], ['sin leche ni '], ['leche '], ['que lleva '], ['ingredientes '], ['a'], [','], [' '], ['\n'],
-    ['sin '], ['vegano '], ['frutos secos '], ['muestrame los sabores '], ['que helados '], ['quiero un helado '], ['recomiendame '], ['dame '], ['ver el menu de los '], ['**'], ['no se '],
+    ['sin '], ['sin azucar '], ['vegano '], ['frutos secos '], ['muestrame los sabores '], ['que helados '], ['quiero un helado '], ['recomiendame '], ['dame '], ['ver el menu de los '], ['**'], ['no se '],
     ['sabor especial sin azucar numero '], ['te muestro su ficha '], ['cual es el '],
   ])('mensaje de 1000 caracteres con %j y 200 productos: menos de 150 ms', (trozo) => {
     for (const modulo of ['gelbotFichas', 'gelbotMenu']) expect(existsSync(new URL(`../../${modulo}.js`, import.meta.url)), modulo).toBe(true);
