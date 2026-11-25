@@ -3,7 +3,7 @@ const Groq = require("groq-sdk");
 const { APIError: GroqAPIError } = require("groq-sdk/error");
 const { imagenProductoValida } = require("./imagenProducto");
 const {
-  analizarMensaje, tieneIntencionDeCompra, resolverPedido, estaRechazado, senalaUnProducto, esConsulta, preguntaPrecio, esAfirmacion,
+  analizarMensaje, tieneIntencionDeCompra, resolverPedido, estaRechazado, esConsulta, preguntaPrecio, esAfirmacion,
   botOfrecioAgregar, botPreguntoCual, leerCantidad, leerCantidadDe, buscarProductos,
 } = require("./gelbotIntencion");
 const { cleanText } = require("./gelbotTexto");
@@ -614,9 +614,8 @@ function quiereAgregar(message, textoBot, producto, productos) {
   // "sí", "agrégalo": solo vale lo único que ofreció el bot.
   if (esAfirmacion(message)) return (botOfrecioAgregar(textoBot) || trasCual) && esElUnico(buscarProductos(textoBot, productos));
   if (!pide) return false;
-  // Si el cliente nombró un sabor, el modelo no puede poner otro; si no nombró ni señaló ninguno, no lo elige por él.
-  const nombrados = buscarProductos(positivo, productos);
-  return nombrados.length ? esElUnico(nombrados) : senalaUnProducto(positivo);
+  // El modelo solo puede poner el sabor que nombró el cliente: ni otro, ni elegirlo por él ("el rojito", "algo rico").
+  return esElUnico(buscarProductos(positivo, productos));
 }
 
 // ── Atajos sin modelo (clientes y visitantes) ─────────────────
@@ -905,14 +904,16 @@ USUARIO: ${userName} | role: "cliente"`;
                 const sinPedido = relato ? MENSAJE_NADA_AGREGADO_RELATO : MENSAJE_NADA_AGREGADO;
                 respuestaSinAgregar = pide ? respuestaCual([]) : { response: sinPedido, action: null, product: null };
                 functionResponse = { info: true, message: "El cliente rechazó algo o no está pidiendo; no se agregó nada al carrito." };
+              } else if (pide && !isAdmin && !esConsulta(message) && !buscarProductos(message, catalogo).length) {
+                // Pide, pero no nombró ningún sabor: no lo elige el modelo.
+                respuestaSinAgregar = respuestaElegirSabor(catalogo);
+                functionResponse = { info: true, message: "El cliente no dijo el sabor; se le preguntará cuál." };
               } else if (encontrados.length > 1) {
                 productosAmbiguos = encontrados;
                 functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };
               } else if (found && !quiereAgregar(message, ultimoMensajeDelBot(history), found, catalogo)) {
                 // Defensa del servidor: no pidió ese producto, no se agrega (aunque el modelo lo pida).
-                if (pide && !isAdmin && !esConsulta(message) && !buscarProductos(message, catalogo).length) {
-                  respuestaSinAgregar = respuestaElegirSabor(catalogo);
-                } else productoConsultado = found;
+                productoConsultado = found;
                 functionResponse = { info: true, message: `El cliente no pidió ${found.nombre}; no se agregó al carrito.` };
               } else if (found) {
                 actionToPerform = 'addToCart';

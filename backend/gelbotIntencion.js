@@ -322,27 +322,12 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   return { producto, cantidad: leerCantidadDe(a.positivo, producto) };
 }
 
-// ¿El cliente describe un producto concreto aunque no lo llame por su nombre ("el rojito de frutas", "el de la
-// abuela")? Solo así puede el modelo traducirlo a uno del catálogo. "un helado", "algo rico", "el barato" o
-// "la especialidad de la casa" no describen ninguno.
-const DESCRIPCION = /\b(?:el|la|los|las|del) (?:([a-z]{1,30}) )?de (?:(?:el|la|los|las) )?([a-z]{1,30})/g;
-const NO_SENALA = new Set(('que cual mas menos mejor mejores peor favorito favorita favoritos rico rica ricos ricas bueno buena primero primera segundo '
-  + 'segunda ultimo ultima otro otra otros otras mismo misma verdad menu carta catalogo tienda casa promo promocion oferta ofertas especial especialidad '
-  + 'recomendado recomendada recomendacion recomendaciones nuevo nueva nuevos tuyo suyo cuenta favor carrito pedido orden dia semana mes hora vez '
-  + 'noche tarde tardes noches manana familia gente tipo tamano grande pequeno pequena mediano').split(' '));
-const describeAlgo = (palabra) =>
-  !palabra || !(RELLENO.has(palabra) || PALABRAS_GENERICAS.has(palabra) || NO_SENALA.has(palabra) || NUMEROS[palabra]);
-function senalaUnProducto(texto) {
-  return [...soloPalabras(texto).matchAll(DESCRIPCION)].some(([, apodo, detalle]) => describeAlgo(apodo) && describeAlgo(detalle));
-}
-
 module.exports = {
   normalizarTexto,
   analizarMensaje,
   tieneIntencionDeCompra,
   resolverPedido,
   estaRechazado,
-  senalaUnProducto,
   esConsulta,
   preguntaPrecio,
   esAfirmacion,
