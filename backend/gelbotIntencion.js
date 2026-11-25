@@ -42,13 +42,20 @@ const VERBO_DE_DESEO = new RegExp(`\\b(?:${unirFormas((v) => v.deseo)})${PRONOMB
 const COMPRO = /^(?:(?:te|le|les|yo|hoy|ahora|entonces|bueno|si|listo|ok|mejor|pues|hola|buenas) ){0,5}compro\b/;
 const pideConAccion = (parte) => VERBO_DE_ACCION.test(parte) || COMPRO.test(parte.trim());
 
+// Pedidos amables: solo valen con cantidad y si el mensaje no dice nada más que el sabor (lo revisa
+// esPedidoSinVerbo), porque también empiezan preguntas y quejas ("para mí un mango es caro").
+const CON_CANTIDAD = '(?= (?:un|una|uno|media|\\d+|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\b)';
+const PEDIDO_AMABLE = new RegExp('\\b(?:(?:(?:me|nos) )?(?:puedes?|podes|podrias?) (?:traer|dar|regalar|vender|servir|pasar|poner)(?:me|nos)?'
+  + `|puedo pedir|me colaboras? con|para mi|me encantaria)${CON_CANTIDAD}`);
+const CUALQUIER = /\bcualquier\b/;
+
 // ── Partes que cuentan algo o se quejan: no piden ─────────────
 // Solo por el verbo (pasado, futuro, costumbre, reclamo), nunca por artículos ni por "ya" o "antes".
 const RELATO = /\b(compr(?:e|aste|amos|aron|ado|ar(?:e|as|a|emos|an)|aba\w*)|pedi|pediste|pedimos|pidio|pidieron|agregaste|agregaron|agregado|mandaste|mandaron|trajo|trajiste|trajeron|llevaste|llevaron|regalaron|reclam\w*|quej\w*|reembols\w*|problemas?|equivoc\w*|alergi\w*|asco|esperando|necesito ayuda)\b/;
 const FUTURO = /\b(?:voy|vas|va|vamos|van|iba|ibas|ibamos|iban) a (?:comprar|pedir|ordenar|agregar|anadir|llevar|traer|mandar)/;
 const COSTUMBRE = /\b(?:siempre|a veces|suelo|normalmente|todos los dias) (?:compro|pido|ordeno|me llevo|quiero|comprar|pedir)\b/;
 // "quiero reclamar", "quisiera hablar": el verbo que sigue no es de comprar ni de comer.
-const DESEO_DE_OTRA_COSA = /\b(?:quiero|quisiera|necesito|me gustaria) (?!(?:comprar|pedir|ordenar|agregar|anadir|llevar|probar|comer|tomar|encargar))[a-z]{1,20}(?:ar|er|ir)(?:me|te|le|les|se|nos)?(?:l[oa]s?)?\b/;
+const DESEO_DE_OTRA_COSA = /\b(?:quiero|quisiera|necesito|me gustaria) (?!(?:cualquier\b|comprar|pedir|ordenar|agregar|anadir|llevar|probar|comer|tomar|encargar))[a-z]{1,20}(?:ar|er|ir)(?:me|te|le|les|se|nos)?(?:l[oa]s?)?\b/;
 const esRelato = (parte) => [RELATO, FUTURO, COSTUMBRE, DESEO_DE_OTRA_COSA].some((r) => r.test(parte));
 // Las tildes del pasado se pierden al normalizar ("compró" = "compro", "agregué" = "agregue"): se marcan antes.
 const PASADO_CON_TILDE = /(?<!\p{L})(compr|llev|agreg|regal|mand)(?:\u00f3|u?\u00e9)(?!\p{L})/gu;
@@ -293,11 +300,13 @@ function contarCantidades(texto) {
     .filter((p) => p === 'un' || p === 'una' || p === 'uno' || NUMEROS[p] || ES_NUMERO.test(p)).length;
 }
 
-// Pedido sin verbo: "dos de mango", "fresa por favor", o el sabor solo si el bot acaba de preguntar cuál.
-// Solo vale si el mensaje no dice nada más y no pregunta.
+// Pedido sin verbo: "dos de mango", "fresa por favor", un pedido amable ("me puedes traer un mango"), o el
+// sabor solo si el bot acaba de preguntar cuál. Solo vale si no dice nada más y (si no es amable) no pregunta.
 function esPedidoSinVerbo(mensaje, positivo, encontrados, trasCual) {
-  if (/[?¿]/.test(mensaje) || !soloNombra(positivo, encontrados, SALUDOS_Y_AFIRMACIONES)) return false;
-  const texto = encontrados.reduce(sinNombre, positivo);
+  const amable = PEDIDO_AMABLE.test(positivo);
+  const resto = positivo.replace(PEDIDO_AMABLE, ' ');
+  if ((!amable && /[?¿]/.test(mensaje)) || !soloNombra(resto, encontrados, SALUDOS_Y_AFIRMACIONES)) return false;
+  const texto = encontrados.reduce(sinNombre, resto);
   return trasCual || contarCantidades(texto) > 0 || POR_FAVOR.test(soloPalabras(mensaje));
 }
 
@@ -316,6 +325,9 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   if (a.duda) return { cual: [] };
   if (permitidos.length !== 1) return { cual: permitidos };
   const [producto] = permitidos;
+  // "cualquier mango": si hay varios, no se escoge uno aunque exista el nombre exacto.
+  const parecidos = CUALQUIER.test(a.positivo) ? buscarPorPalabras(listaDePalabras(a.positivo), productos) : [];
+  if (parecidos.length > 1) return { cual: parecidos };
   if (!a.pide && contarCantidades(sinNombre(a.positivo, producto)) > 1) return { cual: permitidos };
   // "pedí mango, quiero el mango" es un reclamo; "compré mango ayer, quiero otro mango" sí es un pedido.
   if (estaRechazado(producto, a.relatado) && !PIDE_OTRO.test(a.positivo)) return null;
