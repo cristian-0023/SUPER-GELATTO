@@ -939,7 +939,7 @@ USUARIO: ${userName} | role: "cliente"`;
         });
       }
 
-      if (respuestaRechazo && !productoAgregado) {
+      if (respuestaRechazo) {
         return res.json({ ...respuestaRechazo, actionData: null });
       }
       // El cliente preguntó por un producto: la respuesta la arma el servidor con los datos de la base.

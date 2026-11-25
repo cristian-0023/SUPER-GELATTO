@@ -15,7 +15,7 @@ const soloPalabras = (t) => normalizarTexto(t).replace(/[^a-z0-9\s]/g, ' ').repl
 
 // "no quiero", "quita la fresa", "cancela", "en vez de"...: esa parte del mensaje rechaza, no pide.
 // ("nada más" no rechaza: "dame una fresa nada más".) "sin" y "ni" se tratan aparte: pueden ser un atributo.
-const NEGACION = /\b(no|nunca|jamas|tampoco|ningun\w*|quit\w*|elimin\w*|saca\w*|cancel\w*|devolv\w*|devuelv\w*|devoluci\w*|borra\w*|retir\w*|remuev\w*|remov\w*|descart\w*|olvid\w*|evit\w*|cambi\w*|dej(?:a|e|es|en) de|en (?:vez|lugar) de|excepto|salvo|menos|nada(?! mas\b))\b/;
+const NEGACION = /\b(no+|nop|nope|nah|nel|nunca|jamas|tampoco|ningun\w*|quit\w*|elimin\w*|saca\w*|cancel\w*|devolv\w*|devuelv\w*|devoluci\w*|borra\w*|retir\w*|remuev\w*|remov\w*|descart\w*|olvid\w*|evit\w*|cambi\w*|dej(?:a|e|es|en) de|en (?:vez|lugar) de|excepto|salvo|menos|nada(?! mas\b))\b/;
 const NEGACION_NI = /\bni\b/;
 // Verbos que siempre piden agregar o comprar. ("carrito" solo ya no cuenta: "quiero ver mi carrito".)
 const VERBOS_DE_CARRITO = /\b(agreg\w*|anad\w*|compr[ao]\w*|comprar|llevo|me lleva\w*|pido|pide|pedir|ordeno|ordenar|mand(a|e|en|ar|ame|eme)|sirv\w*|echa\w*|me pon\w*|ponga\w*|tra(e|i)?(me|game)|me vendes|vendame)\b/;
@@ -160,10 +160,12 @@ const palabrasClave = (nombre) => listaDePalabras(nombre).filter((p) => p.length
 // "gastan" sus palabras: en "fresa salvaje" no cuenta además "Fresa". Devuelve también las palabras sin gastar.
 function buscarNombresCompletos(palabras, productos) {
   const formas = palabras.map(variantes);
+  const presentes = new Set(formas.flat());
   const libres = palabras.map(() => true);
   const porNombre = new Map();
   for (const p of productos) {
     const nombre = listaDePalabras(p.nombre);
+    if (!nombre.every((n) => presentes.has(n))) continue;
     // Un nombre de solo palabras genéricas ("Helado") no distingue un sabor.
     if (!nombre.some((n) => n.length >= 3 && !PALABRAS_GENERICAS.has(n))) continue;
     const clave = nombre.join(' ');
