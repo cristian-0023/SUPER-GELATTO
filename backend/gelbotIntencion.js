@@ -23,9 +23,12 @@ const NEGACION_NI = /\bni\b/;
 // "pide"). deseo: cuenta solo si el mensaje no es una consulta ("quiero saber cuánto cuesta" no es compra);
 // "¿Me das una fresa?" es un pedido amable: el signo de pregunta solo no la vuelve consulta.
 // claro: pedido inconfundible, el único que cuenta después de una negación o de un relato.
+const LO_PEDIDO = '(?= (?:un|una|uno|unos|unas|el|la|los|las|otro|otra|media|\\d+|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\\b)';
 const VERBOS = [
-  { deseo: false, claro: true, formas: 'agregame|agregueme|agrega|anademe|anade|pongame|traeme|traigame|sirveme|mandame|echame|vendeme|vendame|me llevo|me vendes?|me pones?' },
-  { deseo: true, claro: true, formas: 'quiero|quisiera|dame|deme|ponme|pasame|paseme|regalame|regaleme|me das?|me regalas?|me pasas?|me traes' },
+  { deseo: false, claro: true, formas: 'agregame|agregueme|agrega|anademe|anade|pongame|traeme|traigame|sirveme|mandame|echame|vendeme|vendame|me llevo|me vendes?|me pones' },
+  { deseo: true, claro: true, formas: 'quiero|quisiera|dame|deme|ponme|pasame|paseme|regalame|regaleme|me das|me regalas?|me pasas?|me traes' },
+  // "me da un mango" pide; "me da risa el mango" o "me pone triste" no.
+  { deseo: true, claro: true, formas: `me da${LO_PEDIDO}|me pone${LO_PEDIDO}` },
   { deseo: false, claro: false, formas: 'agreg(?:as|o|ar|ale|anos|ue|ues)|anad(?:es|o|ir|ele|enos|a|as)|compra(?:me|nos)|compreme|me llevas?|pido|ordeno|manda|mande|manden|mandeme|me sirves?|sirvame|sirva|sirves|echale|echeme|echa|me ponga|ponga|trame' },
   { deseo: true, claro: false, formas: 'me gustaria|necesito|antoja|antojo|regalas?' },
 ];
@@ -268,7 +271,7 @@ function estaRechazado(producto, rechazado) {
 // Palabras que acompañan un pedido sin cambiarle el sentido.
 const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y porfa porfavor porfis gracias helado helados gelato '
   + 'gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra hoy ahora mi carrito docena docenas media').split(' '));
-const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.split(/[| ]/).flatMap((f) => (f.endsWith('s?') ? [f.slice(0, -2), f.slice(0, -1)] : [f])));
+const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.split(LO_PEDIDO).join('').split(/[| ]/).flatMap((f) => (f.endsWith('s?') ? [f.slice(0, -2), f.slice(0, -1)] : [f])));
 const SALUDOS_Y_AFIRMACIONES = new Set('hola buenas buenos dias tardes noches si dale listo ok okey claro bueno esa ese'.split(' '));
 const POR_FAVOR = /\b(?:por favor|por fa|porfa|porfavor|porfis)\b/;
 const ES_NUMERO = /^\d{1,2}$/;
@@ -319,16 +322,18 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   return { producto, cantidad: leerCantidadDe(a.positivo, producto) };
 }
 
-// ¿El cliente señala un producto concreto aunque no lo llame por su nombre ("el rojito de frutas")? Solo así
-// puede el modelo traducirlo a uno del catálogo. "un helado", "algo rico" o "el mejor" no señalan ninguno.
-const ARTICULO_Y_PALABRA = /\b(?:el|la|los|las|del) ([a-z]+)/g;
+// ¿El cliente describe un producto concreto aunque no lo llame por su nombre ("el rojito de frutas", "el de la
+// abuela")? Solo así puede el modelo traducirlo a uno del catálogo. "un helado", "algo rico", "el barato" o
+// "la especialidad de la casa" no describen ninguno.
+const DESCRIPCION = /\b(?:el|la|los|las|del) (?:([a-z]{1,30}) )?de (?:(?:el|la|los|las) )?([a-z]{1,30})/g;
 const NO_SENALA = new Set(('que cual mas menos mejor mejores peor favorito favorita favoritos rico rica ricos ricas bueno buena primero primera segundo '
   + 'segunda ultimo ultima otro otra otros otras mismo misma verdad menu carta catalogo tienda casa promo promocion oferta ofertas especial especialidad '
   + 'recomendado recomendada recomendacion recomendaciones nuevo nueva nuevos tuyo suyo cuenta favor carrito pedido orden dia semana mes hora vez '
   + 'noche tarde tardes noches manana familia gente tipo tamano grande pequeno pequena mediano').split(' '));
+const describeAlgo = (palabra) =>
+  !palabra || !(RELLENO.has(palabra) || PALABRAS_GENERICAS.has(palabra) || NO_SENALA.has(palabra) || NUMEROS[palabra]);
 function senalaUnProducto(texto) {
-  return [...soloPalabras(texto).matchAll(ARTICULO_Y_PALABRA)].some(([, palabra]) =>
-    !RELLENO.has(palabra) && !PALABRAS_GENERICAS.has(palabra) && !NO_SENALA.has(palabra) && !NUMEROS[palabra]);
+  return [...soloPalabras(texto).matchAll(DESCRIPCION)].some(([, apodo, detalle]) => describeAlgo(apodo) && describeAlgo(detalle));
 }
 
 module.exports = {
