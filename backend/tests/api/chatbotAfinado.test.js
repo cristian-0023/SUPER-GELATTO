@@ -122,3 +122,86 @@ describe('4. el nombre exacto gana', () => {
     esperaAgregado(await enviar('dame un helado de fresa', { catalogo: [producto(9, 'Helado'), FRESA_SALVAJE] }), 4, 1);
   });
 });
+
+describe('2. la negación solo bloquea si afecta al pedido', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['no quiero fresa'], ['No quiero fresa'], ['no me agregues la fresa'], ['no agregues nada'], ['ya no quiero la fresa'],
+      ['tampoco quiero mango'], ['nunca pedí fresa'], ['quita la fresa'], ['elimina la fresa del carrito'], ['cancela el pedido'],
+      ['no, gracias'], ['mejor no'], ['no'],
+      // el pedido se arrepiente al final, o la negación viene de otras palabras
+      ['dame una fresa, mejor no'], ['quiero una fresa, no, espera'], ['dame una fresa no de mango'],
+      ['no sé si quiero fresa'], ['no quiero que, por favor, agregues la fresa'], ['deja de agregar fresa'], ['olvida la fresa'],
+      ['ni loco quiero fresa'], ['jamás dame fresa'], ['en vez de fresa dame otra cosa'], ['cámbiame la fresa'],
+      ['si no hay mango, dame una fresa'], ['nada de fresa'], ['no llegó, quiero reclamar por la fresa'],
+      ['no me gustó, quiero la devolución de la fresa'], ['quiero que no me agregues fresa'], ['¿por qué no me agregaste la fresa?'],
+      ['quiero una fresa, ya no importa'], ['no quiero fresa pero tampoco mango'],
+      // "sin" + sabor
+      ['sin fresa'], ['un helado sin fresa'], ['dame un helado sin fresa'], ['quiero algo sin fresa ni mango'], ['dame un helado sin una fresa por favor'],
+    ])('"%s" NO agrega (aunque el modelo lo pida)', async (mensaje) => {
+      for (const tramposo of ['Fresa', 'Mango']) {
+        const body = await enviar(mensaje, { history, tramposo });
+        esperaSinAgregar(body);
+        // la respuesta no vuelve a ofrecer lo rechazado (un "ok" después lo agregaría)
+        expect(body.response).not.toMatch(/agr[eé]galo/i);
+      }
+    });
+
+    it.each([
+      ['no sé, dame una fresa', 1, 1],
+      ['no, mejor dame una de mango', 2, 1],
+      ['no mucho, ponme una de vainilla', 3, 1],
+      ['¿por qué no me das una fresa?', 1, 1],
+      ['quiero una fresa, no importa el tamaño', 1, 1],
+      ['dame una fresa sin azúcar', 1, 1],
+      ['quiero una fresa sin crema', 1, 1],
+      ['dame dos mangos sin azúcar ni crema', 2, 2],
+      ['dame un mango sin fresa', 2, 1],
+      // pedido corregido
+      ['no quiero fresa, quiero mango', 2, 1],
+      ['quita la fresa y dame mango', 2, 1],
+      ['no quiero dos fresas, quiero un mango', 2, 1],
+      ['no me des tres fresas; dame dos de mango', 2, 2],
+      ['ya no quiero la fresa pero dame una vainilla porfa', 3, 1],
+      ['agrégame una fresa nada más', 1, 1],
+    ])('"%s" agrega el producto %i x%i', async (mensaje, id, cantidad) => {
+      for (const tramposo of ['Fresa', 'Chocolate Belga']) {
+        esperaAgregado(await enviar(mensaje, { history, tramposo }), id, cantidad);
+      }
+    });
+  });
+
+  it.each([
+    ['contradictorio', 'no quiero fresa, dame una fresa'],
+    ['dos sabores', 'no quiero fresa, dame mango y vainilla'],
+    ['rechaza y pide algo que no está en el catálogo', 'no quiero fresa, dame el rojito de frutas'],
+  ])('ante la duda no agrega y pregunta: %s', async (_c, mensaje) => {
+    const body = await enviar(mensaje);
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l/i);
+  });
+
+  it('lo rechazado es amplio: "no quiero fresa, dame mango" nunca agrega "Fresa con Mango"', async () => {
+    const body = await enviar('no quiero fresa, dame mango', { catalogo: [FRESA_MANGO, FRESA], tramposo: 'Fresa con Mango' });
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l/i);
+  });
+
+  it('"sin crema" descarta "Fresa con crema", aunque sea la única fresa', async () => {
+    esperaAgregado(await enviar('quiero una fresa sin crema', { catalogo: [FRESA_CREMA, FRESA_SALVAJE] }), 4, 1);
+    esperaSinAgregar(await enviar('quiero una fresa sin crema', { catalogo: [FRESA_CREMA], tramposo: 'Fresa con crema' }));
+  });
+
+  it('un producto que se llama "... sin ..." se puede pedir por su nombre', async () => {
+    const catalogo = [FRESA, producto(9, 'Vainilla sin azúcar'), VAINILLA];
+    esperaAgregado(await enviar('dame una vainilla sin azúcar', { catalogo }), 9, 1);
+    esperaAgregado(await enviar('dame una vainilla', { catalogo }), 3, 1);
+    esperaAgregado(await enviar('dame una fresa sin azúcar', { catalogo }), 1, 1);
+  });
+
+  it('si el modelo intenta agregar lo rechazado, se responde sin ofrecerlo', async () => {
+    const body = await enviar('no quiero fresa');
+    expect(body.response).toMatch(/no puse nada/i);
+    expect(body.response).not.toContain('Fresa');
+  });
+});

@@ -62,36 +62,69 @@ function leerCantidad(mensaje) {
 const PALABRAS_GENERICAS = new Set(['helado', 'helados', 'gelato', 'gelatos', 'sabor', 'sabores', 'copa', 'vaso', 'para', 'especial', 'artesanal']);
 const MIN_LETRAS = 4;
 
-// Palabras del texto, con su singular ("fresas" -> "fresa", "limones" -> "limon").
-function palabrasDelTexto(texto) {
-  const palabras = new Set();
-  for (const p of soloPalabras(texto).split(' ')) {
-    if (!p) continue;
-    palabras.add(p);
-    if (p.endsWith('es')) palabras.add(p.slice(0, -2));
-    if (p.endsWith('s')) palabras.add(p.slice(0, -1));
-  }
-  return palabras;
+// Una palabra y su singular ("fresas" -> "fresa", "limones" -> "limon").
+function variantes(palabra) {
+  const formas = [palabra];
+  if (palabra.endsWith('es')) formas.push(palabra.slice(0, -2));
+  if (palabra.endsWith('s')) formas.push(palabra.slice(0, -1));
+  return formas;
 }
 
-const palabrasClave = (nombre) =>
-  soloPalabras(nombre).split(' ').filter((p) => p.length >= MIN_LETRAS && !PALABRAS_GENERICAS.has(p));
+const listaDePalabras = (texto) => soloPalabras(texto).split(' ').filter(Boolean);
+const palabrasClave = (nombre) => listaDePalabras(nombre).filter((p) => p.length >= MIN_LETRAS && !PALABRAS_GENERICAS.has(p));
 
-// Productos que nombra el texto. Gana el que coincide en más palabras completas; si empatan varios, se
-// devuelven todos (el que llama pregunta cuál). [] si no nombra ninguno.
-function buscarProductos(texto, productos) {
-  if (!Array.isArray(productos) || !texto) return [];
-  const palabras = palabrasDelTexto(texto);
+// Productos cuyo nombre COMPLETO está en el texto (palabras seguidas). Los nombres largos van primero y
+// "gastan" sus palabras: en "fresa salvaje" no cuenta además "Fresa". Devuelve también las palabras sin gastar.
+function buscarNombresCompletos(palabras, productos) {
+  const formas = palabras.map(variantes);
+  const libres = palabras.map(() => true);
+  const porNombre = new Map();
+  for (const p of productos) {
+    const nombre = listaDePalabras(p.nombre);
+    // Un nombre de solo palabras genéricas ("Helado") no distingue un sabor.
+    if (!nombre.some((n) => n.length >= 3 && !PALABRAS_GENERICAS.has(n))) continue;
+    const clave = nombre.join(' ');
+    if (!porNombre.has(clave)) porNombre.set(clave, { nombre, productos: [] });
+    porNombre.get(clave).productos.push(p);
+  }
+  const completos = [];
+  const grupos = [...porNombre.values()].sort((x, y) => y.nombre.length - x.nombre.length);
+  for (const grupo of grupos) {
+    const n = grupo.nombre.length;
+    let aparece = false;
+    for (let i = 0; i + n <= palabras.length; i++) {
+      if (!grupo.nombre.every((parte, k) => libres[i + k] && formas[i + k].includes(parte))) continue;
+      libres.fill(false, i, i + n);
+      aparece = true;
+    }
+    if (aparece) completos.push(...grupo.productos);
+  }
+  return { completos, restantes: palabras.filter((_, i) => libres[i]) };
+}
+
+// Los que coinciden en más palabras clave con el texto.
+function buscarPorPalabras(palabras, productos) {
+  const presentes = new Set(palabras.flatMap(variantes));
   let mejores = [];
   let mejorPuntaje = 0;
   for (const p of productos) {
-    if (!p || typeof p.nombre !== 'string') continue;
-    const puntaje = palabrasClave(p.nombre).filter((c) => palabras.has(c)).length;
+    const puntaje = palabrasClave(p.nombre).filter((c) => presentes.has(c)).length;
     if (puntaje === 0 || puntaje < mejorPuntaje) continue;
     if (puntaje > mejorPuntaje) { mejorPuntaje = puntaje; mejores = []; }
     mejores.push(p);
   }
   return mejores;
+}
+
+// Productos que nombra el texto. Gana el nombre completo ("fresa" es "Fresa" aunque exista "Fresa Salvaje");
+// si no hay, el que coincide en más palabras. Si quedan varios se devuelven todos (el que llama pregunta
+// cuál); también si sobran palabras que apuntan a otro sabor. [] si no nombra ninguno.
+function buscarProductos(texto, productos) {
+  if (!Array.isArray(productos) || !texto) return [];
+  const validos = productos.filter((p) => p && typeof p.nombre === 'string');
+  const { completos, restantes } = buscarNombresCompletos(listaDePalabras(texto), validos);
+  const otros = buscarPorPalabras(restantes, validos.filter((p) => !completos.includes(p)));
+  return [...completos, ...otros];
 }
 
 module.exports = {
