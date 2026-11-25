@@ -499,3 +499,10 @@ describe('aceptación 2: una sola lista de verbos', () => {
       '"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, history));
   });
 });
+
+describe('aceptación 2: pedir lo mismo que se reclama', () => {
+  it.each([['pedí mango, quiero el mango'], ['pedí fresa y me trajeron mango, quiero fresa'], ['compré mango ayer y quiero mango']])(
+    '"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, []));
+  it.each([['compré mango ayer, quiero otro mango', 2, 1], ['pedí fresa ayer, dame dos fresas más', 1, 2], ['pedí fresa ayer, hoy dame mango', 2, 1]])(
+    '"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, []));
+});
