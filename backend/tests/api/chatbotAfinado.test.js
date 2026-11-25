@@ -533,3 +533,60 @@ describe('aceptación 2: lo que se siente no es un pedido, y un apodo suelto no 
       expect((await enviar(frase)).response).toMatch(/cu[aá]l sabor quieres/i);
     });
 });
+
+describe('aceptación 3: pedidos amables', () => {
+  const TIRAMISU = producto(11, 'Tiramisú');
+  const PISTACCHIO = producto(12, 'Pistacchio di Bronte');
+  const MANGO_BICHE = producto(13, 'Mango Biche');
+  const AMPLIO = [...CATALOGO, TIRAMISU, PISTACCHIO];
+  async function comprobar(frase, id, cantidad, history) {
+    for (const tramposo of ['Mango', 'Fresa', 'Tiramisú']) {
+      const body = await enviar(frase, { history, tramposo, catalogo: AMPLIO });
+      if (id === null) {
+        esperaSinAgregar(body);
+      } else esperaAgregado(body, id, cantidad);
+    }
+  }
+
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['me puedes traer un mango', 2, 1], ['¿me puedes traer un pistacchio di bronte?', 12, 1], ['me puedes dar un mango', 2, 1],
+      ['me podrías dar un tiramisú', 11, 1], ['me podrías regalar un mango', 2, 1], ['¿podrías darme un mango?', 2, 1],
+      ['puedo pedir un mango', 2, 1], ['¿puedo pedir dos mangos?', 2, 2], ['quiero pedir un mango', 2, 1], ['me colaboras con un mango', 2, 1],
+      ['para mí un mango', 2, 1], ['para mí uno de tiramisú', 11, 1], ['me encantaría un mango', 2, 1], ['quiero cualquier mango', 2, 1],
+    ])('"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobar(frase, id, cantidad, history));
+
+    it.each([
+      ['lléveme un mango'], ['llévame un mango'],
+      ['¿me puedes decir cuánto vale el mango?'], ['¿me puedes explicar qué lleva el mango?'], ['me puedes quitar el mango'], ['puedo cancelar el mango'],
+      ['puedo devolver el mango?'], ['¿podrías decirme si hay mango?'], ['puedo ver el mango?'], ['me puedes ayudar con el mango que llegó mal'],
+      ['para mí el mango es feo'], ['para mí no, gracias'], ['me encantaría saber el precio del mango'], ['me encantó el mango'], ['¿puedo pagar el mango con tarjeta?'],
+      // amables, pero dicen algo más
+      ['me puedes dar un mango que no esté derretido'], ['para mí un mango es muy caro'], ['puedo pedir un mango a domicilio?'],
+      ['me colaboras con un reclamo del mango'], ['me puedes dar una explicación del mango'],
+    ])('"%s" NO agrega', (frase) => comprobar(frase, null, 0, history));
+  });
+
+  it.each([
+    ['sin nombre exacto', [MANGO_BICHE, FRESA_MANGO]],
+    ['aunque haya uno con el nombre exacto', [MANGO, MANGO_BICHE]],
+  ])('"quiero cualquier mango" con varios mangos pregunta cuál (%s)', async (_c, catalogo) => {
+    const body = await enviar('quiero cualquier mango', { catalogo, tramposo: 'Mango Biche' });
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l de estos/i);
+    expect(body.response).toContain('Mango Biche');
+  });
+
+  it.each([['me puedes traer un '], ['puedo pedir '], ['para mi '], ['para mi un '], ['me colaboras con '], ['me encantaria '], ['quiero cualquier '], ['podrias darme un mango ']])(
+    'mensaje de 1000 caracteres con %j: menos de 150 ms', (trozo) => {
+      const mensaje = trozo.repeat(Math.ceil(1000 / trozo.length)).slice(0, 1000);
+      const grande = Array.from({ length: 200 }, (_, i) => producto(i + 1, `Sabor especial número ${i} fresa con mango`));
+      let mejor = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const inicio = performance.now();
+        intencion.resolverPedido(mensaje, grande, { trasCual: true });
+        mejor = Math.min(mejor, performance.now() - inicio);
+      }
+      expect(mejor).toBeLessThan(150);
+    });
+});
