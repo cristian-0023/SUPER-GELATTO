@@ -26,11 +26,12 @@ const ALGO_DE = '(?: (?:algo|algun|alguna|rastros?|trazas?|nada|mucha?|poca?|cua
 const TAMBIEN_SABOR = /\b(?:coco|pistachos?|cacao|cafe|miel|almendras?|avellanas?|mani|nuez|nueces|licor|mantequilla)\b/;
 
 // Declara una condición, o pide "sin" algo que es de salud: aunque pida un sabor, primero ve la ficha.
-const CONDICION_DE_SALUD = new RegExp('\\b(?:alergi\\w*|intoleran\\w*|celiac\\w*|diabet\\w*'
+const CONDICION_DE_SALUD = new RegExp('\\b(?:alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*'
   + '|(?:sin|libres? de) (?:lactosa|lacteos?|leche|gluten|trigo|huevos?|frutos secos|nuez|nueces|mani|cacahuates?|soya|soja))\\b');
 // Preguntas que no dejan duda.
-const PREGUNTA_FUERTE = new RegExp('\\b(?:ingredientes?|alergen\\w*|lacteos?|lactosa|gluten|frutos secos|vegan\\w*|vegetarian\\w*|calori\\w*|nutri(?:cion|cional|cionales|entes?)|engorda\\w*'
-  + '|(?:esta|estan|es|son) hech[oa]s? (?:de|con)|de que (?:esta|estan|es|son) hech[oa]s?|hech[oa]s? con|con que (?:esta|estan|lo|la|los|las|se) (?:hech[oa]s?|hacen?|preparan?)'
+const PREGUNTA_FUERTE = new RegExp('\\b(?:ingredientes?|alergen\\w*|lacteos?|lactosa|gluten|frutos secos|vegan\\w*|vegetarian\\w*|calori\\w*|nutri(?:cion|cional|cionales|entes?)|engorda\\w*|keto|kosher|halal|que leches?'
+  + '|(?:esta|estan|es|son) hech[oa]s? (?:de|con)|de que (?:esta|estan|es|son) hech[oa]s?|hech[oa]s? con|con que (?:(?:esta|estan|lo|la|los|las|se) )?(?:hech[oa]s?|hacen?|preparan?)'
+  + '|^que (?:llevan?|contienen?)$|que (?:llevan|contienen) (?:los|sus|tus) (?:helados|sabores|gelatos)'
   + '|que le (?:ponen|echan)|(?:libres? de|sin) ' + ALERGENO + ')\\b');
 const HECHO = /\bhech[oa]s?\b/;
 // "tiene leche", "lleva huevo", "no puedo tomar leche": el verbo y el alérgeno seguidos.
@@ -39,11 +40,12 @@ const VERBO_Y_ALERGENO = new RegExp('\\b(?:tienen?|tengan?|contienen?|contengan?
 const CUANTO_ALERGENO = new RegExp(`\\bcuant[oa]s? ${ALERGENO}\\b`);
 // Solo cuentan si nombran un sabor ("¿qué lleva la fresa?", no "¿qué lleva mi pedido?").
 const PREGUNTA_DEBIL = new RegExp('\\b(?:que (?:es lo que )?(?:tienen?|llevan?|contienen?|traen?|incluyen?)(?! de\\b)'
-  + '|como (?:(?:se|lo|la|los|las) )?(?:hacen?|preparan?)|como (?:esta|estan) hech[oa]s?|pued(?:o|e|en|es) (?:comer|tomar|consumir)(?:l[oa]s?)?|apt[oa]s?|segur[oa]s?|hacen? dano|caen? mal)\\b');
+  + '|como (?:(?:se|lo|la|los|las) )?(?:hacen?|preparan?)|como (?:esta|estan) hech[oa]s?|pued(?:o|e|en|es) (?:comer|tomar|consumir)(?:l[oa]s?)?|apt[oa]s?|segur[oa]s?|saludables?|grasas?|proteinas?|carbohidratos'
+  + '|de que (?:es|son)|recetas?|(?:lleva|tiene) crema|(?:trazas|rastros) de|hacen? dano|caen? mal)\\b');
 const DEL_PEDIDO = /\b(?:mi|mis|el|un|nuestro) (?:pedidos?|orden|carrito|compras?|domicilio|envio|cuenta|factura)\b/;
 const PIDE_INFORMACION = /\b(?:quiero|quisiera|necesito|me gustaria) que me (?:dig|cuent|expli|inform|aclar)\w*/;
 const PERSONALIZADO = /\b(?:personalizad[oa]s?|creador|3d)\b/;
-const PREGUNTA_NUTRICION = /\b(?:calori\w*|nutri(?:cion|cional|cionales|entes?)|engorda\w*)\b/;
+const PREGUNTA_NUTRICION = /\b(?:calori\w*|nutri(?:cion|cional|cionales|entes?)|engorda\w*|grasas?|proteinas?|carbohidratos)\b/;
 const PREGUNTA_CUANTO_CUESTA = /\b(?:cuesta|cuestan|precios?|vale|valen)\b/;
 
 // Pregunta por todo el menú, aunque nombre un sabor ("soy alérgico al coco, ¿qué puedo comer?").
@@ -55,7 +57,7 @@ const HABLA_DE_UNO = /\b(?:tiene|contiene|lleva|trae|incluye|es|esta|comerl[oa]|
 
 // Trozos que nombran un alérgeno y no el sabor por el que preguntan: se quitan antes de buscar el producto.
 const ALERGICO_A = /\b(?:alergi\w*|intoleran\w*) (?:al?|de|por) (?:(?:la|el|los|las) )?(frutos secos|crema de leche|[a-z0-9]+(?: (?:y|e|o|ni) (?:al? )?(?:(?:la|el|los|las) )?[a-z0-9]+){0,4})/g;
-const TROZOS_DE_ALERGENO = new RegExp('\\b(?:tienen?|tengan?|contienen?|contengan?|llevan?|lleven?|traen?|traigan?|incluyen?|hay|usan|come|como|comer|tomo|tomar|consumo|consumir|tolero|tolera|sin|libres? de|cuant[oa]s?)'
+const TROZOS_DE_ALERGENO = new RegExp('\\b(?:tienen?|tengan?|contienen?|contengan?|llevan?|lleven?|traen?|traigan?|incluyen?|hay|usan|come|como|comer|tomo|tomar|consumo|consumir|tolero|tolera|sin|libres? de|cuant[oa]s?|(?:trazas|rastros) de)'
   + `${ALGO_DE} ((?:(?:la|el|los) (?=leche|huevos?|gluten|lactosa))?${LISTA_ALERGENOS})\\b`, 'g');
 const FRUTOS_SECOS = /\bfrutos secos\b/g;
 
@@ -68,7 +70,7 @@ const CANONICO = {
 const DIETAS = [
   { nombre: 'vegano', pregunta: /\bvegan\w*/, etiqueta: 'vegano', choca: ['lacteos', 'huevo'] },
   { nombre: 'vegetariano', pregunta: /\bvegetarian\w*/, etiqueta: 'vegetariano', choca: [] },
-  { nombre: 'sin gluten', pregunta: /\b(?:gluten|celiac\w*)\b/, etiqueta: 'sin gluten', choca: ['gluten', 'avena'] },
+  { nombre: 'sin gluten', pregunta: /\b(?:gluten|celia(?:c|qu)\w*)\b/, etiqueta: 'sin gluten', choca: ['gluten', 'avena'] },
   { nombre: 'sin lácteos', pregunta: /\b(?:lacteos?|lactosa)\b/, etiqueta: 'sin lacteos', choca: ['lacteos'] },
   { nombre: 'sin azúcar', pregunta: /\b(?:sin azucar\w*|diabet\w*)\b/, etiqueta: 'sin azucar', choca: ['azucar'] },
 ];
@@ -283,8 +285,9 @@ function respuestaFicha(consulta, catalogo, formatearPrecio) {
 }
 
 // ── Filtro del texto del modelo ───────────────────────────────
-const SALUD = new RegExp('\\b(?:ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celiac\\w*|diabet\\w*|gluten|lactosa|lacteos?|leche|huevos?|yemas?|frutos secos|nuez|nueces|mani'
-  + '|vegan\\w*|vegetarian\\w*|calori\\w*|sin azucar\\w*|(?:es|son|seria) segur[oa]s?|apt[oa]s? para|contacto cruzado|contiene trazas)\\b');
+const SALUD = new RegExp('\\b(?:ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|gluten|lactosa|lacteos?|leche|huevos?|yemas?|frutos secos|nuez|nueces|mani'
+  + '|vegan\\w*|vegetarian\\w*|calori\\w*|azucar\\w*|vinagre|hech[oa]s? (?:con|de)|elaborad[oa]s? con|(?:es|son|seria) segur[oa]s? (?:para|comer\\w*|consumir\\w*|si)|apt[oa]s? para|contacto cruzado'
+  + '|(?<!pedido )(?<!carrito )contienen?)\\b');
 function hablaDeSalud(texto, catalogo) {
   let t = soloPalabras(texto);
   if (!SALUD.test(t)) return false;

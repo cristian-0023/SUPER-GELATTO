@@ -24,14 +24,15 @@ const soloPideHelado = (t) => t.split(' ').every((p) => PALABRAS_SIN_SABOR.has(p
 // "quiero mi factura", "dame tu teléfono", "quiero un descuento": no está pidiendo un helado.
 const OTRA_COSA = new RegExp('\\b(?:mis?|tus?|sus?|nuestr[oa]s?|factura|recibo|cuenta|pedidos?|orden|domicilios?|envio|ayuda|soporte|direccion|ubicacion|telefono|numero|celular|whatsapp|correo|email|contacto'
   + '|humano|persona|asesor\\w*|gerente|administrador|admin|root|momento|minuto|segundo|rato|tiempo|opinion|trabajo|empleo|contrasena|clave|sesion|registr\\w*|descuentos?|cupon\\w*|puntos|plata|dinero|reembolso'
-  + '|horarios?|foto|fotos|informacion|info|datos|usuarios?|ventas?|permiso|acceso|carrito|pago|pagar|tarjeta|efectivo|que|chiste|abrazo|beso|paz|animo|gracias)\\b');
+  + '|horarios?|foto|fotos|informacion|info|datos|usuarios?|ventas?|permiso|acceso|carrito|pago|pagar|tarjeta|efectivo|que|chiste|consejos?|abrazo|beso|paz|animo|gracias)\\b');
 const NO_SE = /\bno se(?: (?:que|cual)(?: (?:pedir|comprar|elegir|escoger|quiero|comer|probar))?)?\b/g;
 
+const PARA_ALGUIEN = /\bpara (?:mis?|tus?|sus?|nuestr[oa]s?) [a-z]+\b/g; // para mi mamá no es mi factura
 const QUIERE_VER = /\b(?:quiero|quisiera|necesito|me gustaria) (?=(?:ver|conocer|mirar) )/g; // no es queja ni rechazo
 const HACER_PEDIDO = /^(?:hola |buenas )?(?:quiero|quisiera|me gustaria|necesito|puedo|como puedo) (?:hacer|realizar) (?:un|mi) pedido(?: por favor)?$/;
 
 function leerPedidoDeMenu(mensaje, productos) {
-  const t = soloPalabras(mensaje);
+  const t = soloPalabras(soloPalabras(mensaje).replace(PARA_ALGUIEN, ' '));
   if (preguntaPrecio(mensaje) || buscarProductos(mensaje, productos).length) return null;
   if (HACER_PEDIDO.test(t)) return 'servidor';
   // "no sé qué pedir, recomiéndame algo" no rechaza nada.
