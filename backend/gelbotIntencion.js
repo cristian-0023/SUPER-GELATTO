@@ -315,12 +315,25 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   return { producto, cantidad: leerCantidadDe(a.positivo, producto) };
 }
 
+// ¿El cliente señala un producto concreto aunque no lo llame por su nombre ("el rojito de frutas")? Solo así
+// puede el modelo traducirlo a uno del catálogo. "un helado", "algo rico" o "el mejor" no señalan ninguno.
+const ARTICULO_Y_PALABRA = /\b(?:el|la|los|las|del) ([a-z]+)/g;
+const NO_SENALA = new Set(('que cual mas menos mejor mejores peor favorito favorita favoritos rico rica ricos ricas bueno buena primero primera segundo '
+  + 'segunda ultimo ultima otro otra otros otras mismo misma verdad menu carta catalogo tienda casa promo promocion oferta ofertas especial especialidad '
+  + 'recomendado recomendada recomendacion recomendaciones nuevo nueva nuevos tuyo suyo cuenta favor carrito pedido orden dia semana mes hora vez '
+  + 'noche tarde tardes noches manana familia gente tipo tamano grande pequeno pequena mediano').split(' '));
+function senalaUnProducto(texto) {
+  return [...soloPalabras(texto).matchAll(ARTICULO_Y_PALABRA)].some(([, palabra]) =>
+    !RELLENO.has(palabra) && !PALABRAS_GENERICAS.has(palabra) && !NO_SENALA.has(palabra) && !NUMEROS[palabra]);
+}
+
 module.exports = {
   normalizarTexto,
   analizarMensaje,
   tieneIntencionDeCompra,
   resolverPedido,
   estaRechazado,
+  senalaUnProducto,
   esConsulta,
   preguntaPrecio,
   esAfirmacion,
