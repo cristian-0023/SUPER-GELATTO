@@ -587,6 +587,8 @@ const respuestaAgregar = (p, cantidad) =>
   ({ response: textoAgregadoAlCarrito(p, cantidad), action: 'addToCart', product: productoParaCarrito(p), quantity: cantidad });
 const respuestaCual = (lista) => ({ response: textoCualProducto(lista), action: null, product: null });
 // El cliente rechazó algo y el modelo intentó agregar: no se vuelve a ofrecer (un "ok" después lo agregaría).
+// Es una queja o cuenta algo: tampoco se ofrece el producto.
+const MENSAJE_NADA_AGREGADO_RELATO = 'Entendido, no puse nada en tu carrito 🍦 Cuéntame en qué te puedo ayudar.';
 const MENSAJE_NADA_AGREGADO = 'Entendido, no puse nada en tu carrito 🍦 ¿Cuál sabor quieres?';
 
 // Último mensaje del bot en el historial (para entender "sí", "dale" o un sabor suelto).
@@ -599,12 +601,12 @@ function ultimoMensajeDelBot(history) {
 // Defensa del servidor: ¿se puede agregar este producto que pidió el modelo? Solo si el cliente lo pidió con
 // sus palabras, o con un "sí" o un sabor suelto justo después de que el bot ofreció agregar o preguntó cuál.
 function quiereAgregar(message, textoBot, producto, productos) {
-  const { pide, negacion, exclusion, positivo } = analizarMensaje(message, productos);
+  const { pide, negacion, relato, exclusion, positivo } = analizarMensaje(message, productos);
   const trasCual = botPreguntoCual(textoBot);
   const pedido = resolverPedido(message, productos, { trasCual });
   if (pedido) return pedido.producto?.id_producto === producto.id_producto;
-  // Con un rechazo o un "sin ..." solo vale el pedido que entendió el servidor.
-  if (negacion || exclusion) return false;
+  // Con un rechazo, una queja o un "sin ..." solo vale el pedido que entendió el servidor.
+  if (negacion || relato || exclusion) return false;
   // Si el cliente nombró un sabor, el modelo no puede poner otro.
   const nombrados = buscarProductos(positivo, productos);
   if (nombrados.length && (nombrados.length > 1 || nombrados[0].id_producto !== producto.id_producto)) return false;
@@ -891,11 +893,12 @@ USUARIO: ${userName} | role: "cliente"`;
               const catalogo = await getProductsCached(supabase);
               const encontrados = buscarProductos(args.productName.slice(0, 100), catalogo);
               const found = encontrados.length === 1 ? encontrados[0] : null;
-              const { negacion, exclusion, pide, rechazado } = analizarMensaje(message, catalogo);
-              const rechazo = negacion || (exclusion && (pide || !esConsulta(message) || encontrados.some((p) => estaRechazado(p, rechazado))));
+              const { negacion, relato, exclusion, pide, rechazado } = analizarMensaje(message, catalogo);
+              const rechazo = negacion || relato || (exclusion && (pide || !esConsulta(message) || encontrados.some((p) => estaRechazado(p, rechazado))));
               if (rechazo && !isAdmin) {
-                respuestaRechazo = pide ? respuestaCual([]) : { response: MENSAJE_NADA_AGREGADO, action: null, product: null };
-                functionResponse = { info: true, message: "El cliente rechazó algo; no se agregó nada al carrito." };
+                const sinPedido = relato ? MENSAJE_NADA_AGREGADO_RELATO : MENSAJE_NADA_AGREGADO;
+                respuestaRechazo = pide ? respuestaCual([]) : { response: sinPedido, action: null, product: null };
+                functionResponse = { info: true, message: "El cliente rechazó algo o no está pidiendo; no se agregó nada al carrito." };
               } else if (encontrados.length > 1) {
                 productosAmbiguos = encontrados;
                 functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };

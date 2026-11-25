@@ -17,22 +17,48 @@ const soloPalabras = (t) => normalizarTexto(t).replace(/[^a-z0-9\s]/g, ' ').repl
 // ("nada más" no rechaza: "dame una fresa nada más".) "sin" y "ni" se tratan aparte: pueden ser un atributo.
 const NEGACION = /\b(no+|nop|nope|nah|nel|nunca|jamas|tampoco|ningun\w*|quit\w*|elimin\w*|saca\w*|cancel\w*|devolv\w*|devuelv\w*|devoluci\w*|borra\w*|retir\w*|remuev\w*|remov\w*|descart\w*|olvid\w*|evit\w*|cambi\w*|dej(?:a|e|es|en) de|en (?:vez|lugar) de|excepto|salvo|menos|nada(?! mas\b))\b/;
 const NEGACION_NI = /\bni\b/;
-// Verbos que siempre piden agregar o comprar. ("carrito" solo ya no cuenta: "quiero ver mi carrito".)
-const VERBOS_DE_CARRITO = /\b(agreg\w*|anad\w*|compr[ao]\w*|comprar|llevo|me lleva\w*|pido|pide|pedir|ordeno|ordenar|mand(a|e|en|ar|ame|eme)|sirv\w*|echa\w*|me pon\w*|ponga\w*|tra(e|i)?(me|game)|me vendes|vendame)\b/;
-// Verbos de deseo: cuentan solo si el mensaje no es una consulta ("quiero saber cuánto cuesta" no es compra).
+
+// ── Verbos con los que se pide (ÚNICA lista) ──────────────────
+// Solo formas que piden AHORA ("agrégame", "compro"): nunca pasado, futuro ni tercera persona ("compramos",
+// "pide"). deseo: cuenta solo si el mensaje no es una consulta ("quiero saber cuánto cuesta" no es compra);
 // "¿Me das una fresa?" es un pedido amable: el signo de pregunta solo no la vuelve consulta.
-const VERBOS_DE_DESEO = /\b(quiero|quisiera|dame|deme|ponme|me das|me da|regala\w*|me gustaria|necesito|antoja|antojo)\b/;
+// claro: pedido inconfundible, el único que cuenta después de una negación o de un relato.
+const VERBOS = [
+  { deseo: false, claro: true, formas: 'agregame|agregueme|agrega|anademe|anade|pongame|traeme|traigame|sirveme|mandame|echame|vendeme|vendame|me llevo|me vendes?|me pones?' },
+  { deseo: true, claro: true, formas: 'quiero|quisiera|dame|deme|ponme|regalame|regaleme|me das?|me regalas?' },
+  { deseo: false, claro: false, formas: 'agreg(?:as|o|ar|ale|anos|ue|ues)|anad(?:es|o|ir|ele|enos|a|as)|compra(?:me|nos)|compreme|me llevas?|pido|ordeno|manda|mande|manden|mandeme|me sirves?|sirvame|sirva|sirves|echale|echeme|echa|me ponga|ponga|trame' },
+  { deseo: true, claro: false, formas: 'me gustaria|necesito|antoja|antojo|regalas?' },
+];
+const unirFormas = (filtro) => VERBOS.filter(filtro).map((v) => v.formas).join('|');
+const PRONOMBRE = '(?:l[oa]s?)?'; // "agrégamelo", "dámelos"
+const PEDIDOS_CLAROS = unirFormas((v) => v.claro);
+const PEDIDO_CLARO = new RegExp(`\\b(?:${PEDIDOS_CLAROS})${PRONOMBRE}\\b`);
+const VERBO_DE_ACCION = new RegExp(`\\b(?:${unirFormas((v) => !v.deseo)})${PRONOMBRE}\\b`);
+const VERBO_DE_DESEO = new RegExp(`\\b(?:${unirFormas((v) => v.deseo)})${PRONOMBRE}\\b`);
+// "compro" sin tilde puede ser "compró" ("mi esposo compro mango"): solo vale al empezar, o si antes van solo estas palabras.
+const COMPRO = /^(?:(?:te|le|les|yo|hoy|ahora|entonces|bueno|si|listo|ok|mejor|pues|hola|buenas) ){0,5}compro\b/;
+const pideConAccion = (parte) => VERBO_DE_ACCION.test(parte) || COMPRO.test(parte.trim());
+
+// ── Partes que cuentan algo o se quejan: no piden ─────────────
+// Solo por el verbo (pasado, futuro, costumbre, reclamo), nunca por artículos ni por "ya" o "antes".
+const RELATO = /\b(compr(?:e|aste|amos|aron|ado|ar(?:e|as|a|emos|an)|aba\w*)|pedi|pediste|pedimos|pidio|pidieron|agregaste|agregaron|agregado|mandaste|mandaron|trajo|trajiste|trajeron|llevaste|llevaron|regalaron|reclam\w*|quej\w*|reembols\w*|problemas?|equivoc\w*|alergi\w*|asco|esperando|necesito ayuda)\b/;
+const FUTURO = /\b(?:voy|vas|va|vamos|van|iba|ibas|ibamos|iban) a (?:comprar|pedir|ordenar|agregar|anadir|llevar|traer|mandar)/;
+const COSTUMBRE = /\b(?:siempre|a veces|suelo|normalmente|todos los dias) (?:compro|pido|ordeno|me llevo|quiero|comprar|pedir)\b/;
+// "quiero reclamar", "quisiera hablar": el verbo que sigue no es de comprar ni de comer.
+const DESEO_DE_OTRA_COSA = /\b(?:quiero|quisiera|necesito|me gustaria) (?!(?:comprar|pedir|ordenar|agregar|anadir|llevar|probar|comer|tomar|encargar))[a-z]{1,20}(?:ar|er|ir)(?:me|te|le|les|se|nos)?(?:l[oa]s?)?\b/;
+const esRelato = (parte) => [RELATO, FUTURO, COSTUMBRE, DESEO_DE_OTRA_COSA].some((r) => r.test(parte));
+// Las tildes del pasado se pierden al normalizar ("compró" = "compro", "agregué" = "agregue"): se marcan antes.
+const PASADO_CON_TILDE = /(?<!\p{L})(compr|llev|agreg|regal|mand)(?:\u00f3|u?\u00e9)(?!\p{L})/gu;
+const marcarPasados = (mensaje) => String(mensaje || '').toLowerCase().normalize('NFC').replace(PASADO_CON_TILDE, '$1aron');
+
 const PALABRAS_DE_CONSULTA = /\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
 const PALABRAS_DE_PRECIO = /\b(cuanto|cuesta|cuestan|precios?|vale|valen|valor)\b/;
 
 const esConsulta = (mensaje) => PALABRAS_DE_CONSULTA.test(normalizarTexto(mensaje));
 const preguntaPrecio = (mensaje) => PALABRAS_DE_PRECIO.test(normalizarTexto(mensaje));
 
-// Pedidos inconfundibles. Después de una negación solo cuentan estos ("no sé, dame una fresa").
-const PEDIDOS_CLAROS = 'quiero|quisiera|dame|deme|ponme|pongame|agregame|agregueme|agrega|anademe|anade|traeme|traigame|sirveme|mandame|echame|regalame|regaleme|vendeme|vendame|me llevo|me das?|me regalas?|me vendes?|me pones?';
-const PEDIDO_CLARO = new RegExp(`\\b(?:${PEDIDOS_CLAROS})\\b`);
 // "quita la fresa y dame mango": el conector antes de un pedido claro empieza otra parte del mensaje.
-const CONECTOR_Y_PEDIDO = new RegExp(` (?:y|e|pero|mejor|sino|entonces) (?=(?:mejor |entonces |por favor )?(?:${PEDIDOS_CLAROS})\\b)`, 'g');
+const CONECTOR_Y_PEDIDO = new RegExp(` (?:y|e|pero|mejor|sino|entonces) (?=(?:mejor |entonces |por favor )?(?:${PEDIDOS_CLAROS})${PRONOMBRE}\\b)`, 'g');
 const SEPARADOR = /[,.;:!?¡¿()\n\r\u2026]+|\s[-\u2013\u2014]\s/;
 // Negaciones que no rechazan nada.
 const POR_QUE_NO_ME_DAS = /\bpor que no (?=(?:me|nos) (?:das?|agregas?|pones?|regalas?|vendes?|sirves?|mandas?)\b)/g;
@@ -55,67 +81,84 @@ function protegerNombresConSin(t, productos) {
   return protegido;
 }
 
-// Divide el mensaje en partes y dice cuáles piden y cuáles rechazan:
-//  - negacion: alguna parte rechaza;  - exclusion: hay un "sin ..."
-//  - pide: hay un pedido en pie;      - duda: "sin azúcar y una de mango" (no es claro qué abarca el "sin")
-//  - positivo / rechazado: el texto donde buscar lo que pide y lo que no quiere
-function analizarMensaje(mensaje, productos = []) {
-  const t = protegerNombresConSin(normalizarTexto(mensaje).replace(MARCAS_INTERNAS, ''), productos)
+// Texto listo para partir: sin tildes, sin las negaciones que no rechazan nada y con los cortes marcados.
+function prepararTexto(mensaje, productos) {
+  return protegerNombresConSin(normalizarTexto(marcarPasados(mensaje)).replace(MARCAS_INTERNAS, ''), productos)
     .replace(POR_QUE_NO_ME_DAS, '')
     .replace(SI_NO_ES_MOLESTIA, '')
     .replace(NO_IMPORTA, `, ${PARTE_SIN_PESO}`)
     .replace(CONECTOR_Y_PEDIDO, ', ');
-  const restaurar = (texto) => texto.replace(/\u0003/g, 'i');
-  const consulta = PALABRAS_DE_CONSULTA.test(t);
+}
 
-  const positivas = []; // { texto, despuesDeNegar }
-  const rechazadas = [];
-  let negacion = false;
-  let exclusion = false;
-  let duda = false;
-  let condicion = false;
-  for (const parte of t.split(SEPARADOR)) {
+// Una parte del mensaje: { tipo, inicio, cola } (cola = desde el "sin ...").
+function clasificarParte(parte) {
+  const corte = parte.search(/\bsin\b/);
+  const inicio = corte < 0 ? parte : parte.slice(0, corte);
+  const cola = corte < 0 ? '' : parte.slice(corte);
+  let tipo = 'pedido';
+  if (NEGACION.test(inicio) || NEGACION_NI.test(inicio) || NEGACION.test(cola)) tipo = 'rechazo';
+  else if (parte.startsWith(PARTE_SIN_PESO)) tipo = 'sinPeso';
+  else if (esRelato(inicio)) tipo = 'relato';
+  return { tipo, inicio, cola };
+}
+
+// Reparte las partes entre lo que se puede pedir y lo que se rechaza.
+function repartirPartes(texto) {
+  const r = { positivas: [], rechazadas: [], negacion: false, relato: false, exclusion: false, duda: false, condicion: false };
+  for (const parte of texto.split(SEPARADOR)) {
     if (!parte.trim()) continue;
-    const corte = parte.search(/\bsin\b/);
-    const inicio = corte < 0 ? parte : parte.slice(0, corte);
-    const cola = corte < 0 ? '' : parte.slice(corte);
-    if (NEGACION.test(inicio) || NEGACION_NI.test(inicio) || NEGACION.test(cola)) {
-      negacion = true;
-      condicion = condicion || CONDICION.test(parte);
-      rechazadas.push(parte);
-      positivas.length = 0; // lo pedido antes de una negación ya no es seguro
-      continue;
+    const { tipo, inicio, cola } = clasificarParte(parte);
+    if (tipo === 'rechazo') {
+      r.negacion = true;
+      r.condicion = r.condicion || CONDICION.test(parte);
+      r.rechazadas.push(parte);
+      r.positivas = []; // lo pedido antes de una negación ya no es seguro
+    } else if (tipo === 'relato') {
+      r.relato = true;
+      r.positivas = []; // ni lo pedido antes de una queja o de contar algo
+    } else if (tipo === 'pedido') {
+      r.positivas.push(inicio);
+      if (cola) {
+        r.exclusion = true;
+        r.duda = r.duda || OTRO_PEDIDO.test(cola);
+        r.rechazadas.push(cola);
+      }
     }
-    if (parte.startsWith(PARTE_SIN_PESO)) continue;
-    if (cola) {
-      exclusion = true;
-      duda = duda || OTRO_PEDIDO.test(cola);
-      rechazadas.push(cola);
-    }
-    positivas.push(inicio);
   }
+  return r;
+}
 
-  let pide;
-  if (negacion) {
-    // Solo cuenta desde el primer pedido claro que venga después de la última negación.
+// Las partes que forman el pedido en pie, o null si no hay ninguno.
+function partesDelPedido({ positivas, negacion, relato, condicion }, consulta) {
+  if (negacion || relato) {
+    // Solo cuenta desde el primer pedido claro que venga después de la última negación o relato.
     const desde = positivas.findIndex((p) => PEDIDO_CLARO.test(p));
-    pide = desde >= 0 && !consulta && !condicion;
-    positivas.splice(0, pide ? desde : positivas.length);
-  } else {
-    const texto = positivas.join(' ');
-    pide = VERBOS_DE_CARRITO.test(texto) || (VERBOS_DE_DESEO.test(texto) && !consulta);
+    return desde >= 0 && !consulta && !condicion ? positivas.slice(desde) : null;
   }
+  const pide = positivas.some((p) => pideConAccion(p) || (!consulta && VERBO_DE_DESEO.test(p)));
+  return pide ? positivas : null;
+}
+
+// Qué dice el mensaje:
+//  - negacion: alguna parte rechaza;  - relato: alguna parte cuenta algo o se queja;  - exclusion: hay un "sin ..."
+//  - pide: hay un pedido en pie;      - duda: "sin azúcar y una de mango" (no es claro qué abarca el "sin")
+//  - positivo / rechazado: el texto donde buscar lo que pide y lo que no quiere
+function analizarMensaje(mensaje, productos = []) {
+  const texto = prepararTexto(mensaje, productos);
+  const r = repartirPartes(texto);
+  const pedido = partesDelPedido(r, PALABRAS_DE_CONSULTA.test(texto));
+  const positivas = pedido || (r.negacion || r.relato ? [] : r.positivas);
+  const restaurar = (partes) => partes.join(' ').replace(/\u0003/g, 'i');
   return {
-    negacion, exclusion, duda, pide,
-    positivo: restaurar(positivas.join(' ')),
-    rechazado: restaurar(rechazadas.join(' ')),
+    negacion: r.negacion, relato: r.relato, exclusion: r.exclusion, duda: r.duda, pide: pedido !== null,
+    positivo: restaurar(positivas), rechazado: restaurar(r.rechazadas),
   };
 }
 
 const tieneIntencionDeCompra = (mensaje) => analizarMensaje(mensaje).pide;
 
 // Mensaje que es SOLO una afirmación ("sí", "dale", "sí, por favor", "agrégalo", "la quiero").
-const AFIRMACION = /^(?:(?:si|dale|listo|ok|okey|okay|claro|de una|por favor|porfa|agregalo|agregala|agregamelo|agregamela|anadelo|anadela|lo quiero|la quiero|lo compro|la compro|perfecto|va)\s?)+$/;
+const AFIRMACION = /^(?:(?:si|dale|listo|ok|okey|okay|claro|de una|por favor|porfa|agregalo|agregala|agregamelo|agregamela|anadelo|anadela|lo quiero|la quiero|lo compro|la compro|lo llevo|la llevo|me lo llevo|me la llevo|perfecto|va)\s?)+$/;
 const esAfirmacion = (mensaje) => AFIRMACION.test(soloPalabras(mensaje));
 
 // ¿El último mensaje del bot ofreció agregar algo, o preguntó cuál sabor?
@@ -223,7 +266,7 @@ function estaRechazado(producto, rechazado) {
 // Palabras que acompañan un pedido sin cambiarle el sentido.
 const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y porfa porfavor porfis gracias helado helados gelato '
   + 'gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra mi carrito docena docenas media').split(' '));
-const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.replace(/\?/g, '').split(/[| ]/).concat('da', 'regala', 'vende', 'pone'));
+const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.split(/[| ]/).flatMap((f) => (f.endsWith('s?') ? [f.slice(0, -2), f.slice(0, -1)] : [f])));
 const SALUDOS_Y_AFIRMACIONES = new Set('hola buenas buenos dias tardes noches si dale listo ok okey claro bueno esa ese'.split(' '));
 const POR_FAVOR = /\b(?:por favor|por fa|porfa|porfavor|porfis)\b/;
 const ES_NUMERO = /^\d{1,2}$/;
@@ -258,12 +301,12 @@ function esPedidoSinVerbo(mensaje, positivo, encontrados, trasCual) {
 // trasCual: el último mensaje del bot preguntó cuál sabor quiere.
 function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   const a = analizarMensaje(mensaje, productos);
-  if (esConsulta(mensaje) || (a.negacion && !a.pide)) return null;
+  if (esConsulta(mensaje) || ((a.negacion || a.relato) && !a.pide)) return null;
   const encontrados = buscarProductos(a.positivo, productos);
   if (!encontrados.length) return null;
   if (!a.pide && !esPedidoSinVerbo(mensaje, a.positivo, encontrados, trasCual)) return null;
-  // Con una negación en el mensaje, el pedido tiene que ser limpio (nada de "quiero reclamar por la fresa").
-  if (a.negacion && !soloNombra(a.positivo, encontrados, PALABRAS_DE_PEDIDO)) return null;
+  // Con una negación o un relato en el mensaje, el pedido tiene que ser limpio (nada de "quiero mi plata del mango").
+  if ((a.negacion || a.relato) && !soloNombra(a.positivo, encontrados, PALABRAS_DE_PEDIDO)) return null;
   const permitidos = encontrados.filter((p) => !estaRechazado(p, a.rechazado));
   if (a.duda) return { cual: [] };
   if (permitidos.length !== 1) return { cual: permitidos };
