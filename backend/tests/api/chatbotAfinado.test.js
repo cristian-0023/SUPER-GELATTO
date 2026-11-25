@@ -31,7 +31,6 @@ const fake = crearFakeSupabase();
 let llamadasGroq = [];
 let guion = [];
 let productosBase = CATALOGO;
-let app;
 beforeEach(() => {
   llamadasGroq = [];
   guion = [];
@@ -39,7 +38,6 @@ beforeEach(() => {
   fake.reiniciar();
   fake.responder('usuario', 'select', { data: USUARIO, error: null });
   fake.responder('producto', 'select', () => ({ data: productosBase, error: null }));
-  ({ app } = cargarServidor(fake, { groq: async (p) => { llamadasGroq.push(p); return guion.shift() || texto('Listo.'); } }));
 });
 
 const CUAL = [{ role: 'user', content: 'hola' }, { role: 'assistant', content: '¡Claro! ¿Cuál sabor quieres? 🍦' }];
@@ -48,6 +46,8 @@ const HISTORIALES = [['sin historial', []], ['tras una oferta', OFERTA], ['tras 
 
 async function enviar(message, { history = [], tramposo = 'Fresa', catalogo = CATALOGO, cabeceras = tokenCliente() } = {}) {
   productosBase = catalogo;
+  // Servidor nuevo en cada mensaje: la caché de productos de chatbot.js vive en el módulo.
+  const { app } = cargarServidor(fake, { groq: async (p) => { llamadasGroq.push(p); return guion.shift() || texto('Listo.'); } });
   guion = [pideHerramienta('addToCart', { productName: tramposo }), texto('Ok.')];
   return (await request(app).post('/api/chatbot').set(cabeceras).send({ message, history })).body;
 }

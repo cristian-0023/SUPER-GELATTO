@@ -3,7 +3,7 @@ const Groq = require("groq-sdk");
 const { APIError: GroqAPIError } = require("groq-sdk/error");
 const { imagenProductoValida } = require("./imagenProducto");
 const {
-  tieneIntencionDeCompra, hayNegacion, esConsulta, preguntaPrecio, esAfirmacion,
+  analizarMensaje, tieneIntencionDeCompra, resolverPedido, estaRechazado, esConsulta, preguntaPrecio, esAfirmacion,
   botOfrecioAgregar, botPreguntoCual, leerCantidad, buscarProductos,
 } = require("./gelbotIntencion");
 const { cleanText } = require("./gelbotTexto");
@@ -586,6 +586,8 @@ function productoParaCarrito(p) {
 const respuestaAgregar = (p, cantidad) =>
   ({ response: textoAgregadoAlCarrito(p, cantidad), action: 'addToCart', product: productoParaCarrito(p), quantity: cantidad });
 const respuestaCual = (lista) => ({ response: textoCualProducto(lista), action: null, product: null });
+// El cliente rechazó algo y el modelo intentó agregar: no se vuelve a ofrecer (un "ok" después lo agregaría).
+const MENSAJE_NADA_AGREGADO = 'Entendido, no puse nada en tu carrito 🍦 ¿Cuál sabor quieres?';
 
 // Último mensaje del bot en el historial (para entender "sí", "dale" o un sabor suelto).
 function ultimoMensajeDelBot(history) {
@@ -597,8 +599,10 @@ function ultimoMensajeDelBot(history) {
 // ¿El cliente quiere agregar? Por sus palabras, o por un "sí"/sabor suelto justo después de que el bot
 // ofreció agregar o preguntó cuál.
 function quiereAgregar(message, textoBot) {
-  if (tieneIntencionDeCompra(message)) return true;
-  if (hayNegacion(message)) return false;
+  const { pide, negacion, exclusion } = analizarMensaje(message);
+  // Con un rechazo o un "sin ..." solo agregan los atajos del servidor, nunca el modelo.
+  if (negacion || exclusion) return false;
+  if (pide) return true;
   if (esAfirmacion(message) && (botOfrecioAgregar(textoBot) || botPreguntoCual(textoBot))) return true;
   return botPreguntoCual(textoBot);
 }
@@ -607,12 +611,11 @@ function quiereAgregar(message, textoBot) {
 // Devuelven la respuesta lista, o null para que decida el modelo.
 async function atajosCliente(message, history, supabase) {
   const textoBot = ultimoMensajeDelBot(history);
-  const cantidad = leerCantidad(message);
 
   // 1. "sí" / "dale" / "agrégalo" después de una oferta: el producto es el que nombró el bot.
   if (esAfirmacion(message) && (botOfrecioAgregar(textoBot) || botPreguntoCual(textoBot))) {
     const encontrados = buscarProductos(textoBot, await getProductsCached(supabase));
-    return encontrados.length === 1 ? respuestaAgregar(encontrados[0], cantidad) : respuestaCual(encontrados);
+    return encontrados.length === 1 ? respuestaAgregar(encontrados[0], leerCantidad(message)) : respuestaCual(encontrados);
   }
 
   // 2. Precio de un sabor concreto: lo responde el servidor (el modelo llegó a inventar precios).
@@ -624,17 +627,18 @@ async function atajosCliente(message, history, supabase) {
   }
 
   // 3. Un sabor suelto ("fresa", "una de fresa por favor") justo después de "¿cuál quieres?".
-  if (botPreguntoCual(textoBot) && !hayNegacion(message) && !esConsulta(message)) {
-    const encontrados = buscarProductos(message, await getProductsCached(supabase));
-    if (encontrados.length === 1) return respuestaAgregar(encontrados[0], cantidad);
+  const { negacion, pide, positivo, rechazado } = analizarMensaje(message);
+  if (botPreguntoCual(textoBot) && !negacion && !pide && !esConsulta(message)) {
+    const encontrados = buscarProductos(positivo, await getProductsCached(supabase)).filter((p) => !estaRechazado(p, rechazado));
+    if (encontrados.length === 1) return respuestaAgregar(encontrados[0], leerCantidad(positivo));
     if (encontrados.length > 1) return respuestaCual(encontrados);
   }
 
-  // 4. Pedido directo ("agrégame dos fresas").
-  if (tieneIntencionDeCompra(message) && !esConsulta(message)) {
-    const encontrados = buscarProductos(message, await getProductsCached(supabase));
-    if (encontrados.length === 1) return respuestaAgregar(encontrados[0], cantidad);
-    if (encontrados.length > 1) return respuestaCual(encontrados);
+  // 4. Pedido directo ("agrégame dos fresas", "no quiero fresa, quiero mango").
+  if (pide) {
+    const pedido = resolverPedido(message, await getProductsCached(supabase));
+    if (pedido?.producto) return respuestaAgregar(pedido.producto, pedido.cantidad);
+    if (pedido?.cual) return respuestaCual(pedido.cual);
   }
   return null;
 }
@@ -815,6 +819,7 @@ USUARIO: ${userName} | role: "cliente"`;
       let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
       let productosTarjetas  = null; // getProducts ejecutado: tarjetas con foto (datos de la base)
       let productosAmbiguos  = null; // addToCart con un nombre que coincide con varios sabores
+      let respuestaRechazo   = null; // addToCart de algo que el cliente rechazó
 
       for (const toolCall of llamadasAEjecutar) {
         const functionName = toolCall.function.name;
@@ -888,7 +893,12 @@ USUARIO: ${userName} | role: "cliente"`;
               // Mismo catálogo en caché y misma búsqueda (palabra completa) que los atajos.
               const encontrados = buscarProductos(args.productName.slice(0, 100), await getProductsCached(supabase));
               const found = encontrados.length === 1 ? encontrados[0] : null;
-              if (encontrados.length > 1) {
+              const { negacion, exclusion, pide, rechazado } = analizarMensaje(message);
+              const rechazo = negacion || (exclusion && (pide || !esConsulta(message) || encontrados.some((p) => estaRechazado(p, rechazado))));
+              if (rechazo && !isAdmin) {
+                respuestaRechazo = pide ? respuestaCual([]) : { response: MENSAJE_NADA_AGREGADO, action: null, product: null };
+                functionResponse = { info: true, message: "El cliente rechazó algo; no se agregó nada al carrito." };
+              } else if (encontrados.length > 1) {
                 productosAmbiguos = encontrados;
                 functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };
               } else if (found && !quiereAgregar(message, ultimoMensajeDelBot(history))) {
@@ -934,6 +944,9 @@ USUARIO: ${userName} | role: "cliente"`;
         });
       }
 
+      if (respuestaRechazo && !productoAgregado) {
+        return res.json({ ...respuestaRechazo, actionData: null });
+      }
       // El cliente preguntó por un producto: la respuesta la arma el servidor con los datos de la base.
       if (productoConsultado && !actionToPerform) {
         return res.json({ response: textoInfoProducto(productoConsultado), action: null, product: null, actionData: null });

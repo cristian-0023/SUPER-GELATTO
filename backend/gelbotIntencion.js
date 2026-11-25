@@ -1,5 +1,7 @@
 // Gelbot: cómo se entiende el mensaje del cliente (sin modelo de IA).
-//  - tieneIntencionDeCompra: ¿pide agregar o comprar? (las negaciones y "quitar" nunca cuentan)
+// Regla de oro: ante la duda, NO se agrega (agregar algo rechazado es peor que preguntar otra vez).
+//  - analizarMensaje: qué parte del mensaje pide, qué parte rechaza ("no quiero fresa, quiero mango")
+//  - resolverPedido: a qué producto y cantidad equivale el mensaje, o si hay que preguntar cuál
 //  - esAfirmacion / botOfrecioAgregar / botPreguntoCual: respuestas cortas ("sí", "dale", "fresa")
 //  - leerCantidad: "dos fresas" -> 2 (tope 10)
 //  - buscarProductos: qué productos del catálogo nombra un texto (palabra completa, sin palabras genéricas)
@@ -11,8 +13,10 @@ const normalizarTexto = (t) => String(t || '').toLowerCase().normalize('NFD').re
 // Solo letras, números y espacios (para comparar palabras sueltas).
 const soloPalabras = (t) => normalizarTexto(t).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
-// "no quiero", "quita la fresa", "cancela"...: nunca es un pedido para agregar.
-const NEGACION_O_QUITAR = /\b(no|nunca|tampoco|sin|quit\w*|elimin\w*|saca\w*|cancel\w*|devolv\w*|borra\w*)\b/;
+// "no quiero", "quita la fresa", "cancela", "en vez de"...: esa parte del mensaje rechaza, no pide.
+// ("nada más" no rechaza: "dame una fresa nada más".) "sin" y "ni" se tratan aparte: pueden ser un atributo.
+const NEGACION = /\b(no|nunca|jamas|tampoco|ningun\w*|quit\w*|elimin\w*|saca\w*|cancel\w*|devolv\w*|devuelv\w*|devoluci\w*|borra\w*|retir\w*|remuev\w*|remov\w*|descart\w*|olvid\w*|evit\w*|cambi\w*|dej(?:a|e|es|en) de|en (?:vez|lugar) de|excepto|salvo|menos|nada(?! mas\b))\b/;
+const NEGACION_NI = /\bni\b/;
 // Verbos que siempre piden agregar o comprar. ("carrito" solo ya no cuenta: "quiero ver mi carrito".)
 const VERBOS_DE_CARRITO = /\b(agreg\w*|anad\w*|compr[ao]\w*|comprar|llevo|me lleva\w*|pido|pide|pedir|ordeno|ordenar|mand(a|e|en|ar|ame|eme)|sirv\w*|echa\w*|me pon\w*|ponga\w*|tra(e|i)?(me|game)|me vendes|vendame)\b/;
 // Verbos de deseo: cuentan solo si el mensaje no es una consulta ("quiero saber cuánto cuesta" no es compra).
@@ -21,15 +25,94 @@ const VERBOS_DE_DESEO = /\b(quiero|quisiera|dame|deme|ponme|me das|me da|regala\
 const PALABRAS_DE_CONSULTA = /\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
 const PALABRAS_DE_PRECIO = /\b(cuanto|cuesta|cuestan|precios?|vale|valen|valor)\b/;
 
-const hayNegacion = (mensaje) => NEGACION_O_QUITAR.test(normalizarTexto(mensaje));
 const esConsulta = (mensaje) => PALABRAS_DE_CONSULTA.test(normalizarTexto(mensaje));
 const preguntaPrecio = (mensaje) => PALABRAS_DE_PRECIO.test(normalizarTexto(mensaje));
 
-function tieneIntencionDeCompra(mensaje) {
-  const t = normalizarTexto(mensaje);
-  if (NEGACION_O_QUITAR.test(t)) return false;
-  return VERBOS_DE_CARRITO.test(t) || (VERBOS_DE_DESEO.test(t) && !PALABRAS_DE_CONSULTA.test(t));
+// Pedidos inconfundibles. Después de una negación solo cuentan estos ("no sé, dame una fresa").
+const PEDIDOS_CLAROS = 'quiero|quisiera|dame|deme|ponme|pongame|agregame|agregueme|agrega|anademe|anade|traeme|traigame|sirveme|mandame|echame|regalame|regaleme|vendeme|vendame|me llevo|me das?|me regalas?|me vendes?|me pones?';
+const PEDIDO_CLARO = new RegExp(`\\b(?:${PEDIDOS_CLAROS})\\b`);
+// "quita la fresa y dame mango": el conector antes de un pedido claro empieza otra parte del mensaje.
+const CONECTOR_Y_PEDIDO = new RegExp(` (?:y|e|pero|mejor|sino|entonces) (?=(?:mejor |entonces |por favor )?(?:${PEDIDOS_CLAROS})\\b)`, 'g');
+const SEPARADOR = /[,.;:!?¡¿()\n\r\u2026]+|\s[-\u2013\u2014]\s/;
+// Negaciones que no rechazan nada.
+const POR_QUE_NO_ME_DAS = /\bpor que no (?=(?:me|nos) (?:das?|agregas?|pones?|regalas?|vendes?|sirves?|mandas?)\b)/g;
+const SI_NO_ES_MOLESTIA = /\bsi no es (?:mucha )?molestia\b/g;
+const NO_IMPORTA = /(?<!\bya )\bno importa (?=(?:el|la|los|las|lo|cual|cuanto|que|como|si)\b)/g;
+const CONDICION = /^\s*(?:y )?si no\b/; // "si no hay mango, dame fresa": no se puede saber si se cumple
+// Marcas internas (el mensaje no las puede traer: se quitan al empezar).
+const MARCAS_INTERNAS = /[\u0003\u0004]/g;
+const SIN_DE_NOMBRE = 's\u0003n';   // el "sin" que hace parte del nombre de un producto
+const PARTE_SIN_PESO = '\u0004';    // "no importa el tamaño"
+const OTRO_PEDIDO = /\b(?:y|mas) (?:un|una|uno|\d+|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|media|docena)\b/;
+
+// El "sin" de un producto llamado "Vainilla sin azúcar" no es una exclusión.
+function protegerNombresConSin(t, productos) {
+  let protegido = t;
+  for (const p of Array.isArray(productos) ? productos : []) {
+    const nombre = soloPalabras(p?.nombre);
+    if (/\bsin\b/.test(nombre)) protegido = protegido.split(nombre).join(nombre.replace(/\bsin\b/g, SIN_DE_NOMBRE));
+  }
+  return protegido;
 }
+
+// Divide el mensaje en partes y dice cuáles piden y cuáles rechazan:
+//  - negacion: alguna parte rechaza;  - exclusion: hay un "sin ..."
+//  - pide: hay un pedido en pie;      - duda: "sin azúcar y una de mango" (no es claro qué abarca el "sin")
+//  - positivo / rechazado: el texto donde buscar lo que pide y lo que no quiere
+function analizarMensaje(mensaje, productos = []) {
+  const t = protegerNombresConSin(normalizarTexto(mensaje).replace(MARCAS_INTERNAS, ''), productos)
+    .replace(POR_QUE_NO_ME_DAS, '')
+    .replace(SI_NO_ES_MOLESTIA, '')
+    .replace(NO_IMPORTA, `, ${PARTE_SIN_PESO}`)
+    .replace(CONECTOR_Y_PEDIDO, ', ');
+  const restaurar = (texto) => texto.replace(/\u0003/g, 'i');
+  const consulta = PALABRAS_DE_CONSULTA.test(t);
+
+  const positivas = []; // { texto, despuesDeNegar }
+  const rechazadas = [];
+  let negacion = false;
+  let exclusion = false;
+  let duda = false;
+  let condicion = false;
+  for (const parte of t.split(SEPARADOR)) {
+    if (!parte.trim()) continue;
+    const corte = parte.search(/\bsin\b/);
+    const inicio = corte < 0 ? parte : parte.slice(0, corte);
+    const cola = corte < 0 ? '' : parte.slice(corte);
+    if (NEGACION.test(inicio) || NEGACION_NI.test(inicio) || NEGACION.test(cola)) {
+      negacion = true;
+      condicion = condicion || CONDICION.test(parte);
+      rechazadas.push(parte);
+      positivas.length = 0; // lo pedido antes de una negación ya no es seguro
+      continue;
+    }
+    if (parte.startsWith(PARTE_SIN_PESO)) continue;
+    if (cola) {
+      exclusion = true;
+      duda = duda || OTRO_PEDIDO.test(cola);
+      rechazadas.push(cola);
+    }
+    positivas.push(inicio);
+  }
+
+  let pide;
+  if (negacion) {
+    // Solo cuenta desde el primer pedido claro que venga después de la última negación.
+    const desde = positivas.findIndex((p) => PEDIDO_CLARO.test(p));
+    pide = desde >= 0 && !consulta && !condicion;
+    positivas.splice(0, pide ? desde : positivas.length);
+  } else {
+    const texto = positivas.join(' ');
+    pide = VERBOS_DE_CARRITO.test(texto) || (VERBOS_DE_DESEO.test(texto) && !consulta);
+  }
+  return {
+    negacion, exclusion, duda, pide,
+    positivo: restaurar(positivas.join(' ')),
+    rechazado: restaurar(rechazadas.join(' ')),
+  };
+}
+
+const tieneIntencionDeCompra = (mensaje) => analizarMensaje(mensaje).pide;
 
 // Mensaje que es SOLO una afirmación ("sí", "dale", "sí, por favor", "agrégalo", "la quiero").
 const AFIRMACION = /^(?:(?:si|dale|listo|ok|okey|okay|claro|de una|por favor|porfa|agregalo|agregala|agregamelo|agregamela|anadelo|anadela|lo quiero|la quiero|lo compro|la compro|perfecto|va)\s?)+$/;
@@ -127,10 +210,46 @@ function buscarProductos(texto, productos) {
   return [...completos, ...otros];
 }
 
+// ¿El texto rechazado toca este producto? Basta UNA palabra de su nombre ("no quiero fresa" rechaza todas).
+function estaRechazado(producto, rechazado) {
+  if (!rechazado) return false;
+  const palabras = listaDePalabras(rechazado);
+  const presentes = new Set(palabras.flatMap(variantes));
+  return palabrasClave(producto.nombre).some((c) => presentes.has(c)) || buscarNombresCompletos(palabras, [producto]).completos.length > 0;
+}
+
+// Palabras que acompañan un pedido sin cambiarle el sentido.
+const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y por favor porfa porfavor porfis gracias helado helados '
+  + 'gelato gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra mi carrito docena docenas media').split(' '));
+const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.replace(/\?/g, '').split(/[| ]/).concat('da', 'regala', 'vende', 'pone'));
+
+// ¿El texto es solo el pedido de esos productos? (nada de "quiero reclamar por la fresa").
+function soloNombra(texto, productos, extra = PALABRAS_DE_PEDIDO) {
+  const nombres = new Set(productos.flatMap((p) => listaDePalabras(p.nombre)));
+  return listaDePalabras(texto).every((p) =>
+    RELLENO.has(p) || extra.has(p) || NUMEROS[p] || /^\d{1,2}$/.test(p) || variantes(p).some((v) => nombres.has(v)));
+}
+
+// A qué equivale el mensaje: { producto, cantidad }, { cual: [productos] } si hay que preguntar, o null si
+// no es un pedido claro (decide el modelo, con sus propias defensas).
+function resolverPedido(mensaje, productos) {
+  const a = analizarMensaje(mensaje, productos);
+  if (!a.pide || esConsulta(mensaje)) return null;
+  const encontrados = buscarProductos(a.positivo, productos);
+  if (!encontrados.length) return null;
+  // Con una negación en el mensaje, el pedido tiene que ser limpio.
+  if (a.negacion && !soloNombra(a.positivo, encontrados)) return null;
+  const permitidos = encontrados.filter((p) => !estaRechazado(p, a.rechazado));
+  if (permitidos.length !== 1 || a.duda) return { cual: a.duda ? [] : permitidos };
+  return { producto: permitidos[0], cantidad: leerCantidad(a.positivo) };
+}
+
 module.exports = {
   normalizarTexto,
+  analizarMensaje,
   tieneIntencionDeCompra,
-  hayNegacion,
+  resolverPedido,
+  estaRechazado,
   esConsulta,
   preguntaPrecio,
   esAfirmacion,
