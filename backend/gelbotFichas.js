@@ -59,6 +59,7 @@ const HABLA_DE_UNO = /\b(?:tiene|contiene|lleva|trae|incluye|es|esta|comerl[oa]|
 const ALERGICO_A = /\b(?:alergi\w*|intoleran\w*) (?:al?|de|por) (?:(?:la|el|los|las) )?(frutos secos|crema de leche|[a-z0-9]+(?: (?:y|e|o|ni) (?:al? )?(?:(?:la|el|los|las) )?[a-z0-9]+){0,4})/g;
 const TROZOS_DE_ALERGENO = new RegExp('\\b(?:tienen?|tengan?|contienen?|contengan?|llevan?|lleven?|traen?|traigan?|incluyen?|hay|usan|come|como|comer|tomo|tomar|consumo|consumir|tolero|tolera|sin|libres? de|cuant[oa]s?|(?:trazas|rastros) de)'
   + `${ALGO_DE} ((?:(?:la|el|los) (?=leche|huevos?|gluten|lactosa))?${LISTA_ALERGENOS})\\b`, 'g');
+const DIABETES = /\bdiabet\w*/; // aunque no lo nombre, pregunta por el azúcar
 const FRUTOS_SECOS = /\bfrutos secos\b/g;
 
 const CANONICO = {
@@ -177,7 +178,7 @@ function leerConsultaFicha(mensaje, textoBot, catalogo) {
     const seguimiento = esSeguimiento(mensaje, textoBot, productos);
     return seguimiento.length ? { productos: seguimiento, alergenos: '', pedido: 'no', texto: t } : null;
   }
-  const consulta = { productos: [], alergenos, pedido: 'no', texto: t };
+  const consulta = { productos: [], alergenos: DIABETES.test(t) ? `${alergenos} azucar` : alergenos, pedido: 'no', texto: t };
   if (tipo === 'atributo') consulta.pedido = 'posible';
   else if (tipo === 'pregunta' && hayPedidoAparte(mensaje, productos)) consulta.pedido = 'aparte';
 
@@ -196,13 +197,15 @@ const enumerar = (lista) => (lista.length > 1 ? `${lista.slice(0, -1).join(', ')
 const textoSinFicha = (nombre) =>
   `No tengo la lista de ingredientes de **${nombre}**: su ficha de alérgenos no está registrada. Pregúntale al equipo antes de pedirlo.`;
 
-// Lo que se sabe de una dieta: { etiqueta } de la tienda, { registra } alérgenos que la contradicen, o {} (sin dato).
+// Lo que se sabe de una dieta: { etiqueta } de la tienda, { registra } lo que la ficha tiene en contra, o {}
+// (sin dato, o la etiqueta y la ficha se contradicen).
 function datoDeDieta(dieta, producto, ficha) {
   const registrados = alergenosDe(ficha).filter((a) => dieta.choca.includes(soloPalabras(a)));
   const etiqueta = etiquetasDe(producto).find((e) => soloPalabras(e) === dieta.etiqueta);
-  const ingredienteChoca = ficha.ingredients.some((i) => soloPalabras(i).split(' ').some((w) => dieta.choca.includes(w)));
-  if (etiqueta) return registrados.length || ingredienteChoca ? {} : { etiqueta: etiqueta.trim() };
-  return registrados.length ? { registra: enumerar(registrados) } : {};
+  const ingredientes = ficha.ingredients.filter((i) => soloPalabras(i).split(' ').some((w) => dieta.choca.includes(w)));
+  if (etiqueta) return registrados.length || ingredientes.length ? {} : { etiqueta: etiqueta.trim() };
+  if (registrados.length) return { registra: enumerar(registrados) };
+  return ingredientes.length ? { registra: `entre sus ingredientes ${enumerar(ingredientes)}` } : {};
 }
 
 function lineaDeDieta(dieta, producto, ficha) {
@@ -257,7 +260,8 @@ function lineaDeLista(producto, dietas, { alergenos, texto }) {
 // El menú completo con los alérgenos que registra cada ficha. Nunca se omite un sabor sin ficha.
 function textoLista(productos, consulta) {
   const dietas = DIETAS.filter((d) => d.pregunta.test(consulta.texto));
-  const sinDato = dietas.filter((d) => !productos.some((p) => fichaPropia(p.nombre) && datoDeDieta(d, p, fichaPropia(p.nombre)).etiqueta));
+  const conFicha = productos.map((p) => ({ p, ficha: fichaPropia(p.nombre) })).filter(({ ficha }) => ficha);
+  const sinDato = dietas.filter((d) => !conFicha.some(({ p, ficha }) => Object.keys(datoDeDieta(d, p, ficha)).length));
   return [
     `Estos son los alérgenos que registra la ficha de cada helado. Dime el nombre de un sabor y ${PIDE_SABOR} con todos sus ingredientes:`,
     ...productos.slice(0, MAX_LISTA).map((p) => lineaDeLista(p, dietas, consulta)),
@@ -290,7 +294,7 @@ function respuestaFicha(consulta, catalogo, formatearPrecio) {
 // ── Filtro del texto del modelo ───────────────────────────────
 const SALUD = new RegExp('\\b(?:ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|gluten|lactosa|lacteos?|leche|huevos?|yemas?|frutos secos|nuez|nueces|mani'
   + '|vegan\\w*|vegetarian\\w*|calori\\w*|azucar\\w*|vinagre|hech[oa]s? (?:con|de)|elaborad[oa]s? con|(?:es|son|seria) segur[oa]s? (?:para|comer\\w*|consumir\\w*|si)|apt[oa]s? para|contacto cruzado'
-  + '|(?<!pedido )(?<!carrito )contienen?)\\b');
+  + '|(?<!pedido )(?<!carrito )(?:contienen?|llevan?))\\b');
 function hablaDeSalud(texto, catalogo) {
   let t = soloPalabras(texto);
   if (!SALUD.test(t)) return false;

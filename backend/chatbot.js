@@ -710,6 +710,8 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
   }
 
   let tarjetasMenu = null; // el menú con fotos que se adjunta responda lo que responda el modelo
+  let consulta = null;     // pregunta por la ficha que contesta el servidor, diga lo que diga el modelo
+  const fichaPendiente = async () => ({ ...respuestaFicha(consulta, await getProductsCached(supabase), formatearCOP), actionData: null });
   try {
     const userId = sesion?.id_usuario ?? null;
     const isAdmin = sesion?.rol === 'admin' || sesion?.rol === 'super_admin';
@@ -731,7 +733,6 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
     }
 
     // ── Atajos para clientes (fichas, precio, "sí", sabor suelto, pedido directo, menú), sin LLM ──
-    let consulta = null;
     if (!isAdmin) {
       const atajo = await atajosCliente(message, history, supabase);
       if (atajo?.respuesta) return res.json(atajo.respuesta);
@@ -739,7 +740,6 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
       tarjetasMenu = atajo?.tarjetas?.length ? atajo.tarjetas : null;
     }
     const respuestaMenu = () => ({ response: MENSAJE_SABORES, action: null, product: null, productos: tarjetasMenu, actionData: null });
-    const fichaPendiente = async () => ({ ...respuestaFicha(consulta, await getProductsCached(supabase), formatearCOP), actionData: null });
     // Lo que escribe el modelo para un cliente: limpio y sin datos de salud (esos salen solo de la ficha).
     const textoParaCliente = async (contenido, respaldo) => {
       const limpio = cleanText(contenido);
@@ -821,6 +821,7 @@ USUARIO: ${userName} | role: "cliente"`;
 
     if (!groq) {
       console.error('chatbot: GROQ_API_KEY no configurada');
+      if (consulta) return res.json(await fichaPendiente());
       if (tarjetasMenu) return res.json(respuestaMenu());
       return res.json({ response: MENSAJE_SIN_ASISTENTE });
     }
@@ -1090,6 +1091,7 @@ USUARIO: ${userName} | role: "cliente"`;
     if (esErrorDeGroq(error)) {
       const { categoria, status, codigo } = clasificarErrorGroq(error);
       console.error('chatbot: error de Groq', { categoria, status, codigo, modelo: GROQ_MODEL, tipo: error?.name || null });
+      if (consulta) return res.json(await fichaPendiente());
       if (tarjetasMenu) return res.json({ response: MENSAJE_SABORES, action: null, product: null, productos: tarjetasMenu });
       return res.json({ response: categoria === 'limite' ? MENSAJE_DEMANDA : MENSAJE_FALLA });
     }
