@@ -463,3 +463,39 @@ describe('aceptación 2: quejas y reclamos', () => {
     }
   });
 });
+
+describe('aceptación 2: el modelo no elige el sabor por el cliente', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['quiero un helado'], ['dame algo rico'], ['quiero uno'], ['recomiéndame y agrégalo'], ['dame el mejor'], ['agrégame lo que quieras'],
+      ['quiero el helado que recomiendes'], ['dame dos helados por favor'], ['quiero el más rico'], ['dame uno de los que tengas'], ['quiero la promo'],
+    ])('"%s" NO agrega y pregunta el sabor con el menú a la vista', async (frase) => {
+      await comprobarFrase(frase, null, 0, history);
+      const body = await enviar(frase, { history });
+      expect(body.response).toMatch(/cu[aá]l sabor quieres/i);
+      expect(body.productos.map((p) => p.id)).toEqual(CATALOGO.map((p) => p.id_producto));
+    });
+  });
+
+  it('"agrégalo" tras una oferta única sigue agregando lo ofrecido', () => comprobarFrase('agrégalo', 1, 1, OFERTA));
+  it('"agrégalo" sin oferta NO agrega', () => comprobarFrase('agrégalo', null, 0, []));
+
+  it('admin: un "sí" tampoco deja que el modelo ponga un sabor distinto al ofrecido', async () => {
+    const admin = { Authorization: `Bearer ${tokenPrueba({ id_usuario: 1, email: 'ana@example.com', rol: 'admin' })}` };
+    esperaSinAgregar(await enviar('sí', { history: OFERTA, tramposo: 'Mango', cabeceras: admin }));
+  });
+});
+
+describe('aceptación 2: una sola lista de verbos', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['pásame un mango', 2, 1], ['páseme un mango', 2, 1], ['regáleme dos mangos', 2, 2], ['regálame una fresa', 1, 1], ['me traes un mango?', 2, 1],
+      ['tráeme un mango', 2, 1], ['véndeme una fresa', 1, 1], ['véndame una fresa', 1, 1],
+      // también después de una negación
+      ['no sé, pásame un mango', 2, 1], ['no quiero fresa, me traes un mango', 2, 1],
+    ])('"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, history));
+
+    it.each([['no me traes mango'], ['no me pases la fresa'], ['pasame el precio de la fresa'], ['me pasas el menú']])(
+      '"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, history));
+  });
+});
