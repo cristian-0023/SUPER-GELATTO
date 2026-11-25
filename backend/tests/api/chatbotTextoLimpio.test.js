@@ -108,6 +108,8 @@ describe('1. el prompt del cliente prohíbe nombrar herramientas', () => {
     await responder('Hola.', cabeceras());
     const sistema = llamadasGroq[0].messages[0].content;
     expect(sistema).toMatch(/NUNCA (escribas|nombres|menciones)[^\n]*(herramientas|funciones)/i);
+    // el modelo repetía esta frase del prompt: "ver el menú completo con getProducts"
+    expect(sistema).not.toMatch(/men[uú] completo usa getProducts/i);
   });
 });
 
