@@ -205,3 +205,115 @@ describe('2. la negación solo bloquea si afecta al pedido', () => {
     expect(body.response).not.toContain('Fresa');
   });
 });
+
+describe('3. pedido sin verbo (cantidad + sabor, o sabor + por favor)', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['una de fresa por favor', 1, 1],
+      ['una fresa por favor', 1, 1],
+      ['dos de mango porfa', 2, 2],
+      ['media docena de vainilla', 3, 6],
+      ['2 de fresa', 1, 2],
+      ['una fresa', 1, 1],
+      ['fresa por favor', 1, 1],
+      ['hola, dos fresas porfis', 1, 2],
+      ['un chocolate belga, gracias', 6, 1],
+      ['una fresa sin azúcar por favor', 1, 1],
+      ['50 de mango', 2, 10],
+    ])('"%s" agrega el producto %i x%i', async (mensaje, id, cantidad) => {
+      esperaAgregado(await enviar(mensaje, { history, tramposo: 'Vainilla' }), id, cantidad);
+      expect(llamadasGroq).toHaveLength(0);
+    });
+
+    it.each([
+      ['¿una fresa cuánto vale?'], ['una pregunta'], ['una duda sobre la fresa'], ['¿tienen una de fresa?'], ['dos preguntas'], ['a las 2 abren?'],
+      ['¿una de fresa?'], ['una fresa es muy rica'], ['gracias por una fresa'], ['ayer comí dos fresas'], ['una fresa engorda'], ['la fresa es la número 1'],
+      ['info de la fresa por favor'], ['cuéntame de la fresa por favor'], ['fresa 9000'],
+      ['sin fresa por favor'], ['un helado sin fresa por favor'], ['una fresa no por favor'],
+    ])('"%s" NO agrega (aunque el modelo lo pida)', async (mensaje) => {
+      for (const tramposo of ['Fresa', 'Mango']) esperaSinAgregar(await enviar(mensaje, { history, tramposo }));
+    });
+  });
+
+  it.each([['sin historial', []], ['tras una oferta', OFERTA]])('"fresa" solo, %s, NO agrega', async (_h, history) => {
+    esperaSinAgregar(await enviar('fresa', { history }));
+    esperaSinAgregar(await enviar('la fresa', { history }));
+  });
+
+  it.each([
+    ['sin nombre exacto', 'una fresa', [FRESA_SALVAJE, FRESA_CREMA]],
+    ['mismo nombre', 'una fresa por favor', [FRESA, producto(9, 'FRESA')]],
+    ['dos sabores', 'una de fresa y dos de mango por favor', CATALOGO],
+    ['dos cantidades para un sabor combinado', 'una de fresa y dos de mango', [FRESA_MANGO]],
+  ])('pregunta cuál: %s', async (_c, mensaje, catalogo) => {
+    const body = await enviar(mensaje, { catalogo });
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l/i);
+  });
+});
+
+describe('5. después de "¿cuál?" solo vale un sabor o una afirmación', () => {
+  it.each([
+    ['cuéntame de la fresa'], ['cuéntame de la fresa por favor'], ['háblame de la fresa'], ['la fresa es rica'], ['me gusta la fresa'], ['¿fresa?'],
+    ['y la fresa qué tal'], ['la fresa engorda'], ['el rojito de frutas'], ['mi mamá es alérgica a la fresa'], ['ayer me dieron fresa'],
+    ['gracias'], ['hola'], ['ok'], ['sí'],
+  ])('"%s" NO agrega (aunque el modelo lo pida)', async (mensaje) => {
+    for (const tramposo of ['Fresa', 'Mango']) esperaSinAgregar(await enviar(mensaje, { history: CUAL, tramposo }));
+  });
+
+  it.each([
+    ['fresa', 1, 1], ['la fresa', 1, 1], ['la de fresa', 1, 1], ['Fresa!', 1, 1], ['sí, fresa', 1, 1], ['mejor mango', 2, 1], ['dos de mango', 2, 2],
+    ['una de fresa por favor', 1, 1], ['el chocolate belga', 6, 1], ['belga', 6, 1], ['helado de vainilla', 3, 1], ['fresa sin azúcar', 1, 1],
+  ])('"%s" agrega el producto %i x%i', async (mensaje, id, cantidad) => {
+    esperaAgregado(await enviar(mensaje, { history: CUAL, tramposo: 'Vainilla' }), id, cantidad);
+  });
+
+  it('se puede elegir por el nombre completo un sabor que lleva "sin"', async () => {
+    const catalogo = [FRESA, VAINILLA, producto(9, 'Vainilla sin azúcar')];
+    esperaAgregado(await enviar('vainilla sin azúcar', { history: CUAL, catalogo }), 9, 1);
+    esperaAgregado(await enviar('vainilla', { history: CUAL, catalogo }), 3, 1);
+  });
+
+  it('entre las opciones que dio el bot, basta la palabra que las distingue', async () => {
+    const history = [{ role: 'assistant', content: '¿Cuál de estos quieres? **Fresa Salvaje**, **Fresa con crema** 🍦' }];
+    esperaAgregado(await enviar('la salvaje', { history, catalogo: [FRESA_SALVAJE, FRESA_CREMA] }), 4, 1);
+    esperaSinAgregar(await enviar('la segunda', { history, catalogo: [FRESA_SALVAJE, FRESA_CREMA], tramposo: 'Fresa con crema' }));
+  });
+});
+
+describe('seguridad y velocidad', () => {
+  it('las defensas no dependen del rol que diga el cuerpo: un visitante tampoco agrega lo rechazado', async () => {
+    esperaSinAgregar(await enviar('no quiero fresa', { cabeceras: {} }));
+    esperaAgregado(await enviar('no quiero fresa, quiero mango', { cabeceras: {} }), 2, 1);
+  });
+
+  // 1000 caracteres es el límite real del mensaje.
+  const MIL = (t) => t.repeat(Math.ceil(1000 / t.length)).slice(0, 1000);
+  const GRANDE = Array.from({ length: 200 }, (_, i) => producto(i + 1, `Sabor especial sin azúcar número ${i} fresa con mango`));
+  it.each([
+    ['no '], ['por que no '], ['sin '], ['no importa '], ['si '], ['dale '], ['ok'], ['una de '], ['fresa '], ['y dame '], [' y '], [','], ['!'], [' '], ['\n'],
+    ['a'], ['é'], ['si no es mucha '], ['nada '], ['media docena '], ['agreg'], ['anad'], ['quit'], ['9'], ['9 '], ['- '], ['…'], ['sin azúcar y '],
+    ['por favor '], ['sí, dale ok '], ['sabor especial sin '], ['me da '], ['cual '],
+  ])('mensaje de 1000 caracteres con %j: menos de 150 ms', (trozo) => {
+    const mensaje = MIL(trozo);
+    for (const f of ['analizarMensaje', 'resolverPedido', 'tieneIntencionDeCompra', 'esConsulta', 'preguntaPrecio', 'esAfirmacion', 'botOfrecioAgregar', 'botPreguntoCual', 'leerCantidad', 'buscarProductos']) {
+      const inicio = performance.now();
+      intencion[f](mensaje, GRANDE, { tras: true });
+      expect(performance.now() - inicio, f).toBeLessThan(150);
+    }
+  });
+});
+
+describe('4. los números del nombre no son la cantidad', () => {
+  const LECHES = producto(10, 'Tres Leches');
+  it.each([
+    ['dame una tres leches', 1], ['quiero tres leches', 1], ['tres leches por favor', 1], ['dame dos tres leches', 2], ['dos de tres leches', 2],
+  ])('"%s" -> Tres Leches x%i', async (mensaje, cantidad) => {
+    esperaAgregado(await enviar(mensaje, { catalogo: [FRESA, LECHES] }), 10, cantidad);
+  });
+
+  it('el addToCart del modelo tampoco lee la cantidad del nombre', async () => {
+    const body = await enviar('quiero el de la abuela', { catalogo: [FRESA, LECHES], tramposo: 'Tres Leches' });
+    esperaAgregado(body, 10, 1);
+  });
+});
