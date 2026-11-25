@@ -402,3 +402,64 @@ describe('tabla de aceptación', () => {
     }
   });
 });
+
+// Segunda ronda de aceptación: frases de la revisión de código. [frase, producto o null si no agrega, cantidad]
+async function comprobarFrase(frase, id, cantidad, history) {
+  for (const tramposo of ['Fresa', 'Mango', 'Chocolate Belga']) {
+    const body = await enviar(frase, { history, tramposo });
+    if (id === null) {
+      esperaSinAgregar(body);
+    } else esperaAgregado(body, id, cantidad);
+  }
+}
+
+describe('aceptación 2: compras contadas, en futuro o de otra persona', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['ayer compramos fresa'], ['compramos mango ayer y estaba dañado'], ['mi esposo compró mango'], ['mi esposo compro mango'],
+      ['voy a comprar mango mañana'], ['comprar mango es caro?'], ['cuando compré fresa estaba rica'], ['cuando compre fresa estaba rica'],
+      ['ayer me compraron un mango'], ['me regalaron una fresa'], ['ayer agregué una fresa'], ['ya agregaste la fresa'], ['mi hija pide mango'],
+      ['mañana compraré una fresa'], ['siempre compro fresa aquí'], ['para qué sirve la fresa'], ['ella se llevó un mango'], ['mi tía me llevó mango'],
+    ])('"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, history));
+
+    it.each([
+      ['compro una fresa', 1, 1], ['cómprame una fresa', 1, 1], ['quiero comprar una fresa', 1, 1], ['te compro dos de mango', 2, 2],
+      ['me llevo una fresa', 1, 1], ['hoy compro un mango', 2, 1], ['Hola, te compro una fresa', 1, 1],
+    ])('"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, history));
+  });
+});
+
+describe('aceptación 2: "llevo" suelto', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it('"llevo una hora esperando mi mango" NO agrega', () => comprobarFrase('llevo una hora esperando mi mango', null, 0, history));
+    it('"me llevo un mango" agrega', () => comprobarFrase('me llevo un mango', 2, 1, history));
+  });
+
+  it.each([['lo llevo'], ['me la llevo'], ['Sí, me lo llevo']])('"%s" tras la oferta agrega lo ofrecido', (frase) => comprobarFrase(frase, 1, 1, OFERTA));
+  it('"lo llevo" sin oferta NO agrega', () => comprobarFrase('lo llevo', null, 0, []));
+});
+
+describe('aceptación 2: quejas y reclamos', () => {
+  describe.each(HISTORIALES)('%s', (_h, history) => {
+    it.each([
+      ['quiero reclamar por el mango'], ['tengo un problema con el mango'], ['pedí fresa y no llegó'], ['pedí mango hace una hora'],
+      ['mi mango llegó derretido'], ['soy alérgico a la fresa'], ['quiero quejarme del mango'], ['necesito ayuda con el mango'],
+      ['quiero hablar del mango'], ['quisiera hacer una pregunta de la fresa'], ['pedí mango y quiero mi plata del mango'],
+      ['pedí mango, quiero que me traigan el mango'], ['compré mango, quiero el reembolso del mango'], ['dame una fresa como la que compré ayer'],
+    ])('"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, history));
+
+    it.each([
+      ['ya, dame una fresa', 1, 1], ['dame el de mango', 2, 1], ['quiero el mango', 2, 1], ['antes de irme dame una fresa', 1, 1],
+      ['ayer compré fresa y me encantó, dame otra fresa', 1, 1], ['compré mango ayer, dame dos de vainilla', 3, 2],
+      ['quiero probar el mango', 2, 1], ['quiero pedir una fresa', 1, 1],
+    ])('"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, history));
+  });
+
+  it('si el modelo intenta agregar en una queja, la respuesta no ofrece el producto', async () => {
+    for (const frase of ['quiero reclamar por el mango', 'pedí mango hace una hora', 'ayer compramos fresa']) {
+      const { response } = await enviar(frase, { tramposo: 'Mango' });
+      expect(response).toMatch(/no puse nada/i);
+      expect(response).not.toMatch(/agr[eé]galo|cuesta/i);
+    }
+  });
+});
