@@ -25,7 +25,7 @@ const NEGACION_NI = /\bni\b/;
 // claro: pedido inconfundible, el único que cuenta después de una negación o de un relato.
 const VERBOS = [
   { deseo: false, claro: true, formas: 'agregame|agregueme|agrega|anademe|anade|pongame|traeme|traigame|sirveme|mandame|echame|vendeme|vendame|me llevo|me vendes?|me pones?' },
-  { deseo: true, claro: true, formas: 'quiero|quisiera|dame|deme|ponme|regalame|regaleme|me das?|me regalas?' },
+  { deseo: true, claro: true, formas: 'quiero|quisiera|dame|deme|ponme|pasame|paseme|regalame|regaleme|me das?|me regalas?|me pasas?|me traes' },
   { deseo: false, claro: false, formas: 'agreg(?:as|o|ar|ale|anos|ue|ues)|anad(?:es|o|ir|ele|enos|a|as)|compra(?:me|nos)|compreme|me llevas?|pido|ordeno|manda|mande|manden|mandeme|me sirves?|sirvame|sirva|sirves|echale|echeme|echa|me ponga|ponga|trame' },
   { deseo: true, claro: false, formas: 'me gustaria|necesito|antoja|antojo|regalas?' },
 ];
