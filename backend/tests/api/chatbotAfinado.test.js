@@ -317,3 +317,14 @@ describe('4. los números del nombre no son la cantidad', () => {
     esperaAgregado(body, 10, 1);
   });
 });
+
+describe('2. otras formas de decir que no', () => {
+  it.each([['nooo quiero fresa'], ['noo la quiero, la fresa'], ['nop quiero fresa'], ['nah quiero fresa pues'], ['nel quiero una fresa']])('"%s" NO agrega', async (mensaje) => {
+    esperaSinAgregar(await enviar(mensaje));
+    esperaSinAgregar(await enviar(mensaje, { history: CUAL }));
+  });
+
+  it('"nooo, dame mango" sí agrega el mango', async () => {
+    esperaAgregado(await enviar('nooo, dame mango'), 2, 1);
+  });
+});
