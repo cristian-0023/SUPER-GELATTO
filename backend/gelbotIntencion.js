@@ -51,6 +51,7 @@ const esRelato = (parte) => [RELATO, FUTURO, COSTUMBRE, DESEO_DE_OTRA_COSA].some
 const PASADO_CON_TILDE = /(?<!\p{L})(compr|llev|agreg|regal|mand)(?:\u00f3|u?\u00e9)(?!\p{L})/gu;
 const marcarPasados = (mensaje) => String(mensaje || '').toLowerCase().normalize('NFC').replace(PASADO_CON_TILDE, '$1aron');
 
+const PIDE_OTRO = /\b(?:otr[oa]s?|mas)\b/;
 const PALABRAS_DE_CONSULTA = /\b(cuanto|cuesta|cuestan|precios?|vale|valor|ingredientes?|contiene|hecho|cuales|tienen|hay|saber|informacion|info|sabores|menu|catalogo|opciones|ver)\b/;
 const PALABRAS_DE_PRECIO = /\b(cuanto|cuesta|cuestan|precios?|vale|valen|valor)\b/;
 
@@ -104,7 +105,7 @@ function clasificarParte(parte) {
 
 // Reparte las partes entre lo que se puede pedir y lo que se rechaza.
 function repartirPartes(texto) {
-  const r = { positivas: [], rechazadas: [], negacion: false, relato: false, exclusion: false, duda: false, condicion: false };
+  const r = { positivas: [], rechazadas: [], relatadas: [], negacion: false, relato: false, exclusion: false, duda: false, condicion: false };
   for (const parte of texto.split(SEPARADOR)) {
     if (!parte.trim()) continue;
     const { tipo, inicio, cola } = clasificarParte(parte);
@@ -115,6 +116,7 @@ function repartirPartes(texto) {
       r.positivas = []; // lo pedido antes de una negación ya no es seguro
     } else if (tipo === 'relato') {
       r.relato = true;
+      r.relatadas.push(parte);
       r.positivas = []; // ni lo pedido antes de una queja o de contar algo
     } else if (tipo === 'pedido') {
       r.positivas.push(inicio);
@@ -142,7 +144,7 @@ function partesDelPedido({ positivas, negacion, relato, condicion }, consulta) {
 // Qué dice el mensaje:
 //  - negacion: alguna parte rechaza;  - relato: alguna parte cuenta algo o se queja;  - exclusion: hay un "sin ..."
 //  - pide: hay un pedido en pie;      - duda: "sin azúcar y una de mango" (no es claro qué abarca el "sin")
-//  - positivo / rechazado: el texto donde buscar lo que pide y lo que no quiere
+//  - positivo / rechazado / relatado: el texto donde buscar lo que pide, lo que no quiere y de lo que habla
 function analizarMensaje(mensaje, productos = []) {
   const texto = prepararTexto(mensaje, productos);
   const r = repartirPartes(texto);
@@ -151,7 +153,7 @@ function analizarMensaje(mensaje, productos = []) {
   const restaurar = (partes) => partes.join(' ').replace(/\u0003/g, 'i');
   return {
     negacion: r.negacion, relato: r.relato, exclusion: r.exclusion, duda: r.duda, pide: pedido !== null,
-    positivo: restaurar(positivas), rechazado: restaurar(r.rechazadas),
+    positivo: restaurar(positivas), rechazado: restaurar(r.rechazadas), relatado: restaurar(r.relatadas),
   };
 }
 
@@ -265,7 +267,7 @@ function estaRechazado(producto, rechazado) {
 
 // Palabras que acompañan un pedido sin cambiarle el sentido.
 const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y porfa porfavor porfis gracias helado helados gelato '
-  + 'gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra mi carrito docena docenas media').split(' '));
+  + 'gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra hoy ahora mi carrito docena docenas media').split(' '));
 const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.split(/[| ]/).flatMap((f) => (f.endsWith('s?') ? [f.slice(0, -2), f.slice(0, -1)] : [f])));
 const SALUDOS_Y_AFIRMACIONES = new Set('hola buenas buenos dias tardes noches si dale listo ok okey claro bueno esa ese'.split(' '));
 const POR_FAVOR = /\b(?:por favor|por fa|porfa|porfavor|porfis)\b/;
@@ -312,6 +314,8 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   if (permitidos.length !== 1) return { cual: permitidos };
   const [producto] = permitidos;
   if (!a.pide && contarCantidades(sinNombre(a.positivo, producto)) > 1) return { cual: permitidos };
+  // "pedí mango, quiero el mango" es un reclamo; "compré mango ayer, quiero otro mango" sí es un pedido.
+  if (estaRechazado(producto, a.relatado) && !PIDE_OTRO.test(a.positivo)) return null;
   return { producto, cantidad: leerCantidadDe(a.positivo, producto) };
 }
 
