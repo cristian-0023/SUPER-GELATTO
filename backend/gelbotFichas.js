@@ -116,7 +116,10 @@ function tipoDePregunta(t, hayProducto) {
   if (CONDICION_DE_SALUD.test(t)) return 'salud';
   const delPedido = DEL_PEDIDO.test(t);
   const fuerte = t.match(PREGUNTA_FUERTE);
-  if (fuerte && !(delPedido && HECHO.test(fuerte[0]))) return fuerte[0].startsWith('sin ') ? 'atributo' : 'pregunta';
+  if (fuerte && !(delPedido && HECHO.test(fuerte[0]))) {
+    // "sin azúcar" es un atributo, salvo que además pregunte ("sin azúcar, ¿tiene leche?").
+    return fuerte[0].startsWith('sin ') ? tipoDePregunta(t.replace(fuerte[0], ' '), hayProducto) || 'atributo' : 'pregunta';
+  }
   if (delPedido) return null;
   if (CUANTO_ALERGENO.test(t)) return 'pregunta';
   const conVerbo = t.match(VERBO_Y_ALERGENO);
@@ -154,7 +157,7 @@ function hayPedidoAparte(mensaje, productos) {
   if (!analizarMensaje(mensaje, productos).pide) return false;
   const partes = mensaje.split(SEPARADOR).filter((parte) => {
     const t = soloPalabras(parte);
-    return t && !PIDE_INFORMACION.test(t) && tipoDePregunta(t, true) === null;
+    return t && !PIDE_INFORMACION.test(t) && [null, 'atributo'].includes(tipoDePregunta(t, true));
   });
   return partes.length > 0 && resolverPedido(partes.join(', '), productos) !== null;
 }

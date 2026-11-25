@@ -659,7 +659,7 @@ async function atajosCliente(message, history, supabase) {
   //    suelto justo después de "¿cuál quieres?".
   const conFicha = consulta?.pedido === 'aparte' ? consulta : null;
   if (pedido?.producto) return listo(agregarFicha(respuestaAgregar(pedido.producto, pedido.cantidad), conFicha, pedido.producto));
-  if (pedido?.cual) return listo(respuestaCual(pedido.cual));
+  if (pedido?.cual) return listo(conFicha ? respuestaFicha(conFicha, productos, formatearCOP) : respuestaCual(pedido.cual));
   if (conFicha) return { consulta: conFicha };
 
   // 5. No dijo el sabor, o pide el menú o una recomendación: tarjetas con foto.
