@@ -506,3 +506,15 @@ describe('aceptación 2: pedir lo mismo que se reclama', () => {
   it.each([['compré mango ayer, quiero otro mango', 2, 1], ['pedí fresa ayer, dame dos fresas más', 1, 2], ['pedí fresa ayer, hoy dame mango', 2, 1]])(
     '"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, []));
 });
+
+describe('aceptación 2: lo que se siente no es un pedido, y un apodo suelto no deja elegir al modelo', () => {
+  it.each([['me da risa el mango'], ['me da igual la fresa'], ['me da miedo la fresa'], ['me pone triste el mango']])(
+    '"%s" NO agrega', (frase) => comprobarFrase(frase, null, 0, []));
+  it.each([['¿me da un mango?', 2, 1], ['me da dos mangos', 2, 2], ['me pone una fresa', 1, 1], ['¿me das mango?', 2, 1], ['me da otro mango', 2, 1]])(
+    '"%s" agrega el producto %i x%i', (frase, id, cantidad) => comprobarFrase(frase, id, cantidad, []));
+  it.each([['dame el barato'], ['quiero el clásico'], ['dame la sorpresa'], ['quiero el del chef'], ['dame una bola de helado'], ['dame la especialidad de la casa']])(
+    '"%s" NO agrega y pregunta el sabor', async (frase) => {
+      await comprobarFrase(frase, null, 0, []);
+      expect((await enviar(frase)).response).toMatch(/cu[aá]l sabor quieres/i);
+    });
+});
