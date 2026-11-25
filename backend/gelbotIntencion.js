@@ -219,29 +219,55 @@ function estaRechazado(producto, rechazado) {
 }
 
 // Palabras que acompañan un pedido sin cambiarle el sentido.
-const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y por favor porfa porfavor porfis gracias helado helados '
-  + 'gelato gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra mi carrito docena docenas media').split(' '));
+const RELLENO = new Set(('a al de del la el las los lo un una uno unos unas me y porfa porfavor porfis gracias helado helados gelato '
+  + 'gelatos sabor copa vaso mejor entonces pues solo nada mas otro otra mi carrito docena docenas media').split(' '));
 const PALABRAS_DE_PEDIDO = new Set(PEDIDOS_CLAROS.replace(/\?/g, '').split(/[| ]/).concat('da', 'regala', 'vende', 'pone'));
+const SALUDOS_Y_AFIRMACIONES = new Set('hola buenas buenos dias tardes noches si dale listo ok okey claro bueno esa ese'.split(' '));
+const POR_FAVOR = /\b(?:por favor|por fa|porfa|porfavor|porfis)\b/;
+const ES_NUMERO = /^\d{1,2}$/;
 
-// ¿El texto es solo el pedido de esos productos? (nada de "quiero reclamar por la fresa").
-function soloNombra(texto, productos, extra = PALABRAS_DE_PEDIDO) {
+// ¿El texto es solo el nombre de esos productos, con cantidad y cortesía? (nada de "una duda sobre la fresa").
+function soloNombra(texto, productos, extra) {
   const nombres = new Set(productos.flatMap((p) => listaDePalabras(p.nombre)));
-  return listaDePalabras(texto).every((p) =>
-    RELLENO.has(p) || extra.has(p) || NUMEROS[p] || /^\d{1,2}$/.test(p) || variantes(p).some((v) => nombres.has(v)));
+  return listaDePalabras(soloPalabras(texto).replace(POR_FAVOR, '')).every((p) =>
+    RELLENO.has(p) || extra.has(p) || NUMEROS[p] || ES_NUMERO.test(p) || variantes(p).some((v) => nombres.has(v)));
+}
+
+// El texto sin el nombre del producto: en "dos tres leches", el "tres" es del nombre y no de la cantidad.
+const sinNombre = (texto, producto) => buscarNombresCompletos(listaDePalabras(texto), [producto]).restantes.join(' ');
+const leerCantidadDe = (texto, producto) => leerCantidad(sinNombre(texto, producto));
+
+// Cuántas cantidades dice el texto ("una fresa y dos" dice dos; "media docena" es una sola).
+function contarCantidades(texto) {
+  return listaDePalabras(soloPalabras(texto).replace(/\b(?:[a-z0-9]{1,6} )?docenas?\b/g, 'seis'))
+    .filter((p) => p === 'un' || p === 'una' || p === 'uno' || NUMEROS[p] || ES_NUMERO.test(p)).length;
+}
+
+// Pedido sin verbo: "dos de mango", "fresa por favor", o el sabor solo si el bot acaba de preguntar cuál.
+// Solo vale si el mensaje no dice nada más y no pregunta.
+function esPedidoSinVerbo(mensaje, positivo, encontrados, trasCual) {
+  if (/[?¿]/.test(mensaje) || !soloNombra(positivo, encontrados, SALUDOS_Y_AFIRMACIONES)) return false;
+  const texto = encontrados.reduce(sinNombre, positivo);
+  return trasCual || contarCantidades(texto) > 0 || POR_FAVOR.test(soloPalabras(mensaje));
 }
 
 // A qué equivale el mensaje: { producto, cantidad }, { cual: [productos] } si hay que preguntar, o null si
 // no es un pedido claro (decide el modelo, con sus propias defensas).
-function resolverPedido(mensaje, productos) {
+// trasCual: el último mensaje del bot preguntó cuál sabor quiere.
+function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
   const a = analizarMensaje(mensaje, productos);
-  if (!a.pide || esConsulta(mensaje)) return null;
+  if (esConsulta(mensaje) || (a.negacion && !a.pide)) return null;
   const encontrados = buscarProductos(a.positivo, productos);
   if (!encontrados.length) return null;
-  // Con una negación en el mensaje, el pedido tiene que ser limpio.
-  if (a.negacion && !soloNombra(a.positivo, encontrados)) return null;
+  if (!a.pide && !esPedidoSinVerbo(mensaje, a.positivo, encontrados, trasCual)) return null;
+  // Con una negación en el mensaje, el pedido tiene que ser limpio (nada de "quiero reclamar por la fresa").
+  if (a.negacion && !soloNombra(a.positivo, encontrados, PALABRAS_DE_PEDIDO)) return null;
   const permitidos = encontrados.filter((p) => !estaRechazado(p, a.rechazado));
-  if (permitidos.length !== 1 || a.duda) return { cual: a.duda ? [] : permitidos };
-  return { producto: permitidos[0], cantidad: leerCantidad(a.positivo) };
+  if (a.duda) return { cual: [] };
+  if (permitidos.length !== 1) return { cual: permitidos };
+  const [producto] = permitidos;
+  if (!a.pide && contarCantidades(sinNombre(a.positivo, producto)) > 1) return { cual: permitidos };
+  return { producto, cantidad: leerCantidadDe(a.positivo, producto) };
 }
 
 module.exports = {
@@ -256,6 +282,7 @@ module.exports = {
   botOfrecioAgregar,
   botPreguntoCual,
   leerCantidad,
+  leerCantidadDe,
   buscarProductos,
   MAX_CANTIDAD,
 };
