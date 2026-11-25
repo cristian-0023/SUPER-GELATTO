@@ -171,7 +171,12 @@ describe('2. dietas: solo lo que dice la ficha o la etiqueta de la tienda', () =
     expect((await enviar('¿el tiramisú es sin gluten?')).response).toMatch(/la ficha registra Gluten/i);
     expect((await enviar('¿el matcha es sin gluten?')).response).toMatch(/la ficha registra Avena/i);
     expect((await enviar('¿la rosa es sin gluten?')).response).toMatch(/no tengo esa información/i);
-    expect((await enviar('¿la fresa es sin azúcar?')).response).toMatch(/sin azúcar: no tengo esa información/i);
+    expect((await enviar('¿la fresa es sin azúcar?')).response).toMatch(/sin azúcar: la ficha registra entre sus ingredientes Azúcar de caña\./);
+    expect((await enviar('soy diabético, ¿puedo comer el mango?')).response).toMatch(/la ficha registra entre sus ingredientes Azúcar de palma/);
+    expect((await enviar('¿el tiramisú es sin azúcar?')).response).toMatch(/sin azúcar: no tengo esa información/i);
+    const lista = (await enviar('soy diabético, ¿qué puedo comer?')).response;
+    expect(lista).toMatch(/Fresa Salvaje\*\*[^\n]*Azúcar de caña/);
+    expect(lista).not.toMatch(/no tengo esa información/);
     expect((await enviar('¿la vainilla es vegetariana?')).response).toMatch(/no tengo esa información/i);
   });
   it('si la etiqueta contradice la ficha: no tengo esa información (y la etiqueta no se repite)', async () => {
@@ -294,6 +299,15 @@ describe('6. pedido y pregunta en el mismo mensaje: se agrega lo pedido y la fic
     expect(body.response).toContain(FICHAS[1][0]);
     expect(body.response).toMatch(AVISO);
   });
+  it('si Groq falla, la ficha igual se muestra y no se agrega nada', async () => {
+    const { APIError } = requireNode('groq-sdk/error');
+    productosBase = CATALOGO_REAL;
+    for (const opciones of [{ groq: async () => { throw APIError.generate(500, { error: { message: 'x' } }, undefined, new Headers()); } }, { groqApiKey: '' }]) {
+      const { app } = cargarServidor(fake, opciones);
+      const { body } = await request(app).post('/api/chatbot').send({ message: 'agrégame una fresa, ¿qué ingredientes contiene?' });
+      esperaFicha(body, 1);
+    }
+  });
   it.each([['dame una fresa sin azúcar, ¿tiene leche?'], ['dame una fresa sin azúcar, ¿lleva huevo?']])('"%s": el "sin azúcar" no tapa la pregunta', async (frase) => {
     const body = await enviar(frase);
     expect(body.action).toBe('addToCart');
@@ -320,6 +334,7 @@ describe('7. defensa extra: si algo se escapa al atajo, el modelo no puede dar d
     [INVENTO], ['El mango es vegano y sin gluten.'], ['Tranquilo, es seguro para alérgicos.'], ['La fresa no lleva leche.'], ['Nuestros helados no contienen huevos.'],
     ['Es apto para celíacos.'], ['Tiene pocas calorías.'], ['No tiene lactosa'],
     ['La **Fresa Salvaje** lleva fresas frescas, azúcar y un toque de vinagre balsámico.'], ['Está hecha con fruta fresca.'], ['Está elaborado con cacao.'], ['Contiene fruta natural.'],
+    ['La Fresa Salvaje lleva fresas silvestres y un toque de balsámico.'], ['Los helados llevan fruta.'],
   ])('el texto "%s" no llega al cliente', async (inventado) => {
     for (const guion of [[texto(inventado)], [pideHerramienta('getOrders'), texto(inventado)]]) {
       const body = await enviar(ESCAPA, { guion });
@@ -338,7 +353,7 @@ describe('7. defensa extra: si algo se escapa al atajo, el modelo no puede dar d
   });
   it('un texto normal del modelo pasa igual (aunque nombre un producto que se llama "... sin azúcar")', async () => {
     expect((await enviar(ESCAPA, { guion: [texto('La **Fresa Salvaje** es intensa 🍓')] })).response).toBe('La **Fresa Salvaje** es intensa 🍓');
-    for (const normal of ['Tu pedido contiene 2 helados.', 'Es seguro pagar en la página.']) expect((await enviar(ESCAPA, { guion: [texto(normal)] })).response).toBe(normal);
+    for (const normal of ['Tu pedido contiene 2 helados.', 'Tu pedido lleva 2 helados.', 'Es seguro pagar en la página.']) expect((await enviar(ESCAPA, { guion: [texto(normal)] })).response).toBe(normal);
     const catalogo = [{ ...CATALOGO_REAL[0], nombre: 'Vainilla sin azúcar' }];
     expect((await enviar('hola', { catalogo, guion: [texto('Hoy tenemos Vainilla sin azúcar.')] })).response).toBe('Hoy tenemos Vainilla sin azúcar.');
   });
