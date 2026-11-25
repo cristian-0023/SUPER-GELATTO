@@ -152,9 +152,20 @@ describe('3. cantidad', () => {
 
   it('el addToCart del modelo también lleva la cantidad del mensaje', async () => {
     guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('Listo.')];
-    const res = await chat({ message: 'quiero tres del rojito de frutas' });
+    const res = await chat({ message: 'agrégame tres fresas, ¿qué ingredientes contiene?' });
+    expect(llamadasGroq.length).toBeGreaterThan(0);
     expect(res.body.action).toBe('addToCart');
     expect(res.body.quantity).toBe(3);
+  });
+
+  it('un apodo con cantidad ("quiero tres del rojito de frutas") no agrega: pregunta el sabor con el menú', async () => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('Listo.')];
+    const res = await chat({ message: 'quiero tres del rojito de frutas' });
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(res.body.productos.length).toBeGreaterThan(0);
+    expect(res.body.quantity).toBeUndefined();
   });
 });
 
@@ -202,17 +213,40 @@ describe('4. coincidencia de productos (palabra completa, sin palabras genérica
 
   it('el addToCart del modelo usa la caché de productos (no consulta la base otra vez)', async () => {
     guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('Listo.')];
-    const res = await chat({ message: 'quiero el rojito de frutas' });
+    const res = await chat({ message: 'agrégame una fresa, ¿qué ingredientes contiene?' });
+    expect(llamadasGroq.length).toBeGreaterThan(0);
     expect(res.body.action).toBe('addToCart');
+    expect(fake.consultas('producto', 'select')).toHaveLength(1);
+  });
+
+  it('un apodo no agrega, pregunta el sabor con el menú y tampoco consulta la base otra vez', async () => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('Listo.')];
+    const res = await chat({ message: 'quiero el rojito de frutas' });
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(res.body.productos.length).toBeGreaterThan(0);
     expect(fake.consultas('producto', 'select')).toHaveLength(1);
   });
 
   it('si el modelo pide un nombre ambiguo, no agrega y pregunta cuál', async () => {
     productosBase = [FRESA, FRESA_MANGO];
     guion = [pideHerramienta('addToCart', { productName: 'fresa' }), texto('Listo.')];
+    const res = await chat({ message: 'agrégame una fresa, ¿qué ingredientes contiene?' });
+    expect(llamadasGroq.length).toBeGreaterThan(0);
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.response).toMatch(/cu[aá]l de estos/i);
+    expect(res.body.response).toContain('Fresa con Mango');
+  });
+
+  it('si el cliente usa un apodo y el modelo pide un nombre ambiguo, se pregunta el sabor con el menú', async () => {
+    productosBase = [FRESA, FRESA_MANGO];
+    guion = [pideHerramienta('addToCart', { productName: 'fresa' }), texto('Listo.')];
     const res = await chat({ message: 'quiero el rojito de frutas' });
     expect(res.body.action).not.toBe('addToCart');
-    expect(res.body.response).toMatch(/cu[aá]l/i);
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(res.body.productos.length).toBeGreaterThan(0);
   });
 });
 

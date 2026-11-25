@@ -191,13 +191,24 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
 
 describe('3. el precio lo escribe el servidor', () => {
   it('addToCart: aunque el modelo diga "$12.000", el cliente lee el precio real "$9.000"', async () => {
-    // "el rojito de frutas" no lo resuelve el atajo: pasa por el modelo.
+    // pedido y pregunta a la vez: no lo resuelve el atajo, pasa por el modelo.
     guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('**Fresa** cuesta **$12.000 COP** y ya está en tu carrito.')];
-    const res = await chat({ message: 'quiero el rojito de frutas' }, tokenCliente());
+    const res = await chat({ message: 'agrégame una fresa, ¿qué ingredientes contiene?' }, tokenCliente());
+    expect(llamadasGroq.length).toBeGreaterThan(0);
     expect(res.body.action).toBe('addToCart');
     expect(res.body.product).toMatchObject({ id: 1, precio: 9000 });
     expect(res.body.response).toContain('Fresa Salvaje');
     expect(res.body.response).toContain('$9.000');
+    expect(res.body.response).not.toMatch(/12\.000/);
+  });
+
+  it('un apodo ("quiero el rojito de frutas") no deja que el modelo elija: no agrega y pregunta el sabor con el menú', async () => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto('**Fresa** cuesta **$12.000 COP** y ya está en tu carrito.')];
+    const res = await chat({ message: 'quiero el rojito de frutas' }, tokenCliente());
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(res.body.productos.length).toBeGreaterThan(0);
     expect(res.body.response).not.toMatch(/12\.000/);
   });
 

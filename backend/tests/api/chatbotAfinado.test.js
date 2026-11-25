@@ -84,7 +84,14 @@ describe('4. el nombre exacto gana', () => {
     });
 
   it.each([['Fresa', 1], ['fresa salvaje', 4], ['Fresa con crema', 5]])('addToCart del modelo: "%s" -> producto %i', async (nombre, id) => {
-    esperaAgregado(await enviar('quiero el rojito de frutas', { catalogo: FRESAS, tramposo: nombre }), id, 1);
+    const pedido = `agrégame una ${nombre}, ¿qué ingredientes contiene?`; // pedido y pregunta: pasa por el modelo
+    esperaAgregado(await enviar(pedido, { catalogo: FRESAS, tramposo: nombre }), id, 1);
+    expect(llamadasGroq.length).toBeGreaterThan(0);
+    // con un apodo, el modelo no elige
+    const body = await enviar('quiero el rojito de frutas', { catalogo: FRESAS, tramposo: nombre });
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(body.productos).toHaveLength(3);
   });
 
   it('"sí" después de la oferta de Fresa -> Fresa (no pregunta por las otras)', async () => {
@@ -317,8 +324,16 @@ describe('4. los números del nombre no son la cantidad', () => {
   });
 
   it('el addToCart del modelo tampoco lee la cantidad del nombre', async () => {
-    const body = await enviar('quiero el de la abuela', { catalogo: [FRESA, LECHES], tramposo: 'Tres Leches' });
+    const body = await enviar('agrégame una tres leches, ¿qué ingredientes contiene?', { catalogo: [FRESA, LECHES], tramposo: 'Tres Leches' });
     esperaAgregado(body, 10, 1);
+    expect(llamadasGroq.length).toBeGreaterThan(0);
+  });
+
+  it('un apodo ("el de la abuela") no agrega: pregunta el sabor con el menú', async () => {
+    const body = await enviar('quiero el de la abuela', { catalogo: [FRESA, LECHES], tramposo: 'Tres Leches' });
+    esperaSinAgregar(body);
+    expect(body.response).toMatch(/cu[aá]l sabor quieres/i);
+    expect(body.productos).toHaveLength(2);
   });
 });
 
