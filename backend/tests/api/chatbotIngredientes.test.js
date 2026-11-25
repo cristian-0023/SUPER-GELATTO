@@ -29,7 +29,11 @@ beforeEach(() => {
   productosBase = CATALOGO_REAL;
   fake.reiniciar();
   fake.responder('usuario', 'select', { data: { id_usuario: 7, nombre: 'Carlos', email: 'x@example.com', rol: 'cliente' }, error: null });
-  fake.responder('producto', 'select', () => ({ data: productosBase, error: null }));
+  // como la base real, solo devuelve las columnas pedidas
+  fake.responder('producto', 'select', (c) => {
+    const columnas = c.columnas.split(',').map((n) => n.trim());
+    return { data: productosBase.map((p) => Object.fromEntries(columnas.map((n) => [n, p[n]]))), error: null };
+  });
 });
 
 const FUE_AL_CARRITO = () => [pideHerramienta('addToCart', { productName: 'Fresa Salvaje' }), texto(INVENTO)];
@@ -107,6 +111,8 @@ describe('1. un producto: la ficha completa, sin modelo y sin agregar', () => {
       ['¿cuánto azúcar tiene la fresa?', 1], ['¿la fresa engorda?', 1], ['¿la fresa es apta para embarazadas?', 1], ['¿es segura la fresa para un bebé?', 1],
       // declara una condición de salud: aunque pida, primero ve la ficha (ante la duda no se agrega)
       ['soy alérgico a la leche, dame una fresa', 1], ['dame una fresa sin lactosa', 1], ['quiero un mango sin gluten', 3],
+      ['¿la fresa lleva crema?', 1], ['¿de qué es el cioccolato nero?', 2], ['¿con qué hacen la fresa?', 1], ['receta de la fresa', 1], ['¿la vainilla puede tener trazas de nueces?', 7],
+      ['¿es kosher la fresa?', 1], ['¿el mango es saludable?', 3], ['¿cuántas grasas tiene el mango?', 3], ['tengo celiaquía, ¿puedo comer el mango?', 3],
       // sin coincidencia de nombre, pero la ficha se reconoce por su palabra
       ['¿qué ingredientes tiene el limón?', 8], ['¿qué lleva el chocolate?', 2],
     ])('"%s" -> ficha del producto %i', async (frase, id) => {
@@ -192,6 +198,7 @@ describe('3. sin producto: la lista completa según la ficha', () => {
       ['quiero un helado sin lactosa'], ['quiero algo sin leche'], ['quiero un helado vegano'], ['recomiéndame algo sin azúcar'], ['quiero algo que no tenga huevo'],
       ['no puedo tomar leche'], ['tengo alergia al pistacho, ¿qué puedo comer?'], ['soy alérgica al coco'], ['¿qué alérgenos manejan?'], ['¿todos los helados tienen leche?'],
       ['¿qué helados tienen coco?'], ['¿cuántas calorías tienen los helados?'], ['¿cuáles no llevan pistacho?'],
+      ['tengo celiaquía'], ['¿qué llevan los helados?'], ['¿qué contienen?'], ['¿qué leche usan?'], ['¿tienen algo keto?'],
     ])('"%s"', async (frase) => {
       for (const mensaje of [frase, sinTildes(frase)]) esperaLista(await enviar(mensaje, { history }));
     });
@@ -301,6 +308,7 @@ describe('7. defensa extra: si algo se escapa al atajo, el modelo no puede dar d
   it.each([
     [INVENTO], ['El mango es vegano y sin gluten.'], ['Tranquilo, es seguro para alérgicos.'], ['La fresa no lleva leche.'], ['Nuestros helados no contienen huevos.'],
     ['Es apto para celíacos.'], ['Tiene pocas calorías.'], ['No tiene lactosa'],
+    ['La **Fresa Salvaje** lleva fresas frescas, azúcar y un toque de vinagre balsámico.'], ['Está hecha con fruta fresca.'], ['Está elaborado con cacao.'], ['Contiene fruta natural.'],
   ])('el texto "%s" no llega al cliente', async (inventado) => {
     for (const guion of [[texto(inventado)], [pideHerramienta('getOrders'), texto(inventado)]]) {
       const body = await enviar(ESCAPA, { guion });
@@ -319,6 +327,7 @@ describe('7. defensa extra: si algo se escapa al atajo, el modelo no puede dar d
   });
   it('un texto normal del modelo pasa igual (aunque nombre un producto que se llama "... sin azúcar")', async () => {
     expect((await enviar(ESCAPA, { guion: [texto('La **Fresa Salvaje** es intensa 🍓')] })).response).toBe('La **Fresa Salvaje** es intensa 🍓');
+    for (const normal of ['Tu pedido contiene 2 helados.', 'Es seguro pagar en la página.']) expect((await enviar(ESCAPA, { guion: [texto(normal)] })).response).toBe(normal);
     const catalogo = [{ ...CATALOGO_REAL[0], nombre: 'Vainilla sin azúcar' }];
     expect((await enviar('hola', { catalogo, guion: [texto('Hoy tenemos Vainilla sin azúcar.')] })).response).toBe('Hoy tenemos Vainilla sin azúcar.');
   });

@@ -72,7 +72,7 @@ describe('1. sin sabor y sin duda: lo resuelve el servidor, sin modelo', () => {
     it.each([
       ['quiero un helado'], ['dame algo rico'], ['quiero uno'], ['quiero dos helados por favor'], ['hola, quiero un helado'], ['me das un helado?'], ['quiero pedir'], ['quiero comprar un helado'],
       ['necesito un helado'], ['recomiéndame algo'], ['qué me recomiendas'], ['¿qué me recomiendas?'], ['recomiéndame un helado rico'], ['¿cuál me recomiendas?'], ['no sé qué pedir, recomiéndame algo'],
-      ['dame una recomendación'], ['¿cuál es el más vendido?'],
+      ['dame una recomendación'], ['quiero hacer un pedido'], ['quiero algo para mi mamá'], ['¿cuál es el más vendido?'],
     ])('"%s"', async (frase) => {
       for (const mensaje of [frase, sinTildes(frase)]) {
         const body = await enviar(mensaje, { history });
@@ -125,7 +125,7 @@ describe('3. sin tarjetas cuando no se está preguntando el sabor', () => {
     ['hola'], ['buenas tardes'], ['gracias'], ['chao'], ['adiós'], ['no me gustó el helado'], ['el menú no carga'], ['no me gustan sus sabores'], ['quiero reclamar'], ['pedí un helado y no llegó'],
     ['cuánto cuesta la fresa'], ['¿qué ingredientes tiene la fresa?'], ['agrégame una fresa'], ['quiero un mango'], ['¿dónde están ubicados?'], ['¿tienen domicilio?'], ['quiero ver mis pedidos'],
     ['quiero mi factura'], ['necesito hablar con un asesor'], ['quiero saber el horario'], ['dame tu teléfono'], ['quiero pagar'], ['qué ricos sabores'], ['¿me recomiendas la fresa?'], ['dame un momento'],
-    ['no quiero un helado'], ['soy alérgico a la leche'], ['quiero un descuento'], ['necesito ayuda'],
+    ['no quiero un helado'], ['soy alérgico a la leche'], ['quiero un descuento'], ['dame un consejo'], ['necesito ayuda'],
   ])('"%s"', async (frase) => {
     expect((await enviar(frase)).productos).toBeUndefined();
   });
