@@ -109,8 +109,9 @@ describe('1. un producto: la ficha completa, sin modelo y sin agregar', () => {
       ['¿el mango es vegano?', 3], ['¿la fresa es vegana?', 1], ['¿la vainilla es vegetariana?', 7], ['¿la fresa es sin azúcar?', 1], ['¿la fresa es sin gluten?', 1], ['¿el caramelo es libre de gluten?', 6],
       ['¿cuántas calorías tiene la fresa?', 1], ['calorías del mango', 3], ['valor nutricional de la fresa', 1], ['información nutricional del limone', 8],
       ['¿cuánto azúcar tiene la fresa?', 1], ['¿la fresa engorda?', 1], ['¿la fresa es apta para embarazadas?', 1], ['¿es segura la fresa para un bebé?', 1],
-      // declara una condición de salud: aunque pida, primero ve la ficha (ante la duda no se agrega)
-      ['soy alérgico a la leche, dame una fresa', 1], ['dame una fresa sin lactosa', 1], ['quiero un mango sin gluten', 3],
+      // pide "sin" un alérgeno: aunque pida, primero ve la ficha (ante la duda no se agrega). "soy alérgico a la leche,
+      // dame una fresa" ahora además ofrece confirmar: se prueba en chatbotRespuestasServidor.test.js.
+      ['dame una fresa sin lactosa', 1], ['quiero un mango sin gluten', 3],
       ['¿la fresa lleva crema?', 1], ['¿de qué es el cioccolato nero?', 2], ['¿con qué hacen la fresa?', 1], ['receta de la fresa', 1], ['¿la vainilla puede tener trazas de nueces?', 7],
       ['¿es kosher la fresa?', 1], ['¿el mango es saludable?', 3], ['¿cuántas grasas tiene el mango?', 3], ['tengo celiaquía, ¿puedo comer el mango?', 3],
       // sin coincidencia de nombre, pero la ficha se reconoce por su palabra
@@ -351,17 +352,21 @@ describe('7. defensa extra: si algo se escapa al atajo, el modelo no puede dar d
     expect(body.response).toMatch(/estos son nuestros sabores/i);
     expect(body.productos.length).toBeGreaterThan(0);
   });
-  it('un texto normal del modelo pasa igual (aunque nombre un producto que se llama "... sin azúcar")', async () => {
-    expect((await enviar(ESCAPA, { guion: [texto('La **Fresa Salvaje** es intensa 🍓')] })).response).toBe('La **Fresa Salvaje** es intensa 🍓');
-    for (const normal of ['Tu pedido contiene 2 helados.', 'Tu pedido lleva 2 helados.', 'Es seguro pagar en la página.']) expect((await enviar(ESCAPA, { guion: [texto(normal)] })).response).toBe(normal);
+  // Opción A (2026-11-25): ningún texto del modelo llega al cliente, ni siquiera uno normal. Antes se esperaba que
+  // estos textos pasaran tal cual; ahora el cliente lee el texto del servidor.
+  it('ni un texto normal del modelo llega al cliente: responde el servidor', async () => {
+    for (const normal of ['La **Fresa Salvaje** es intensa 🍓', 'Tu pedido contiene 2 helados.', 'Tu pedido lleva 2 helados.', 'Es seguro pagar en la página.']) {
+      const { response } = await enviar(ESCAPA, { guion: [texto(normal)] });
+      expect(response).not.toBe(normal);
+      expect(response).toContain('Esto dice la ficha de **Fresa Salvaje**');
+    }
     const catalogo = [{ ...CATALOGO_REAL[0], nombre: 'Vainilla sin azúcar' }];
-    expect((await enviar('hola', { catalogo, guion: [texto('Hoy tenemos Vainilla sin azúcar.')] })).response).toBe('Hoy tenemos Vainilla sin azúcar.');
+    expect((await enviar('hola', { catalogo, guion: [texto('Hoy tenemos Vainilla sin azúcar.')] })).response).not.toContain('Hoy tenemos');
   });
-  it.each([['anónimo', () => ({})], ['cliente', tokenCliente]])('%s: los prompts prohíben ingredientes, alérgenos y consejos de salud, y no llevan las fichas', async (_r, cabeceras) => {
-    await enviar('qué sabores tienen', { guion: [pideHerramienta('getProducts'), texto('Listo.')], cabeceras: cabeceras() });
-    expect(llamadasGroq).toHaveLength(2);
+  it.each([['anónimo', () => ({})], ['cliente', tokenCliente]])('%s: el prompt prohíbe ingredientes, alérgenos y consejos de salud, no lleva las fichas y no hay segunda llamada', async (_r, cabeceras) => {
+    await enviar('hola', { guion: [pideHerramienta('getProducts'), texto('Listo.')], cabeceras: cabeceras() });
+    expect(llamadasGroq).toHaveLength(1);
     expect(llamadasGroq[0].messages[0].content).toMatch(/NUNCA des ingredientes, alérgenos/);
-    expect(JSON.stringify(llamadasGroq[1].messages.at(-1)) + JSON.stringify(llamadasGroq[1].messages.at(-2))).toMatch(/NUNCA des ingredientes, alérgenos/);
     expect(JSON.stringify(llamadasGroq)).not.toMatch(/Vinagre balsámico|Yemas de huevo|Savoiardi|Sin gluten|"tags"/);
   });
   it('el admin no usa el atajo ni el filtro', async () => {
@@ -383,11 +388,20 @@ describe('8. NO son preguntas de ingredientes', () => {
       expect(body.action).not.toBe('addToCart');
     });
 
-    it.each([['dame una fresa sin azúcar', 1], ['dame un mango sin crema', 3], ['quiero una fresa con crema', 1]])('"%s" sigue agregando, sin ficha', async (frase, id) => {
+    it.each([['dame un mango sin crema', 3], ['quiero una fresa con crema', 1]])('"%s" sigue agregando, sin ficha', async (frase, id) => {
       const body = await enviar(frase, { history });
       expect(body.action).toBe('addToCart');
       expect(body.product.id).toBe(id);
       expect(body.response).not.toMatch(/ficha/i);
+    });
+
+    // Decisión del dueño (2026-11-25): "sin X" con pedido agrega y avisa si la ficha SÍ registra X.
+    it('"dame una fresa sin azúcar" sigue agregando, con una línea de aviso de la ficha', async () => {
+      const body = await enviar('dame una fresa sin azúcar', { history });
+      expect(body.action).toBe('addToCart');
+      expect(body.product.id).toBe(1);
+      expect(body.response).toContain('Ojo: la ficha de Fresa Salvaje indica Azúcar de caña');
+      expect(body.response).not.toContain('Ingredientes:');
     });
   });
 
@@ -415,7 +429,7 @@ describe('9. nombres raros de la base y velocidad', () => {
     ['sabor especial sin azucar numero '], ['te muestro su ficha '], ['cual es el '],
   ])('mensaje de 1000 caracteres con %j y 200 productos: menos de 150 ms', (trozo) => {
     for (const modulo of ['gelbotFichas', 'gelbotMenu']) expect(existsSync(new URL(`../../${modulo}.js`, import.meta.url)), modulo).toBe(true);
-    const { leerConsultaFicha, hablaDeSalud } = requireNode('../../gelbotFichas.js');
+    const { leerConsultaFicha } = requireNode('../../gelbotFichas.js');
     const { leerPedidoDeMenu } = requireNode('../../gelbotMenu.js');
     const grande = Array.from({ length: 200 }, (_, i) => ({ ...CATALOGO_REAL[0], id_producto: i, nombre: `Sabor especial sin azúcar número ${i} fresa con mango` }));
     const mensaje = MIL(trozo);
@@ -429,7 +443,6 @@ describe('9. nombres raros de la base y velocidad', () => {
       expect(mejor).toBeLessThan(150);
     };
     medir(() => leerConsultaFicha(mensaje, mensaje, grande));
-    medir(() => hablaDeSalud(mensaje, grande));
     medir(() => leerPedidoDeMenu(mensaje, grande));
   });
 });

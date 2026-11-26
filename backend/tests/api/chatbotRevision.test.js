@@ -305,10 +305,11 @@ describe('6. imagen validada en el producto del carrito', () => {
   });
 });
 
+// Opción A (2026-11-25): solo el admin hace la segunda llamada, así que se prueba con el admin.
 describe('7. getProducts llega al modelo como datos no confiables', () => {
   it('el resultado va entre las marcas DATOS_NO_CONFIABLES', async () => {
     guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores.')];
-    await chat({ message: 'qué sabores tienen' });
+    await chat({ message: 'catálogo' }, tokenAdmin());
     const tool = llamadasGroq[1].messages.find((m) => m.role === 'tool');
     expect(tool.content).toMatch(/^<<<DATOS_NO_CONFIABLES>>>/);
     expect(tool.content).toMatch(/<<<FIN_DATOS_NO_CONFIABLES>>>$/);
@@ -318,7 +319,7 @@ describe('7. getProducts llega al modelo como datos no confiables', () => {
 describe('8. la segunda llamada también reintenta una vez', () => {
   it('tool_use_failed en la segunda llamada: reintenta y responde con el texto del modelo', async () => {
     guion = [pideHerramienta('getProducts'), errorGroq(400, 'tool_use_failed'), texto('Estos son nuestros sabores 🍦')];
-    const res = await chat({ message: 'qué sabores tienen' });
+    const res = await chat({ message: 'catálogo' }, tokenAdmin());
     expect(llamadasGroq).toHaveLength(3);
     expect(llamadasGroq[2].tool_choice).toBe('none');
     expect(res.body.response).toBe('Estos son nuestros sabores 🍦');

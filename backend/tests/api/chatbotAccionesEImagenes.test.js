@@ -68,17 +68,17 @@ beforeEach(() => {
 const nombres = (llamada) => (llamada?.tools || []).map((t) => t.function.name).sort();
 
 describe('1. segunda llamada sin tool_use_failed', () => {
+  // Opción A (2026-11-25): clientes y visitantes hacen UNA sola llamada (sin segunda llamada ni texto del modelo).
   it.each([
-    ['anónimo', () => ({}), ['addToCart', 'getProducts']],
-    ['cliente', tokenCliente, ['addToCart', 'getOrders', 'getProducts']],
-  ])('%s: la segunda llamada lleva SOLO sus herramientas permitidas y tool_choice "none"', async (_r, cabeceras, esperadas) => {
+    ['anónimo', () => ({}), ['addToCart', 'elegirTema', 'getProducts']],
+    ['cliente', tokenCliente, ['addToCart', 'elegirTema', 'getOrders', 'getProducts']],
+  ])('%s: una sola llamada, con SOLO sus herramientas permitidas; las tarjetas salen de la base', async (_r, cabeceras, esperadas) => {
     guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores.')];
-    await chat({ message: 'qué sabores de helado tienen' }, cabeceras());
-    expect(llamadasGroq).toHaveLength(2);
-    expect(llamadasGroq[1].tool_choice).toBe('none');
-    expect(nombres(llamadasGroq[1])).toEqual(esperadas);
-    expect(nombres(llamadasGroq[1])).toEqual(nombres(llamadasGroq[0]));
-    expect(llamadasGroq[1]).not.toHaveProperty('parallel_tool_calls');
+    const res = await chat({ message: 'hola, a ver' }, cabeceras());
+    expect(llamadasGroq).toHaveLength(1);
+    expect(nombres(llamadasGroq[0])).toEqual(esperadas);
+    expect(llamadasGroq[0].parallel_tool_calls).toBe(false);
+    expect(res.body.productos).toHaveLength(3);
   });
 
   it('admin: la segunda llamada lleva las mismas herramientas de la primera y tool_choice "none"', async () => {
@@ -101,14 +101,15 @@ describe('1. segunda llamada sin tool_use_failed', () => {
   it('si la segunda respuesta de un cliente trae addToCart, no se agrega nada al carrito', async () => {
     guion = [pideHerramienta('getProducts'), pideHerramienta('addToCart', { productName: 'Fresa Salvaje' })];
     const res = await chat({ message: 'qué sabores tienen' }, tokenCliente());
-    expect(llamadasGroq).toHaveLength(2);
+    expect(llamadasGroq.length).toBeLessThanOrEqual(1); // ya no hay segunda llamada
     expect(res.body.action).not.toBe('addToCart');
     expect(res.body.product ?? null).toBeNull();
   });
 
   it('tool_use_failed en la primera llamada: se reintenta UNA vez y responde bien', async () => {
+    // el texto del modelo solo lo ve el admin (opción A): el reintento se prueba con el admin
     guion = [errorGroq(400, 'tool_use_failed', { failed_generation: '<function=x>' }), texto('¡Hola! 🍦')];
-    const res = await chat({ message: 'hola' }, tokenCliente());
+    const res = await chat({ message: 'hola' }, tokenAdmin());
     expect(llamadasGroq).toHaveLength(2);
     expect(llamadasGroq[1].tools).toBeDefined();
     expect(res.body.response).toMatch(/Hola/);
@@ -116,14 +117,14 @@ describe('1. segunda llamada sin tool_use_failed', () => {
 
   it('tool_use_failed dos veces seguidas: solo 2 intentos y mensaje de falla', async () => {
     guion = [errorGroq(400, 'tool_use_failed'), errorGroq(400, 'tool_use_failed'), texto('no debería llegar')];
-    const res = await chat({ message: 'hola' }, tokenCliente());
+    const res = await chat({ message: 'hola' }, tokenAdmin());
     expect(llamadasGroq).toHaveLength(2);
     expect(res.body.response).toMatch(MENSAJE_FALLA);
   });
 
   it('otro error 400 (no tool_use_failed) no se reintenta', async () => {
     guion = [errorGroq(400, 'invalid_request_error'), texto('no debería llegar')];
-    const res = await chat({ message: 'hola' }, tokenCliente());
+    const res = await chat({ message: 'hola' }, tokenAdmin());
     expect(llamadasGroq).toHaveLength(1);
     expect(res.body.response).toMatch(MENSAJE_FALLA);
   });
@@ -136,14 +137,24 @@ describe('2. agregar al carrito solo cuando el cliente lo pide', () => {
     ['quiero saber cuánto cuesta la fresa'],
     ['dame el precio de la fresa'],
     ['¿qué ingredientes tiene la fresa?'],
-    // pregunta de precio que el atajo de precios no resuelve: llega al modelo y la frena el servidor
-    ['cuánto cuesta el rojito de frutas'],
   ])('"%s": aunque el modelo llame a addToCart, NO se agrega y se responde con la info del producto', async (mensaje) => {
     guion = [pideHerramienta('addToCart', { productName: 'Fresa' }), texto('Fresa agregada.')];
     const res = await chat({ message: mensaje }, tokenCliente());
     expect(res.body.action).not.toBe('addToCart');
     expect(res.body.product ?? null).toBeNull();
     expect(res.body.response).toMatch(/Fresa Salvaje/);
+  });
+
+  // Antes: el texto nombraba el sabor que eligió el modelo (Fresa Salvaje). Con la opción A la pista del modelo solo
+  // vale si el cliente nombró el sabor: con un apodo no se nombra ninguno y se muestran los precios en las tarjetas.
+  it('pregunta de precio con un apodo ("cuánto cuesta el rojito de frutas"): no agrega ni elige el sabor del modelo', async () => {
+    guion = [pideHerramienta('addToCart', { productName: 'Fresa' }), texto('Fresa agregada.')];
+    const res = await chat({ message: 'cuánto cuesta el rojito de frutas' }, tokenCliente());
+    expect(res.body.action).not.toBe('addToCart');
+    expect(res.body.product ?? null).toBeNull();
+    expect(res.body.response).not.toContain('Fresa');
+    expect(res.body.response).toMatch(/precio/i);
+    expect(res.body.productos).toHaveLength(3);
   });
 
   it.each([
@@ -280,12 +291,13 @@ describe('4. fotos de los helados en la lista', () => {
     ]);
   });
 
-  it('máximo 12 productos y solo activos', async () => {
-    const muchos = Array.from({ length: 20 }, (_, i) => ({ id_producto: i + 1, nombre: `Sabor ${i + 1}`, precio: 1000 * (i + 1), imagen: `/images/s${i + 1}.png`, estado: i !== 0 }));
+  // Tope subido de 12 a 24 (decisión del dueño, 2026-11-25).
+  it('máximo 24 productos y solo activos', async () => {
+    const muchos = Array.from({ length: 30 }, (_, i) => ({ id_producto: i + 1, nombre: `Sabor ${i + 1}`, precio: 1000 * (i + 1), imagen: `/images/s${i + 1}.png`, estado: i !== 0 }));
     prepararFake(muchos);
     guion = [pideHerramienta('getProducts'), texto('Estos son nuestros sabores 🍦')];
     const res = await chat({ message: 'muéstrame el menú' }, tokenCliente());
-    expect(res.body.productos).toHaveLength(12);
+    expect(res.body.productos).toHaveLength(24);
     expect(res.body.productos.map((p) => p.id)).not.toContain(1);
     expect(res.body.productos[0]).toEqual({ id: 2, nombre: 'Sabor 2', precio: 2000, image: '/images/s2.png' });
   });

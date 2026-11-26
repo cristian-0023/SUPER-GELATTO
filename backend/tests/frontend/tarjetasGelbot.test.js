@@ -51,10 +51,11 @@ describe('armarTarjetasProductos', () => {
     expect(armarTarjetasProductos(lista).map((t) => t.id)).toEqual([5]);
   });
 
-  it(`muestra como máximo ${12} tarjetas`, () => {
+  // Tope subido de 12 a 24 (decisión del dueño, 2026-11-25): el menú real ya tiene 13 sabores.
+  it(`muestra como máximo ${24} tarjetas`, () => {
     const lista = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, nombre: `S${i}`, precio: 1000 }));
-    expect(MAX_TARJETAS).toBe(12);
-    expect(armarTarjetasProductos(lista)).toHaveLength(12);
+    expect(MAX_TARJETAS).toBe(24);
+    expect(armarTarjetasProductos(lista)).toHaveLength(24);
   });
 
   it('recorta nombres larguísimos', () => {

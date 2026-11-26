@@ -61,7 +61,7 @@ function esperaTarjetas(body) {
   expect(body.action ?? null).toBeNull();
   expect(body.product ?? null).toBeNull();
   expect(body.quantity).toBeUndefined();
-  expect(body.productos?.length).toBe(12); // el tope de tarjetas del chat
+  expect(body.productos?.length).toBe(13); // los 13 sabores reales (el tope del chat es 24)
   expect(body.productos[0]).toEqual({ id: 1, nombre: 'Fresa Salvaje', precio: 9000, image: '/images/1.png' });
   expect(body.response).toBeTruthy();
   expect(body.response).not.toMatch(/agr[eé]galo|fue añadido/i);
