@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
+import AvisoPendiente from './components/AvisoPendiente';
 import { SuperPointsProvider } from './context/SuperPointsContext';
 import { actualizarUsuarioGuardado, borrarSesion, leerUsuarioGuardado } from './utils/sesion';
 import './index.css';
@@ -83,6 +84,7 @@ function App() {
     <CartProvider user={user}>
       <SuperPointsProvider user={user}>
       <Router>
+        <AvisoPendiente />
         <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Auth Routes */}

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, ShoppingBag, IceCream, Trash2, Shield, Plus, 
   RefreshCw, AlertTriangle, Box, Sparkles, Key, CheckCircle, 
-  X, Camera, Loader2, Star, Image, Upload, Eye, EyeOff,
+  X, Camera, Loader2, Star, Image, Upload, Eye, EyeOff, Undo2,
   Mail, Receipt, Edit2, Save, CheckCircle2,
   TrendingUp, TrendingDown, Calendar, Clock, DollarSign, Filter, ChevronRight, BarChart2
 } from 'lucide-react';
@@ -19,7 +19,9 @@ import { puedeEditarRol } from '../utils/permisosUsuarios';
 import { decidirAnteErrorPanel, mensajeDeError } from '../utils/respuestaAdmin';
 import { borrarSesion } from '../utils/sesion';
 import { describirPersonalizacion } from '../utils/personalizado';
-import { estaVisible, textoBotonVisibilidad, filtrarProductosPanel, contarOcultos, avisoTrasBorrar } from '../utils/visibilidadProductos';
+import { estaVisible, filtrarProductosPanel, contarOcultos, avisoTrasBorrar } from '../utils/visibilidadProductos';
+import { crearPendientes, resolverCambioVisibilidad, focoTrasOcultar } from '../utils/cambiosEnCurso';
+import { guardarAvisoPendiente } from '../utils/avisoPendiente';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -312,30 +314,54 @@ const AdminDashboard = ({ user, onLogout }) => {
   };
 
   // --- Ocultar / Mostrar en la tienda (producto.estado) ---
-  // Optimista como precio y categoría: se cambia al instante y, si el servidor no lo guarda, se vuelve atrás
-  // con un aviso (401 = verificar de nuevo). Al guardar, resolverCambioRapido avisa a las otras pestañas.
-  const [cambiandoVisibilidad, setCambiandoVisibilidad] = useState(null);
+  // Optimista: se cambia al instante y, si el servidor no lo guarda, se vuelve atrás con un aviso
+  // (401 = verificar de nuevo). Un solo PUT en curso por producto (pendientesVisibilidad); la reversión
+  // no pisa un valor más nuevo (utils/cambiosEnCurso). Al guardar se avisa a las otras pestañas.
+  const pendientesVisibilidad = useRef(crearPendientes());
+  const [enCursoVisibilidad, setEnCursoVisibilidad] = useState([]); // ids (texto) con PUT en curso, para el giro
   const [mostrarOcultos, setMostrarOcultos] = useState(true);
+  const tituloCatalogoRef = useRef(null);
+
+  // Si la fila va a desaparecer (filtro "Mostrar ocultos" apagado), el foco pasa a la fila vecina o al título.
+  const moverFocoAntesDeOcultar = (productId) => {
+    const ids = filtrarProductosPanel(dashboardData.products, false).map(p => p.id);
+    const destino = focoTrasOcultar(ids, productId);
+    const boton = destino !== null ? document.querySelector(`[data-visibilidad-id="${destino}"]`) : null;
+    if (boton) boton.focus();
+    else tituloCatalogoRef.current?.focus();
+  };
 
   const handleCambiarVisibilidad = async (productId, visibleAhora) => {
+    if (!pendientesVisibilidad.current.empezar(productId)) return; // ya hay un cambio en curso de este producto
     const siguiente = !visibleAhora;
-    setCambiandoVisibilidad(productId);
+    const clave = String(productId);
+    setEnCursoVisibilidad(prev => [...prev, clave]);
+    if (!siguiente && !mostrarOcultos) moverFocoAntesDeOcultar(productId);
     setDashboardData(prev => ({ ...prev, products: cambiarProducto(prev.products, productId, { estado: siguiente }) }));
     let res = null;
+    let mensajeServidor;
     try {
       res = await apiFetch(`/api/admin/products/${productId}/visible`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ estado: siguiente })
       });
+      if (!res.ok && res.status !== 401) mensajeServidor = (await res.json().catch(() => ({}))).message;
     } catch (err) {
       console.error('Error cambiando la visibilidad:', err);
     }
-    await resolverCambioRapido(res, productId, { estado: visibleAhora }, res ? 'No se pudo cambiar la visibilidad del producto.' : 'Error de conexión al cambiar la visibilidad del producto.');
-    if (res && res.ok) {
-      mostrarAviso(siguiente ? 'El producto ya se muestra en la tienda.' : 'Producto oculto: la tienda y Gelbot ya no lo ofrecen.', 'success');
+    setDashboardData(prev => ({ ...prev, products: resolverCambioVisibilidad(prev.products, productId, siguiente, res, mensajeServidor).productos }));
+    const { decision, aviso: avisoCambio } = resolverCambioVisibilidad([], productId, siguiente, res, mensajeServidor);
+    if (decision === 'ok') avisarProductosActualizados();
+    if (decision === 'sesion') setIsQrVerified(false);
+    if (avisoCambio) {
+      const deshacer = decision === 'ok' && !siguiente
+        ? { etiqueta: 'Deshacer', icono: Undo2, alHacer: () => { cerrarAviso(); handleCambiarVisibilidad(productId, false); } }
+        : null;
+      mostrarAviso(avisoCambio.texto, avisoCambio.tipo, deshacer);
     }
-    setCambiandoVisibilidad(null);
+    pendientesVisibilidad.current.terminar(productId);
+    setEnCursoVisibilidad(prev => prev.filter(id => id !== clave));
   };
 
   // --- Update Price State ---
@@ -640,8 +666,9 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   // La sesión es válida pero ya no es de administrador (403 de requireAdmin): se avisa, se borra la
   // sesión y se sale a la portada, en vez de dejar el panel trabado.
+  // El aviso del panel se iría con él: se guarda para que lo muestre la página de destino (AvisoPendiente).
   const salirDelPanelSinPermiso = (mensaje) => {
-    if (showToast) showToast(mensaje, 'error');
+    guardarAvisoPendiente(mensaje);
     if (onLogout) onLogout();
     else borrarSesion();
     navigate('/', { replace: true });
@@ -651,32 +678,30 @@ const AdminDashboard = ({ user, onLogout }) => {
   const fetchDashboardData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await apiFetch('/api/admin/dashboard');
-      
-      if (res.status === 401) {
-        // La sesión facial expiró en el servidor
-        sessionStorage.removeItem('superGelatto_face_verified');
-        setIsQrVerified(false);
-        throw new Error('Sesión de verificación QR expirada.');
-      }
-      
-      if (!res.ok) {
-        const cuerpoError = await res.json().catch(() => ({}));
-        if (decidirAnteErrorPanel(res.status) === 'sin-permiso') {
-          salirDelPanelSinPermiso(mensajeDeError(cuerpoError, MENSAJE_SIN_PERMISO));
-          return;
+      // Métricas y productos a la vez. Los productos salen de la ruta de admin: TODOS, también los ocultos
+      // de la tienda (sin caché).
+      const [res, prodRes] = await Promise.all([
+        apiFetch('/api/admin/dashboard'),
+        apiFetch('/api/admin/products', { cache: 'no-store' })
+      ]);
+
+      // Mismo manejo para las dos respuestas: 401 = la sesión expiró; 403 = ya no es admin; otro = error.
+      for (const [respuesta, mensajePorDefecto] of [[res, 'Error al obtener datos'], [prodRes, 'Error al obtener los productos del panel.']]) {
+        if (respuesta.status === 401) {
+          sessionStorage.removeItem('superGelatto_face_verified');
+          setIsQrVerified(false);
+          throw new Error('Sesión de verificación QR expirada.');
         }
-        throw new Error(mensajeDeError(cuerpoError, 'Error al obtener datos'));
+        if (!respuesta.ok) {
+          const cuerpoError = await respuesta.json().catch(() => ({}));
+          if (decidirAnteErrorPanel(respuesta.status) === 'sin-permiso') {
+            salirDelPanelSinPermiso(mensajeDeError(cuerpoError, MENSAJE_SIN_PERMISO));
+            return;
+          }
+          throw new Error(mensajeDeError(cuerpoError, mensajePorDefecto));
+        }
       }
-      const data = await res.json();
-      
-      // Productos del panel: TODOS, también los ocultos de la tienda (ruta de admin, sin caché).
-      const prodRes = await apiFetch('/api/admin/products', { cache: 'no-store' });
-      if (!prodRes.ok) {
-        const cuerpoProductos = await prodRes.json().catch(() => ({}));
-        throw new Error(mensajeDeError(cuerpoProductos, 'Error al obtener los productos del panel.'));
-      }
-      const { products } = await prodRes.json();
+      const [data, { products }] = await Promise.all([res.json(), prodRes.json()]);
 
       setDashboardData({ ...data, products: products || [] });
     } catch (err) {
@@ -774,7 +799,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         const producto = (dashboardData.products || []).find(p => String(p.id) === String(id));
         const { texto, ofrecerOcultar } = avisoTrasBorrar(res.status, data, !producto || estaVisible(producto));
         const accion = ofrecerOcultar
-          ? { etiqueta: 'Ocultar', alHacer: () => { cerrarAviso(); handleCambiarVisibilidad(id, true); } }
+          ? { etiqueta: 'Ocultar', icono: EyeOff, alHacer: () => { cerrarAviso(); handleCambiarVisibilidad(id, true); } }
           : null;
         mostrarAviso(texto, 'error', accion);
       }
@@ -992,8 +1017,7 @@ const AdminDashboard = ({ user, onLogout }) => {
       avisarProductosActualizados();
       window.dispatchEvent(new CustomEvent('products-updated'));
 
-      setSaveSuccess(true);
-      if (showToast) showToast('¡Producto actualizado con éxito!', 'success');
+      setSaveSuccess(true); // el modal muestra su propio mensaje de éxito
       setTimeout(() => {
         setSaveSuccess(false);
         setEditingProduct(null);
@@ -1062,7 +1086,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 onClick={aviso.accion.alHacer}
                 className="mt-3 min-h-[44px] px-4 inline-flex items-center gap-2 rounded-xl bg-gold-premium hover:bg-amber-400 text-black text-xs font-bold cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-premium"
               >
-                <EyeOff size={14} aria-hidden="true" />
+                {aviso.accion.icono && <aviso.accion.icono size={14} aria-hidden="true" />}
                 {aviso.accion.etiqueta}
               </button>
             )}
@@ -1625,7 +1649,7 @@ const AdminDashboard = ({ user, onLogout }) => {
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="p-6 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/[0.01]">
                 <div>
-                  <h3 className="text-lg font-light text-white flex items-center gap-2">
+                  <h3 ref={tituloCatalogoRef} tabIndex={-1} className="text-lg font-light text-white flex items-center gap-2 focus:outline-none">
                     <IceCream className="text-gold-premium" size={20} />
                     Catálogo de <span className="text-gold-premium font-normal">Helados</span>
                   </h3>
@@ -1671,6 +1695,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <tbody className="divide-y divide-white/5">
                   {filtrarProductosPanel(dashboardData.products, mostrarOcultos).map(p => {
                     const visible = estaVisible(p);
+                    const enCurso = enCursoVisibilidad.includes(String(p.id));
                     const currentStock = p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50;
                     let stockBadge = 'bg-green-500/10 text-green-400 border-green-500/20';
                     if (currentStock === 0) {
@@ -1835,11 +1860,12 @@ const AdminDashboard = ({ user, onLogout }) => {
                             type="button"
                             role="switch"
                             aria-checked={visible}
-                            aria-label={`${textoBotonVisibilidad(p)}: ${p.name}`}
+                            aria-label={`En la tienda: ${p.name}`}
+                            aria-disabled={enCurso ? 'true' : undefined}
+                            data-visibilidad-id={p.id}
                             title={visible ? 'Visible en la tienda y en Gelbot. Clic para ocultarlo.' : 'Oculto: la tienda y Gelbot no lo muestran. Clic para mostrarlo.'}
-                            onClick={() => handleCambiarVisibilidad(p.id, visible)}
-                            disabled={cambiandoVisibilidad === p.id}
-                            className={`min-h-[44px] min-w-[44px] px-3 rounded-xl text-[11px] font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-premium whitespace-nowrap ${
+                            onClick={() => { if (!enCurso) handleCambiarVisibilidad(p.id, visible); }}
+                            className={`min-h-[44px] min-w-[44px] px-3 rounded-xl text-[11px] font-bold transition-all flex items-center gap-2 cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-premium whitespace-nowrap ${
                               visible
                                 ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20'
                                 : 'bg-white/5 text-white/70 border border-white/15 hover:text-white hover:bg-white/10'
@@ -1848,7 +1874,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             <span aria-hidden="true" className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${visible ? 'bg-emerald-400/80' : 'bg-white/20'}`}>
                               <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${visible ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                             </span>
-                            {cambiandoVisibilidad === p.id && <RefreshCw size={12} className="animate-spin" aria-hidden="true" />}
+                            {enCurso && <RefreshCw size={12} className="animate-spin" aria-hidden="true" />}
                             <span>{visible ? 'Visible' : 'Oculto'}</span>
                           </button>
                         </td>
