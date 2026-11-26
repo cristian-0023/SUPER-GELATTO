@@ -100,8 +100,8 @@ describe('1. segunda llamada sin tool_use_failed', () => {
 
   it('si la segunda respuesta de un cliente trae addToCart, no se agrega nada al carrito', async () => {
     guion = [pideHerramienta('getProducts'), pideHerramienta('addToCart', { productName: 'Fresa Salvaje' })];
-    const res = await chat({ message: 'qué sabores tienen' }, tokenCliente());
-    expect(llamadasGroq.length).toBeLessThanOrEqual(1); // ya no hay segunda llamada
+    const res = await chat({ message: 'hmm, a ver' }, tokenCliente()); // un mensaje que sí llega al modelo
+    expect(llamadasGroq).toHaveLength(1); // una sola llamada: no hay segunda
     expect(res.body.action).not.toBe('addToCart');
     expect(res.body.product ?? null).toBeNull();
   });

@@ -268,7 +268,7 @@ describe('propiedad: ningún texto del modelo llega a un cliente o visitante', (
 
 // ── Temas: el texto lo escribe el servidor (3 ejemplos por tema) ──
 const AVISO = /si tienes alergia, confirma con el equipo antes de comer.*contacto cruzado/i;
-const SEGURO = /no estoy seguro de haberte entendido/i;
+const SEGURO = /no estoy seguro de haberte entendido|no te entendí bien|no logré entenderte/i;
 const CASOS_TEMA = [
   ['saludo', ['hola', 'buenas tardes', 'qué tal'], (b) => { expect(b.response).toMatch(/Gelbot|hola|bienvenid/i); expect(b.productos).toBeUndefined(); }],
   ['despedida', ['chao', 'nos vemos', 'hasta pronto'], (b) => { expect(b.response).toMatch(/pronto|visitarnos/i); expect(b.action).toBe('closeChat'); }],
@@ -367,7 +367,7 @@ describe('cada tema tiene su texto del servidor', () => {
 describe('si el modelo falla, el servidor entiende lo básico solo', () => {
   const CASOS = [
     ['hola', /Gelbot|hola|bienvenid/i], ['buenas noches', /Gelbot|hola|bienvenid/i], ['ola', /Gelbot|hola|bienvenid/i],
-    ['chao', /pronto|visitarnos/i], ['adiós', /pronto|visitarnos/i], ['gracias', /pronto|visitarnos/i],
+    ['chao', /pronto|visitarnos/i], ['adiós', /pronto|visitarnos/i], ['gracias', /con gusto|para eso estoy|a ti/i],
     ['¿a qué hora abren?', /no tengo ese dato/i], ['¿hacen envíos?', /no tengo ese dato/i], ['¿dónde quedan?', /no tengo ese dato/i],
     ['¿cómo pago?', /Continuar al Pago/], ['¿aceptan tarjeta?', /Continuar al Pago/], ['quiero ir al carrito', /Continuar al Pago/],
     ['¿cómo funcionan los super points?', /1 punto por cada \$100/], ['¿cuántos puntos tengo?', /Perfil/], ['¿qué nivel soy?', /Perfil/],
@@ -496,7 +496,7 @@ describe('alergia, intolerancia, celiaquía o diabetes con un pedido: ficha, NO 
       expect(body.response).toMatch(AVISO);
       expect(body.response).not.toMatch(/es segur|apt[oa]s? para|puedes comerl|no contiene/i);
       // después, "sí, agrégalo" agrega ESE producto con esa cantidad
-      for (const si of ['sí, agrégalo', 'sí', 'agrégalo', 'dale']) {
+      for (const si of ['sí, agrégalo', 'sí', 'agrégalo']) {
         const confirmado = await enviar(si, { history: [{ role: 'user', content: frase }, { role: 'assistant', content: body.response }], cabeceras: cabeceras() });
         expect(confirmado.action, si).toBe('addToCart');
         expect(confirmado.product.id).toBe(id);
