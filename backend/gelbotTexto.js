@@ -130,4 +130,14 @@ function cleanText(text) {
   return huboMarcas && !TIENE_TEXTO.test(limpio) ? '' : limpio;
 }
 
-module.exports = { cleanText };
+// Nombre de un producto (lo escribe un admin en el panel) listo para ir dentro de un texto del chat: sin asteriscos ni
+// acentos graves (romperían la negrita), sin saltos de línea, caracteres de control ni invisibles, y recortado.
+// Es solo texto: nunca se usa como regex ni como instrucción.
+const MAX_NOMBRE_VISIBLE = 80;
+const NO_VISIBLES = /[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0]/g;
+function nombreVisible(nombre) {
+  const limpio = String(nombre ?? '').normalize('NFKC').replace(NO_VISIBLES, ' ').replace(/[*`_~|<>]/g, ' ').replace(/\s+/g, ' ').trim();
+  return Array.from(limpio).slice(0, MAX_NOMBRE_VISIBLE).join('').trim();
+}
+
+module.exports = { cleanText, nombreVisible, NO_VISIBLES };

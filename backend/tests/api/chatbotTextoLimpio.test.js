@@ -30,8 +30,9 @@ beforeEach(() => {
   }));
 });
 
-// Respuesta que ve la persona cuando el modelo escribe `contenido`.
-async function responder(contenido, cabeceras = {}) {
+// Respuesta que ve la persona cuando el modelo escribe `contenido`. La limpieza (cleanText) solo se aplica al texto
+// del modelo, que desde la opción A (2026-11-25) solo ve el admin: por eso se prueba como admin.
+async function responder(contenido, cabeceras = cabecera(1, 'admin')) {
   guion = [texto(contenido)];
   return (await request(app).post('/api/chatbot').set(cabeceras).send({ message: 'hola' })).body.response;
 }

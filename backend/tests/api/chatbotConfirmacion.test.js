@@ -232,13 +232,13 @@ describe('segunda llamada al modelo', () => {
     expect(llamadasGroq[1].tools.map((t) => t.function.name)).toEqual(llamadasGroq[0].tools.map((t) => t.function.name));
   });
 
-  it('a un cliente nunca le llegan herramientas de admin en la segunda llamada', async () => {
+  // Opción A (2026-11-25): un cliente ya no tiene segunda llamada; en su única llamada tampoco hay herramientas de admin.
+  it('a un cliente nunca le llegan herramientas de admin (y no hay segunda llamada)', async () => {
     fake.responder('producto', 'select', { data: [], error: null });
     guion = [pideHerramienta('getProducts'), texto('Nada.')];
     await chat({ message: 'catálogo' }, tokenCliente());
-    expect(llamadasGroq).toHaveLength(2);
-    expect(llamadasGroq[1].tool_choice).toBe('none');
-    expect(llamadasGroq[1].tools.map((t) => t.function.name).sort()).toEqual(['addToCart', 'getOrders', 'getProducts']);
+    expect(llamadasGroq).toHaveLength(1);
+    expect(llamadasGroq[0].tools.map((t) => t.function.name).sort()).toEqual(['addToCart', 'elegirTema', 'getOrders', 'getProducts']);
   });
 });
 

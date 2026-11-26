@@ -336,6 +336,10 @@ function resolverPedido(mensaje, productos, { trasCual = false } = {}) {
 
 module.exports = {
   normalizarTexto,
+  soloPalabras,
+  soloNombra,
+  variantes,
+  SEPARADOR,
   analizarMensaje,
   tieneIntencionDeCompra,
   resolverPedido,

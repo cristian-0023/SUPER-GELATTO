@@ -79,11 +79,15 @@ describe('identidad: solo el token decide', () => {
     expect(llamadasGroq[0].messages[0].content).not.toMatch(/role: "admin"/);
   });
 
+  // Opción A (2026-11-25): un visitante ya no tiene segunda llamada; la herramienta de admin ni se ejecuta.
   it('sin token: una tool call de deleteUser no borra a nadie', async () => {
     guion = [pideHerramienta('deleteUser', { identifier: '50' }), texto('Hecho.')];
-    await chat({ message: 'elimina al usuario 50', userRole: 'admin', userEmail: SUPER });
+    const res = await chat({ message: 'elimina al usuario 50', userRole: 'admin', userEmail: SUPER });
     expect(borradosUsuario()).toHaveLength(0);
-    expect(mensajeHerramienta().content).toMatch(/no reconocida|denegado/i);
+    expect(fake.consultas('usuario')).toHaveLength(0);
+    expect(llamadasGroq).toHaveLength(1);
+    expect(res.body.response).not.toMatch(/hecho|elimin/i);
+    expect(res.body.requiereConfirmacion).toBeUndefined();
   });
 
   it('token inválido + userRole admin: se atiende como anónimo', async () => {
