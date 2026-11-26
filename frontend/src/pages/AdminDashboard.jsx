@@ -3,23 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, ShoppingBag, IceCream, Trash2, Shield, Plus, 
   RefreshCw, AlertTriangle, Box, Sparkles, Key, CheckCircle, 
-  X, Camera, Loader2, Star, Image, Upload, Eye,
+  X, Camera, Loader2, Star, Image, Upload, Eye, EyeOff,
   Mail, Receipt, Edit2, Save, CheckCircle2,
   TrendingUp, TrendingDown, Calendar, Clock, DollarSign, Filter, ChevronRight, BarChart2
 } from 'lucide-react';
 import Model3DPreview from '../components/Model3DPreview';
 import CapturaFacial from '../components/CapturaFacial';
 import { apiFetch } from '../utils/api';
-import { crearSondeo, urlSinCache, avisarProductosActualizados } from '../utils/sondeo';
+import { crearSondeo, avisarProductosActualizados } from '../utils/sondeo';
 import { crearSondeoModelo3D } from '../utils/sondeoModelo3D';
 import { soloVentasCobradas } from '../utils/ingresos';
 import { armarCuerpoProducto, mapearProductoGuardado, armarCuerpoAlta, productoCreadoParaPanel, IMAGENES_PREDETERMINADAS } from '../utils/editorProductos';
 import { leerEntero, decidirTrasGuardar, cambiarProducto } from '../utils/edicionRapida';
-import { useCart } from '../context/CartContext';
 import { puedeEditarRol } from '../utils/permisosUsuarios';
 import { decidirAnteErrorPanel, mensajeDeError } from '../utils/respuestaAdmin';
 import { borrarSesion } from '../utils/sesion';
 import { describirPersonalizacion } from '../utils/personalizado';
+import { estaVisible, textoBotonVisibilidad, filtrarProductosPanel, contarOcultos, avisoTrasBorrar } from '../utils/visibilidadProductos';
 
 const getProductFallbackImage = (name = '') => {
   const n = String(name).toLowerCase();
@@ -38,7 +38,22 @@ const getProductFallbackImage = (name = '') => {
 };
 
 const AdminDashboard = ({ user, onLogout }) => {
-  const { showToast } = useCart();
+  // Avisos del panel: { texto, tipo: 'success' | 'error' | 'info', accion?: { etiqueta, alHacer } }.
+  // (useCart no trae showToast: antes estos avisos no se veían nunca.) Se cierran solos, salvo los que
+  // ofrecen una acción, que esperan un poco más para dar tiempo a usarla.
+  const [aviso, setAviso] = useState(null);
+  const temporizadorAviso = useRef(null);
+  const mostrarAviso = (texto, tipo = 'info', accion = null) => {
+    clearTimeout(temporizadorAviso.current);
+    setAviso({ texto, tipo, accion });
+    temporizadorAviso.current = setTimeout(() => setAviso(null), accion ? 12000 : 6000);
+  };
+  const cerrarAviso = () => {
+    clearTimeout(temporizadorAviso.current);
+    setAviso(null);
+  };
+  useEffect(() => () => clearTimeout(temporizadorAviso.current), []);
+  const showToast = mostrarAviso;
   const [dashboardData, setDashboardData] = useState({ stats: {}, users: [], sales: [], products: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -294,6 +309,33 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
     await resolverCambioRapido(res, productId, anterior, res ? 'Error al actualizar la categoría.' : 'Error de conexión al actualizar la categoría.');
     setUpdatingCategory(null);
+  };
+
+  // --- Ocultar / Mostrar en la tienda (producto.estado) ---
+  // Optimista como precio y categoría: se cambia al instante y, si el servidor no lo guarda, se vuelve atrás
+  // con un aviso (401 = verificar de nuevo). Al guardar, resolverCambioRapido avisa a las otras pestañas.
+  const [cambiandoVisibilidad, setCambiandoVisibilidad] = useState(null);
+  const [mostrarOcultos, setMostrarOcultos] = useState(true);
+
+  const handleCambiarVisibilidad = async (productId, visibleAhora) => {
+    const siguiente = !visibleAhora;
+    setCambiandoVisibilidad(productId);
+    setDashboardData(prev => ({ ...prev, products: cambiarProducto(prev.products, productId, { estado: siguiente }) }));
+    let res = null;
+    try {
+      res = await apiFetch(`/api/admin/products/${productId}/visible`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado: siguiente })
+      });
+    } catch (err) {
+      console.error('Error cambiando la visibilidad:', err);
+    }
+    await resolverCambioRapido(res, productId, { estado: visibleAhora }, res ? 'No se pudo cambiar la visibilidad del producto.' : 'Error de conexión al cambiar la visibilidad del producto.');
+    if (res && res.ok) {
+      mostrarAviso(siguiente ? 'El producto ya se muestra en la tienda.' : 'Producto oculto: la tienda y Gelbot ya no lo ofrecen.', 'success');
+    }
+    setCambiandoVisibilidad(null);
   };
 
   // --- Update Price State ---
@@ -628,11 +670,15 @@ const AdminDashboard = ({ user, onLogout }) => {
       }
       const data = await res.json();
       
-      // Obtener productos saltándose la caché del CDN (30 s): el admin ve sus cambios al instante
-      const prodRes = await fetch(urlSinCache(`${import.meta.env.VITE_API_URL || ''}/api/products`), { cache: 'no-store' });
-      const products = await prodRes.json();
-      
-      setDashboardData({ ...data, products });
+      // Productos del panel: TODOS, también los ocultos de la tienda (ruta de admin, sin caché).
+      const prodRes = await apiFetch('/api/admin/products', { cache: 'no-store' });
+      if (!prodRes.ok) {
+        const cuerpoProductos = await prodRes.json().catch(() => ({}));
+        throw new Error(mensajeDeError(cuerpoProductos, 'Error al obtener los productos del panel.'));
+      }
+      const { products } = await prodRes.json();
+
+      setDashboardData({ ...data, products: products || [] });
     } catch (err) {
       if (!silent) setError(err.message);
     } finally {
@@ -724,7 +770,13 @@ const AdminDashboard = ({ user, onLogout }) => {
         setIsQrVerified(false);
       } else {
         const data = await res.json().catch(() => ({}));
-        if (showToast) showToast(data.message || 'Error al eliminar producto', 'error');
+        // Con ventas no se puede borrar (409): el aviso ofrece ocultarlo de la tienda en un clic.
+        const { texto, ofrecerOcultar } = avisoTrasBorrar(res.status, data);
+        const producto = (dashboardData.products || []).find(p => String(p.id) === String(id));
+        const accion = ofrecerOcultar && estaVisible(producto)
+          ? { etiqueta: 'Ocultar', alHacer: () => { cerrarAviso(); handleCambiarVisibilidad(id, true); } }
+          : null;
+        mostrarAviso(texto, 'error', accion);
       }
     } catch (err) {
       if (showToast) showToast('Error al eliminar producto', 'error');
@@ -991,6 +1043,40 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   return (
     <div className="min-h-screen bg-[#050505] text-white pt-24 sm:pt-28 pb-20 px-4 sm:px-6 font-sans selection:bg-gold-premium/30">
+      {aviso && (
+        <div
+          role={aviso.tipo === 'error' ? 'alert' : 'status'}
+          aria-live={aviso.tipo === 'error' ? 'assertive' : 'polite'}
+          className={`fixed z-[300] bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 sm:max-w-md flex items-start gap-3 p-4 text-left rounded-2xl border bg-[#111116] shadow-[0_12px_32px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-bottom-4 duration-300 ${
+            aviso.tipo === 'error' ? 'border-red-500/40' : aviso.tipo === 'success' ? 'border-emerald-500/40' : 'border-gold-premium/40'
+          }`}
+        >
+          {aviso.tipo === 'error'
+            ? <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
+            : <CheckCircle size={18} className={`${aviso.tipo === 'success' ? 'text-emerald-400' : 'text-gold-premium'} shrink-0 mt-0.5`} aria-hidden="true" />}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-white/90 leading-snug">{aviso.texto}</p>
+            {aviso.accion && (
+              <button
+                type="button"
+                onClick={aviso.accion.alHacer}
+                className="mt-3 min-h-[44px] px-4 inline-flex items-center gap-2 rounded-xl bg-gold-premium hover:bg-amber-400 text-black text-xs font-bold cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-premium"
+              >
+                <EyeOff size={14} aria-hidden="true" />
+                {aviso.accion.etiqueta}
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={cerrarAviso}
+            aria-label="Cerrar aviso"
+            className="shrink-0 -m-2 w-11 h-11 inline-flex items-center justify-center rounded-xl text-white/50 hover:text-white hover:bg-white/10 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-premium"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto">
         
         <header className="mb-8 sm:mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-8 sm:pb-10">
@@ -1543,9 +1629,21 @@ const AdminDashboard = ({ user, onLogout }) => {
                     <IceCream className="text-gold-premium" size={20} />
                     Catálogo de <span className="text-gold-premium font-normal">Helados</span>
                   </h3>
-                  <p className="text-xs text-white/40 mt-0.5">Gestiona precios, cambia imágenes, destaca productos o agrega nuevas creaciones.</p>
+                  <p className="text-xs text-white/40 mt-0.5">Gestiona precios, cambia imágenes, destaca productos, oculta de la tienda o agrega nuevas creaciones.</p>
                 </div>
 
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0">
+                {contarOcultos(dashboardData.products) > 0 && (
+                  <label className="min-h-[44px] px-4 inline-flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs text-white/70 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-gold-premium">
+                    <input
+                      type="checkbox"
+                      checked={mostrarOcultos}
+                      onChange={(e) => setMostrarOcultos(e.target.checked)}
+                      className="w-4 h-4 accent-[#D4AF37] cursor-pointer"
+                    />
+                    Mostrar ocultos ({contarOcultos(dashboardData.products)})
+                  </label>
+                )}
                 <button
                   onClick={() => setShowAddProductModal(true)}
                   className="px-5 py-2.5 bg-gold-premium hover:bg-amber-400 text-black font-bold text-xs rounded-xl shadow-lg hover:shadow-gold-premium/20 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
@@ -1553,23 +1651,26 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <Plus size={16} />
                   <span>Agregar Nuevo Producto</span>
                 </button>
+                </div>
               </div>
 
+              <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase tracking-[0.2em] font-bold">
                     <th className="p-6">SKU</th>
                     <th className="p-6">Sabor / Producto</th>
                     <th className="p-6">Precio</th>
-                    <th className="p-6">Stock / Disponible</th>
                     <th className="p-6">Categoría</th>
                     <th className="p-6">Stock Disponible</th>
+                    <th className="p-6">En la tienda</th>
                     <th className="p-6">Destacado</th>
                     <th className="p-6 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {dashboardData.products.map(p => {
+                  {filtrarProductosPanel(dashboardData.products, mostrarOcultos).map(p => {
+                    const visible = estaVisible(p);
                     const currentStock = p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50;
                     let stockBadge = 'bg-green-500/10 text-green-400 border-green-500/20';
                     if (currentStock === 0) {
@@ -1579,10 +1680,10 @@ const AdminDashboard = ({ user, onLogout }) => {
                     }
 
                     return (
-                      <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                      <tr key={p.id} className={`transition-colors group ${visible ? 'hover:bg-white/[0.02]' : 'bg-white/[0.015] hover:bg-white/[0.03]'}`}>
                         <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
                         <td className="p-6">
-                          <div className="flex items-center gap-4 min-w-[260px]">
+                          <div className={`flex items-center gap-4 min-w-[260px] transition-opacity ${visible ? '' : 'opacity-50'}`}>
                             <div 
                               className="relative group/img cursor-pointer w-14 h-14 shrink-0 rounded-2xl overflow-hidden bg-[#111116] border border-white/10 group-hover/img:border-gold-premium/40 transition-all flex items-center justify-center" 
                               onClick={() => handleOpenImageModal(p)}
@@ -1604,6 +1705,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                             <div className="min-w-0 flex-1">
                               <p className="font-medium text-white flex items-center gap-2 text-sm">
                                 <span className="truncate">{p.name}</span>
+                                {!visible && (
+                                  <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/80 border border-white/20 font-bold flex items-center gap-1">
+                                    <EyeOff size={10} aria-hidden="true" /> Oculto
+                                  </span>
+                                )}
                                 {p.destacado && (
                                   <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-gold-premium/20 text-gold-premium border border-gold-premium/30 font-bold flex items-center gap-1">
                                     <Star size={10} className="fill-gold-premium" /> Destacado
@@ -1724,6 +1830,30 @@ const AdminDashboard = ({ user, onLogout }) => {
                             </button>
                           </div>
                         </td>
+                        <td className="p-4">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={visible}
+                            aria-label={`${textoBotonVisibilidad(p)}: ${p.name}`}
+                            title={visible ? 'Visible en la tienda y en Gelbot. Clic para ocultarlo.' : 'Oculto: la tienda y Gelbot no lo muestran. Clic para mostrarlo.'}
+                            onClick={() => handleCambiarVisibilidad(p.id, visible)}
+                            disabled={cambiandoVisibilidad === p.id}
+                            className={`min-h-[44px] min-w-[44px] px-3 rounded-xl text-[11px] font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-premium whitespace-nowrap ${
+                              visible
+                                ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20'
+                                : 'bg-white/5 text-white/70 border border-white/15 hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            <span aria-hidden="true" className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${visible ? 'bg-emerald-400/80' : 'bg-white/20'}`}>
+                              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${visible ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                            </span>
+                            {cambiandoVisibilidad === p.id
+                              ? <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+                              : (visible ? <Eye size={12} aria-hidden="true" /> : <EyeOff size={12} aria-hidden="true" />)}
+                            <span>{visible ? 'Visible' : 'Oculto'}</span>
+                          </button>
+                        </td>
                         <td className="p-6">
                           <button
                             onClick={() => handleToggleFeatured(p.id, p.destacado)}
@@ -1776,7 +1906,11 @@ const AdminDashboard = ({ user, onLogout }) => {
                   })}
                 </tbody>
               </table>
+              </div>
               {dashboardData.products.length === 0 && <div className="p-20 text-center text-white/20">No hay productos en el catálogo</div>}
+              {dashboardData.products.length > 0 && filtrarProductosPanel(dashboardData.products, mostrarOcultos).length === 0 && (
+                <div className="p-20 text-center text-white/40">Todos los productos están ocultos. Activa "Mostrar ocultos" para verlos.</div>
+              )}
             </div>
           )}
 
@@ -1801,7 +1935,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 <div className="bg-black/50 border border-white/10 px-6 py-4 rounded-2xl flex items-center gap-4 text-center min-w-[200px]">
                   <div>
                     <span className="text-3xl font-bold text-gold-premium">
-                      {dashboardData.products.filter(p => p.destacado).length}
+                      {dashboardData.products.filter(p => p.destacado && estaVisible(p)).length}
                     </span>
                     <span className="text-white/40 text-xs font-mono block uppercase">Destacados Activos</span>
                   </div>
@@ -1833,8 +1967,15 @@ const AdminDashboard = ({ user, onLogout }) => {
                     >
                       {/* Badge superior */}
                       <div className="flex items-center justify-between mb-4">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-white/5 text-white/60 border border-white/10">
-                          {p.categoria || 'Artesanal'}
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-white/5 text-white/60 border border-white/10">
+                            {p.categoria || 'Artesanal'}
+                          </span>
+                          {!estaVisible(p) && (
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-white/10 text-white/80 border border-white/20 flex items-center gap-1" title="Oculto de la tienda: no aparece en el inicio aunque esté destacado">
+                              <EyeOff size={10} aria-hidden="true" /> Oculto
+                            </span>
+                          )}
                         </span>
 
                         <span className="text-xs font-bold text-gold-premium font-mono">
@@ -1906,7 +2047,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <span className="text-xs uppercase tracking-widest font-bold">Vista Previa de Clientes en el Inicio</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {dashboardData.products.filter(p => p.destacado).map(p => (
+                  {dashboardData.products.filter(p => p.destacado && estaVisible(p)).map(p => (
                     <div key={`preview-${p.id}`} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-3">
                       <img 
                         src={p.image || p.imagen || getProductFallbackImage(p.name)} 
@@ -1923,7 +2064,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                       </div>
                     </div>
                   ))}
-                  {dashboardData.products.filter(p => p.destacado).length === 0 && (
+                  {dashboardData.products.filter(p => p.destacado && estaVisible(p)).length === 0 && (
                     <div className="col-span-full py-8 text-center text-white/30 text-xs italic">
                       No hay ningún producto marcado como destacado. Haz clic en "Destacar Producto" arriba para agregarlo.
                     </div>

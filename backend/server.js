@@ -2616,6 +2616,50 @@ app.put('/api/admin/products/:id/stock', requireAdmin, rutaCampoProducto({
   mensajeOk: () => 'Stock disponible actualizado con éxito.'
 }));
 
+// Ocultar / mostrar el producto en la tienda (estado). Es la salida para un producto con ventas, que no se
+// puede borrar. Solo true/false de verdad (los textos "true"/"false" no valen). La tienda y Gelbot solo
+// muestran estado = true; la caché de Gelbot se invalida sola (middleware de /api/admin/products) y la del
+// CDN de /api/products tarda hasta ~60 s (las otras pestañas del navegador refrescan sin caché al recibir el aviso).
+app.put('/api/admin/products/:id/visible', requireAdmin, rutaCampoProducto({
+  columna: 'estado',
+  ...REGLAS_PRODUCTO.estado,
+  mensajeError: 'Error al cambiar la visibilidad del producto.',
+  mensajeOk: (v) => (v ? 'El producto ya se muestra en la tienda.' : 'El producto quedó oculto de la tienda.')
+}));
+
+// Lista de productos del panel: TODOS (también los ocultos, con su estado), nunca el personalizado.
+// Sin caché: el admin debe ver sus cambios al instante.
+const COLUMNAS_LISTA_ADMIN = 'id_producto, nombre, precio, descripcion, imagen, categoria, destacado, stock, estado, tipo';
+app.get('/api/admin/products', requireAdmin, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { data, error } = await supabase
+      .from('producto')
+      .select(COLUMNAS_LISTA_ADMIN)
+      .or(SIN_PERSONALIZADO)
+      .order('id_producto', { ascending: true });
+    if (falloSupabase(res, error, 'Error al obtener los productos del panel.')) return;
+
+    // Segunda barrera por si la base devolviera el personalizado. estado nulo = oculto (la tienda pide estado = true).
+    const products = (data || []).filter((p) => p.tipo !== 'personalizado').map((p) => ({
+      id: p.id_producto,
+      name: p.nombre,
+      precio: p.precio,
+      price: p.precio,
+      desc: p.descripcion || '',
+      image: p.imagen || getProductImage(p.nombre),
+      categoria: p.categoria || 'Clásico',
+      destacado: Boolean(p.destacado),
+      stock: p.stock !== undefined && p.stock !== null ? Number(p.stock) : 50,
+      estado: p.estado === true
+    }));
+    return res.status(200).json({ ok: true, products });
+  } catch (error) {
+    console.error('Error al listar productos del panel:', error);
+    return res.status(500).json({ ok: false, message: 'Error al obtener los productos del panel.' });
+  }
+});
+
 // ─── Despertador diario (Vercel Cron) ───────────────────────────
 // Una consulta mínima a la base evita que Supabase (plan gratis) se pause por falta de actividad.
 // Si existe CRON_SECRET, exige "Authorization: Bearer <CRON_SECRET>" (lo que manda Vercel Cron).
@@ -2666,7 +2710,8 @@ app.get('/api/products', async (req, res) => {
 
     if (error || !data || data.length === 0) {
       console.warn('⚠️ No se obtuvieron datos de Supabase, usando fallback local.');
-      data = FALLBACK_PRODUCTS;
+      // Lo que el admin ocultó (estado = false) tampoco se muestra desde el catálogo de emergencia.
+      data = FALLBACK_PRODUCTS.filter((p) => p.estado !== false);
     } else {
       vieneDeLaBase = true;
     }
