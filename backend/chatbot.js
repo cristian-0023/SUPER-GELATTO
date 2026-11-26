@@ -627,6 +627,117 @@ function responderComoCliente(supabase, { message, history, userId, userName }) 
   });
 }
 
+// Ejecuta las herramientas que pidió el modelo en una conversación de ADMIN y agrega sus resultados a `messages`.
+// Defensa en profundidad: aunque el handler ya atiende antes a clientes y visitantes, sin admin no se ejecuta nada.
+async function ejecutarHerramientasAdmin(llamadas, { supabase, isAdmin, userId, message, history, estadosCobrados = [], messages }) {
+  const nombresPermitidos = new Set(tools.map((t) => t.function.name));
+  let actionToPerform = null;
+  let productToBuy    = null;
+  let actionData      = null;
+  let propuesta       = null; // máximo 1 acción que modifica datos por mensaje
+  let productoConsultado = null; // addToCart sin intención de compra: se informa, no se agrega
+  let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
+  let productosAmbiguos  = null; // addToCart con un nombre que coincide con varios sabores
+
+  for (const toolCall of llamadas) {
+    const functionName = toolCall.function.name;
+    let functionResponse;
+
+    try {
+      // Defensa en profundidad: sin admin no se ejecuta nada (el handler ya separó a los clientes antes).
+      if (!isAdmin) {
+        functionResponse = { error: "Acceso denegado." };
+
+      // Solo se ejecuta lo que se le ofreció al modelo para esta sesión (y nada que no exista).
+      } else if (!nombresPermitidos.has(functionName)) {
+        functionResponse = { error: "Herramienta no reconocida." };
+
+      } else if (functionName === "getProducts") {
+        functionResponse = await functions.getProducts(supabase);
+
+      } else if (functionName === "getOrders") {
+        // Siempre los pedidos del usuario del token, aunque el modelo pida otro userId.
+        functionResponse = await functions.getOrders(supabase, userId);
+
+      } else if (functionName === "getAllUsers") {
+        functionResponse = await functions.getAllUsers(supabase);
+        actionToPerform = 'showUsersTable';
+        actionData = functionResponse.users;
+
+      } else if (functionName === "getAllOrders") {
+        functionResponse = await functions.getAllOrders(supabase);
+        actionToPerform = 'showSalesTable';
+        actionData = functionResponse.sales;
+
+      } else if (ACCIONES_CON_CONFIRMACION.includes(functionName)) {
+        // Solo se PROPONE: la ejecuta el admin al confirmar con el token (otra petición).
+        if (userId == null) {
+          functionResponse = { error: "Acceso denegado." };
+        } else if (propuesta) {
+          functionResponse = { error: "Solo se permite una acción que modifica datos por mensaje." };
+        } else {
+          const preparada = prepararAccion(functionName, JSON.parse(toolCall.function.arguments || '{}'));
+          if (preparada.error) {
+            functionResponse = { error: preparada.error };
+          } else {
+            propuesta = {
+              accion: functionName,
+              resumen: preparada.resumen,
+              tokenConfirmacion: crearPropuesta(userId, functionName, preparada.args)
+            };
+            functionResponse = { pendienteDeConfirmacion: true, message: "Se le pidió confirmación al administrador. La acción todavía NO se ha ejecutado." };
+          }
+        }
+
+      } else if (functionName === "getSalesSummary") {
+        const args = JSON.parse(toolCall.function.arguments || '{}');
+        functionResponse = await functions.getSalesSummary(supabase, args.periodo, estadosCobrados);
+
+      } else if (functionName === "addToCart") {
+        const args = JSON.parse(toolCall.function.arguments || '{}');
+        if (!args?.productName || typeof args.productName !== 'string') {
+          functionResponse = { error: "Necesito saber qué helado deseas agregar al carrito." };
+        } else {
+          // Mismo catálogo en caché y misma búsqueda (palabra completa) que los clientes.
+          const catalogo = await getProductsCached(supabase);
+          const encontrados = buscarProductos(args.productName.slice(0, 100), catalogo);
+          const found = encontrados.length === 1 ? encontrados[0] : null;
+          if (encontrados.length > 1) {
+            productosAmbiguos = encontrados;
+            functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };
+          } else if (found && !quiereAgregar(message, ultimoMensajeDelBot(history), found, catalogo)) {
+            // Defensa del servidor: no pidió ese producto, no se agrega (aunque el modelo lo pida).
+            productoConsultado = found;
+            functionResponse = { info: true, message: `El cliente no pidió ${found.nombre}; no se agregó al carrito.` };
+          } else if (found) {
+            actionToPerform = 'addToCart';
+            productoAgregado = found;
+            productToBuy    = productoParaCarrito(found);
+            functionResponse = { success: true, message: `${found.nombre} listo para el carrito.` };
+          } else {
+            functionResponse = { error: "No encontré ese sabor en el catálogo." };
+          }
+        }
+
+      } else {
+        functionResponse = { error: "Herramienta no reconocida." };
+      }
+
+    } catch (e) {
+      console.error("❌ Error en tool:", functionName, e);
+      functionResponse = { error: "Error interno al ejecutar la función." };
+    }
+
+    messages.push({
+      tool_call_id: toolCall.id,
+      role: "tool",
+      name: functionName,
+      content: isAdmin ? resultadoParaModelo(functionName, functionResponse) : JSON.stringify(functionResponse)
+    });
+  }
+  return { actionToPerform, productToBuy, actionData, propuesta, productoConsultado, productoAgregado, productosAmbiguos };
+}
+
 // ── Controlador principal ────────────────────────────────────
 // opciones.sesion: el contenido del JWT ya verificado por server.js (verifyTokenSafely), o null.
 // La identidad sale SOLO de ahí: userId, userName, userRole y userEmail del cuerpo se ignoran.
@@ -681,7 +792,6 @@ async function handleChatbotRequest(req, res, supabase, { sesion = null, estados
     const activeHistory = isDataQuery ? [] : filteredHistory;
 
     const activeTools = tools;
-    const nombresPermitidos = new Set(activeTools.map(t => t.function.name));
 
     // Fecha/hora actual en Colombia para que el LLM sepa qué es "hoy", "esta semana", etc.
     const colombiaTime = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'full', timeStyle: 'short' });
@@ -747,106 +857,8 @@ USUARIO: ${userName} | role: "admin"`;
       // Mensaje armado a mano: no se reenvía el `reasoning` de gpt-oss (no es un campo de entrada válido para él).
       messages.push({ role: "assistant", content: responseMessage.content ?? null, tool_calls: llamadasAEjecutar });
 
-      let actionToPerform = null;
-      let productToBuy    = null;
-      let actionData      = null;
-      let propuesta       = null; // máximo 1 acción que modifica datos por mensaje
-      let productoConsultado = null; // addToCart sin intención de compra: se informa, no se agrega
-      let productoAgregado   = null; // addToCart ejecutado: el texto con el precio lo arma el servidor
-      let productosAmbiguos  = null; // addToCart con un nombre que coincide con varios sabores
-
-      for (const toolCall of llamadasAEjecutar) {
-        const functionName = toolCall.function.name;
-        let functionResponse;
-
-        try {
-          // Solo se ejecuta lo que se le ofreció al modelo para esta sesión (y nada que no exista).
-          if (!nombresPermitidos.has(functionName)) {
-            functionResponse = { error: "Herramienta no reconocida." };
-
-          } else if (functionName === "getProducts") {
-            functionResponse = await functions.getProducts(supabase);
-
-          } else if (functionName === "getOrders") {
-            // Siempre los pedidos del usuario del token, aunque el modelo pida otro userId.
-            functionResponse = await functions.getOrders(supabase, userId);
-
-          } else if (functionName === "getAllUsers") {
-            functionResponse = await functions.getAllUsers(supabase);
-            actionToPerform = 'showUsersTable';
-            actionData = functionResponse.users;
-
-          } else if (functionName === "getAllOrders") {
-            functionResponse = await functions.getAllOrders(supabase);
-            actionToPerform = 'showSalesTable';
-            actionData = functionResponse.sales;
-
-          } else if (ACCIONES_CON_CONFIRMACION.includes(functionName)) {
-            // Solo se PROPONE: la ejecuta el admin al confirmar con el token (otra petición).
-            if (userId == null) {
-              functionResponse = { error: "Acceso denegado." };
-            } else if (propuesta) {
-              functionResponse = { error: "Solo se permite una acción que modifica datos por mensaje." };
-            } else {
-              const preparada = prepararAccion(functionName, JSON.parse(toolCall.function.arguments || '{}'));
-              if (preparada.error) {
-                functionResponse = { error: preparada.error };
-              } else {
-                propuesta = {
-                  accion: functionName,
-                  resumen: preparada.resumen,
-                  tokenConfirmacion: crearPropuesta(userId, functionName, preparada.args)
-                };
-                functionResponse = { pendienteDeConfirmacion: true, message: "Se le pidió confirmación al administrador. La acción todavía NO se ha ejecutado." };
-              }
-            }
-
-          } else if (functionName === "getSalesSummary") {
-            const args = JSON.parse(toolCall.function.arguments || '{}');
-            functionResponse = await functions.getSalesSummary(supabase, args.periodo, estadosCobrados);
-
-          } else if (functionName === "addToCart") {
-            const args = JSON.parse(toolCall.function.arguments || '{}');
-            if (!args?.productName || typeof args.productName !== 'string') {
-              functionResponse = { error: "Necesito saber qué helado deseas agregar al carrito." };
-            } else {
-              // Mismo catálogo en caché y misma búsqueda (palabra completa) que los clientes.
-              const catalogo = await getProductsCached(supabase);
-              const encontrados = buscarProductos(args.productName.slice(0, 100), catalogo);
-              const found = encontrados.length === 1 ? encontrados[0] : null;
-              if (encontrados.length > 1) {
-                productosAmbiguos = encontrados;
-                functionResponse = { info: true, message: "Hay varios sabores con ese nombre; se le preguntará cuál." };
-              } else if (found && !quiereAgregar(message, ultimoMensajeDelBot(history), found, catalogo)) {
-                // Defensa del servidor: no pidió ese producto, no se agrega (aunque el modelo lo pida).
-                productoConsultado = found;
-                functionResponse = { info: true, message: `El cliente no pidió ${found.nombre}; no se agregó al carrito.` };
-              } else if (found) {
-                actionToPerform = 'addToCart';
-                productoAgregado = found;
-                productToBuy    = productoParaCarrito(found);
-                functionResponse = { success: true, message: `${found.nombre} listo para el carrito.` };
-              } else {
-                functionResponse = { error: "No encontré ese sabor en el catálogo." };
-              }
-            }
-
-          } else {
-            functionResponse = { error: "Herramienta no reconocida." };
-          }
-
-        } catch (e) {
-          console.error("❌ Error en tool:", functionName, e);
-          functionResponse = { error: "Error interno al ejecutar la función." };
-        }
-
-        messages.push({
-          tool_call_id: toolCall.id,
-          role: "tool",
-          name: functionName,
-          content: resultadoParaModelo(functionName, functionResponse)
-        });
-      }
+      const { actionToPerform, productToBuy, actionData, propuesta, productoConsultado, productoAgregado, productosAmbiguos } =
+        await ejecutarHerramientasAdmin(llamadasAEjecutar, { supabase, isAdmin, userId, message, history, estadosCobrados, messages });
 
       // Con una propuesta el texto lo pone el servidor (el modelo no puede afirmar que ya se hizo).
       if (propuesta) {
@@ -943,4 +955,4 @@ USUARIO: ${userName} | role: "admin"`;
   }
 }
 
-module.exports = { handleChatbotRequest, functions, invalidarCacheProductos };
+module.exports = { handleChatbotRequest, functions, invalidarCacheProductos, ejecutarHerramientasAdmin };

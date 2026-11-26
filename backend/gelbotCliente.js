@@ -8,7 +8,7 @@
 // Regla de oro: ante la duda no se agrega y, si nombra un sabor y habla de salud, se muestra la ficha con aviso.
 // Las dependencias (catálogo, modelo, pedidos, reglas) llegan desde chatbot.js: este módulo no conoce Supabase ni Groq.
 const {
-  analizarMensaje, tieneIntencionDeCompra, resolverPedido, estaRechazado, esConsulta, preguntaPrecio, esAfirmacion,
+  soloPalabras, analizarMensaje, tieneIntencionDeCompra, resolverPedido, estaRechazado, esConsulta, preguntaPrecio, esAfirmacion,
   botOfrecioAgregar, botPreguntoCual, leerCantidad, leerCantidadDe, buscarProductos,
 } = require('./gelbotIntencion');
 const {
@@ -36,7 +36,8 @@ const HERRAMIENTAS = {
             type: 'string',
             enum: R.TEMAS,
             description: 'saludo, despedida, gracias, menu (o recomendación), precio, ficha (ingredientes, alérgenos o salud de UN sabor), alergenos (en general), '
-              + 'agregar (quiere comprar pero no dijo cuál), pedidos, pagar (carrito o cómo pagar), superpoints, personalizado (helado 3D), queja (o ayuda), '
+              + 'agregar (quiere comprar pero no dijo cuál), pedidos, pagar (carrito o cómo pagar), superpoints, personalizado (helado 3D), queja (reclamo), '
+              + 'ayuda (qué puede hacer Gelbot), '
               + 'contacto (horarios, envíos, dirección, teléfono, promociones), quien (quién eres) u otro.',
           },
           producto: { type: 'string', description: 'Nombre exacto del sabor del catálogo, solo si el cliente lo nombró.' },
@@ -121,8 +122,13 @@ function agregarDelModelo(ctx, productName) {
   const { negacion, relato, exclusion, pide, rechazado } = analizarMensaje(message, productos);
   const encontrados = productName ? buscarProductos(productName, productos) : [];
   const rechazo = negacion || relato || (exclusion && (pide || !esConsulta(message) || encontrados.some((p) => estaRechazado(p, rechazado))));
-  if (rechazo) return pide ? R.respuestaCual([]) : { response: relato ? R.MENSAJE_NADA_AGREGADO_RELATO : R.MENSAJE_NADA_AGREGADO };
   const nombrados = buscarProductos(message, productos);
+  if (rechazo && !pide && !nombrados.length) {
+    // No pidió nada ni nombró un sabor ("quiero pagar", "mi pedido llegó derretido"): se responde su tema, no el carrito.
+    const tema = temaDelServidor(message, productos);
+    if (tema !== 'otro') return { redirigir: tema };
+  }
+  if (rechazo) return pide ? R.respuestaCual([]) : { response: relato ? R.MENSAJE_NADA_AGREGADO_RELATO : R.MENSAJE_NADA_AGREGADO };
   // Pide, pero no nombró ningún sabor: no lo elige el modelo.
   if (pide && !esConsulta(message) && !nombrados.length) return R.respuestaElegirSabor(productos);
   // La pista del modelo solo vale para sabores que el cliente nombró.
@@ -142,8 +148,9 @@ function atajos(message, textoBot, productos) {
 
   // 1. Tras "soy alérgico..., dame X": solo un "sí" justo después de esa oferta agrega ESE producto.
   if (traeOfertaTrasSalud(textoBot)) {
+    // Es un tema de salud: solo vale la respuesta que pide la oferta ("sí, agrégalo", "agrégalo" o "sí"), no un "ok".
     const oferta = leerOfertaTrasSalud(textoBot, productos);
-    if (oferta && esAfirmacion(message)) return listo(agregar(message, oferta.producto, oferta.cantidad));
+    if (oferta && CONFIRMA_OFERTA.has(soloPalabras(message))) return listo(agregar(message, oferta.producto, oferta.cantidad));
   } else if (esAfirmacion(message) && (botOfrecioAgregar(textoBot) || trasCual)) {
     // "sí" / "dale" / "agrégalo" después de una oferta: el producto es el que nombró el bot.
     const encontrados = buscarProductos(textoBot, productos);
@@ -188,6 +195,7 @@ function atajos(message, textoBot, productos) {
 // Productos de un tema: la pista del modelo solo si el cliente nombró ese sabor; si no, los que nombró el cliente.
 function productosDelTema(pista, message, productos) {
   const nombrados = productosNombrados(message, productos);
+  if (nombrados.length > 1) return nombrados; // nombró varios: el modelo no escoge uno
   if (pista) {
     const [p, ...otros] = buscarProductos(pista, productos);
     if (p && !otros.length && nombrados.includes(p)) return [p];
@@ -196,8 +204,8 @@ function productosDelTema(pista, message, productos) {
 }
 
 async function responderTema(tema, ctx, pista = '') {
-  const { message, productos, deps, conSesion } = ctx;
-  const fijo = R.respuestaDeTemaFijo(tema, message, productos);
+  const { message, productos, deps, conSesion, textoBot } = ctx;
+  const fijo = R.respuestaDeTemaFijo(tema, message, productos, textoBot);
   if (fijo) return fijo;
   if (tema === 'ficha' || tema === 'alergenos') {
     const lista = tema === 'ficha' ? productosDelTema(pista, message, productos) : [];
@@ -206,10 +214,13 @@ async function responderTema(tema, ctx, pista = '') {
   }
   if (tema === 'precio') {
     const lista = productosDelTema(pista, message, productos);
-    if (lista.length === 1) return { response: R.textoInfoProducto(lista[0]) };
+    if (lista.length === 1) return { response: R.rechazaOCuenta(message, productos) ? R.TEXTOS.neutro : R.textoInfoProducto(lista[0]) };
     return lista.length > 1 ? R.respuestaCual(lista) : R.respuestaMenu(productos, R.MENSAJE_PRECIOS);
   }
-  if (tema === 'producto') return { response: R.textoInfoProducto(productosNombrados(message, productos)[0]) };
+  if (tema === 'producto') {
+    return { response: R.rechazaOCuenta(message, productos) ? R.TEXTOS.neutro : R.textoInfoProducto(productosNombrados(message, productos)[0]) };
+  }
+  if (tema === 'varios') return R.respuestaMenu(productosNombrados(message, productos), R.TEXTOS.varios);
   if (tema === 'pedidos') return { response: conSesion ? R.textoPedidos(await deps.pedidos()) : R.TEXTOS.pedidosSinSesion };
   if (tema === 'superpoints') return { response: R.textoPuntos(await deps.reglasPuntos()) };
   if (tema === 'personalizado') return { response: R.textoPersonalizado(await deps.datosPersonalizado()) };
@@ -217,12 +228,18 @@ async function responderTema(tema, ctx, pista = '') {
 }
 
 // Sin tema del modelo: el servidor decide con sus palabras (un solo sabor nombrado: su ficha o su precio).
+// Varios sabores nombrados: sus tarjetas (o la pregunta de cuál, si es de salud).
 function temaDelServidor(message, productos) {
   const nombrados = productosNombrados(message, productos);
-  const tema = R.temaPorPalabras(message, { nombraProducto: nombrados.length === 1 });
-  if (tema === 'producto' && pideInformacion(message, nombrados)) return 'ficha';
-  return tema;
+  const tema = R.temaPorPalabras(message, { nombraProducto: nombrados.length > 0 });
+  if (tema !== 'producto') return tema;
+  if (pideInformacion(message, nombrados)) return 'ficha';
+  return nombrados.length > 1 ? 'varios' : 'producto';
 }
+
+// Temas que las palabras reconocen sin duda: se responden sin llamar al modelo (si no nombra ningún sabor).
+const SIN_MODELO = new Set(['gracias', 'despedida', 'pagar', 'quien', 'contacto', 'superpoints', 'personalizado']);
+const CONFIRMA_OFERTA = new Set(['si', 'si agregalo', 'agregalo']);
 
 // ── Flujo completo ────────────────────────────────────────────
 // entrada: { message, history, conSesion, userName }. deps: { productos, llamarModelo (o null), alFallarModelo,
@@ -236,6 +253,11 @@ async function responderCliente(entrada, deps) {
   const atajo = atajos(message, textoBot, productos);
   if (atajo?.respuesta) return R.paraCliente(atajo.respuesta);
   ctx.consulta = atajo?.consulta || null;
+
+  // Lo inequívoco ("muchas gracias", "¿cómo pago?", "¿a qué hora abren?") no necesita al modelo.
+  const nombrados = productosNombrados(message, productos);
+  const temaPalabras = R.temaPorPalabras(message, { nombraProducto: nombrados.length > 0 });
+  if (!ctx.consulta && !nombrados.length && SIN_MODELO.has(temaPalabras)) return R.paraCliente(await responderTema(temaPalabras, ctx));
 
   // Una sola llamada al modelo; su texto nunca se usa.
   let decision = { tema: null };
@@ -252,13 +274,15 @@ async function responderCliente(entrada, deps) {
 
   if (decision.tema === 'agregar' && (decision.productName || decision.pista)) {
     const respuesta = agregarDelModelo(ctx, decision.productName || decision.pista);
+    if (respuesta?.redirigir) return R.paraCliente(await responderTema(respuesta.redirigir, ctx));
     if (respuesta) return R.paraCliente(respuesta);
     if (decision.productName) decision = { tema: null };
   }
   if (ctx.consulta) return R.paraCliente(respuestaFicha(ctx.consulta, productos, R.formatearCOP));
+  // Un tema de baja gravedad (queja, despedida, pedidos) solo si las palabras lo respaldan.
+  if (decision.tema && !R.respaldaTema(decision.tema, message)) decision = { tema: null };
 
   // Salud primero: si nombra un solo sabor y pide información o habla de salud, la ficha (diga lo que diga el modelo).
-  const nombrados = productosNombrados(message, productos);
   if (nombrados.length === 1 && decision.tema !== 'ficha' && pideInformacion(message, nombrados)) return R.paraCliente(await responderTema('ficha', ctx));
 
   // Sin un tema claro del modelo (o "otro"), el servidor entiende lo básico solo.

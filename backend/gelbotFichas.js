@@ -360,7 +360,7 @@ function avisoSinIngrediente(producto, mensaje) {
 // ── ¿Pide información o habla de salud? ───────────────────────
 // Si el modelo no da un tema claro y el mensaje nombra un sabor, esto decide entre su ficha (con aviso) o su precio.
 const PIDE_INFO = new RegExp(`\\b(?:${ALERGENO}|ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|vegan\\w*|vegetarian\\w*`
-  + '|calori\\w*|nutri\\w*|engorda\\w*|segur[oa]s?|apt[oa]s?|sano|sana|saludables?|natural(?:es)?|light|contiene\\w*|lleva\\w*|trae\\w*|hech[oa]s?|receta'
+  + '|calori\\w*|nutri\\w*|engorda\\w*|dietas?|(?:cayo|caer|cae|caen|sienta|sentar|sento|sientan) mal|hace dano|segur[oa]s?|apt[oa]s?|sano|sana|saludables?|natural(?:es)?|light|contiene\\w*|lleva\\w*|trae\\w*|hech[oa]s?|receta'
   + '|cuentame|cuenta(?:nos)?|hablame|habla(?:nos)?|info|informacion|detalles?|describe\\w*|explica\\w*|que es|como es|mas de|sobre|tell|about)\\b');
 // Las palabras del nombre de los sabores nombrados no cuentan ("me gusta el coco" nombra Coco & Lima, no pregunta).
 function pideInformacion(mensaje, nombrados = []) {

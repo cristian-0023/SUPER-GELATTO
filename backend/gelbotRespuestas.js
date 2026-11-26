@@ -14,7 +14,7 @@ const { pideOtraCosa } = require('./gelbotMenu');
 // ── La frontera ───────────────────────────────────────────────
 // Solo estos campos, con valores del servidor. action: null, 'addToCart' o 'closeChat'.
 function paraCliente({ response, action = null, product = null, quantity, productos } = {}) {
-  const salida = { response: String(response || TEXTOS.otro), action: ['addToCart', 'closeChat'].includes(action) ? action : null, product: product || null };
+  const salida = { response: String(response || TEXTOS.otro[0]), action: ['addToCart', 'closeChat'].includes(action) ? action : null, product: product || null };
   if (salida.action === 'addToCart' && Number.isInteger(quantity)) salida.quantity = quantity;
   if (Array.isArray(productos) && productos.length) salida.productos = productos;
   return salida;
@@ -51,10 +51,10 @@ function productosParaTarjetas(lista) {
   return lista
     .filter((p) => p && p.estado !== false && Number.isInteger(Number(p.id_producto)) && typeof p.nombre === 'string')
     .slice(0, MAX_PRODUCTOS_TARJETAS)
-    .map((p) => ({ id: p.id_producto, nombre: p.nombre, precio: p.precio, image: imagenProductoValida(p.imagen) }));
+    .map((p) => ({ id: p.id_producto, nombre: nombreVisible(p.nombre), precio: p.precio, image: imagenProductoValida(p.imagen) }));
 }
 // Producto que recibe el carrito del navegador (el carrito no usa la descripción: no se manda).
-const productoParaCarrito = (p) => ({ id: p.id_producto, nombre: p.nombre, precio: p.precio, image: imagenProductoValida(p.imagen) });
+const productoParaCarrito = (p) => ({ id: p.id_producto, nombre: nombreVisible(p.nombre), precio: p.precio, image: imagenProductoValida(p.imagen) });
 
 const textoInfoProducto = (p) =>
   `**${nombreVisible(p.nombre)}** cuesta **${formatearCOP(p.precio)}**. Si lo quieres, dime "agrégalo" y lo pongo en tu carrito 🍦`;
@@ -93,7 +93,7 @@ function respuestaMenu(productos, texto = MENSAJE_SABORES) {
 
 // ── Temas ─────────────────────────────────────────────────────
 const TEMAS = ['saludo', 'despedida', 'gracias', 'menu', 'precio', 'ficha', 'alergenos', 'agregar', 'pedidos', 'pagar', 'superpoints',
-  'personalizado', 'queja', 'contacto', 'quien', 'otro'];
+  'personalizado', 'queja', 'ayuda', 'contacto', 'quien', 'otro'];
 
 // Sin "agrégalo" ni "cuál": esas palabras harían que un "sí" o un sabor suelto después agregaran algo.
 const TEXTOS = {
@@ -103,14 +103,36 @@ const TEXTOS = {
     '¡Bienvenido a Super Gelatto! Soy Gelbot 🍦 Pídeme el menú, el precio de un sabor o sus ingredientes.',
   ],
   despedida: ['¡Gracias por visitarnos! Vuelve pronto 🍦', '¡Hasta pronto! Que disfrutes tu helado 🍦'],
-  gracias: ['¡Con gusto! ¿Te ayudo con algo más? 🍦', '¡Para eso estoy! 🍦 Si quieres, te muestro el menú.'],
-  pagar: 'Para pagar, abre tu carrito 🛒 y pulsa «Continuar al Pago». Ahí revisas tu pedido y eliges PSE, Nequi o Botón Bancolombia. Necesitas tener la sesión iniciada.',
+  gracias: ['¡Con gusto! ¿Te ayudo con algo más? 🍦', '¡Para eso estoy! 🍦 Si quieres, te muestro el menú.', '¡Gracias a ti! 🍦 Aquí sigo si necesitas algo más.'],
+  pagar: [
+    'Para pagar, abre tu carrito 🛒 y pulsa «Continuar al Pago». Ahí revisas tu pedido y eliges PSE, Nequi o Botón Bancolombia. Necesitas tener la sesión iniciada.',
+    'El pago se hace desde tu carrito 🛒: pulsa «Continuar al Pago», revisa tu pedido y elige PSE, Nequi o Botón Bancolombia. Recuerda tener la sesión iniciada.',
+    'Abre tu carrito 🛒 y pulsa «Continuar al Pago»: ahí confirmas tu pedido y pagas con PSE, Nequi o Botón Bancolombia (con la sesión iniciada).',
+  ],
+  // Preguntan por efectivo, Daviplata, tarjeta...: solo se dice lo que existe en la tienda.
+  mediosPago: 'En la tienda se paga en línea con PSE, Nequi o Botón Bancolombia 🛒 Abre tu carrito y pulsa «Continuar al Pago».',
+  ayuda: [
+    'Te ayudo con gusto 🍦 Puedo mostrarte el menú, decirte el precio o los ingredientes de un sabor, agregar uno a tu carrito o contarte cómo pagar.',
+    'Claro, te ayudo 🍦 Puedo enseñarte los sabores, darte precios e ingredientes, armar tu carrito y mostrarte tus pedidos.',
+    'Con mucho gusto 🍦 Puedo mostrarte los sabores con su precio, contarte sus ingredientes y ayudarte con tu carrito.',
+  ],
+  // Rechaza o cuenta algo de un sabor ("no me gusta el mango"): sin precio ni oferta.
+  neutro: 'Entendido 🍦 Si quieres, te muestro el menú para que encuentres otro sabor.',
+  varios: 'Aquí tienes los sabores que nombraste 🍦 Toca el que prefieras para agregarlo al carrito.',
   superpoints: 'Con cada compra ganas Super Points y puedes usarlos para pagar parte de tus siguientes compras. Tu saldo y tu nivel están en tu Perfil.',
   personalizado: 'Puedes crear tu propio helado en el creador 3D de la página de inicio: ahí eliges envase, sabores y toppings, y ves el precio al momento.',
   queja: 'Siento mucho lo que pasó 🙏 Desde el chat no puedo resolver reclamos: pídele ayuda al equipo de Super Gelatto. El estado de tus pedidos está en tu Perfil, en «Tus Pedidos».',
-  contacto: 'No tengo ese dato; pregúntale al equipo de Super Gelatto 🍦 Aquí puedo mostrarte el menú, los precios y los ingredientes de cada sabor, y armar tu carrito.',
+  contacto: [
+    'No tengo ese dato; pregúntale al equipo de Super Gelatto 🍦 Aquí puedo mostrarte el menú, los precios y los ingredientes de cada sabor, y armar tu carrito.',
+    'No tengo ese dato; pregúntale al equipo de Super Gelatto 🍦 Mientras tanto, te puedo mostrar los sabores o ayudarte con tu carrito.',
+    'No tengo ese dato; pregúntale al equipo de Super Gelatto 🍦 Yo te ayudo con el menú, los precios, los ingredientes y tu carrito.',
+  ],
   quien: 'Soy Gelbot, el asistente virtual de Super Gelatto 🍦 Te ayudo con el menú, los precios y los ingredientes de cada sabor, y con tu carrito.',
-  otro: 'No estoy seguro de haberte entendido. Puedo mostrarte el menú, el precio o los ingredientes de un sabor, o agregar uno a tu carrito 🍦',
+  otro: [
+    'No estoy seguro de haberte entendido. Puedo mostrarte el menú, el precio o los ingredientes de un sabor, o agregar uno a tu carrito 🍦',
+    'Perdona, no te entendí bien 🍦 Pídeme el menú, el precio o los ingredientes de un sabor, o agregar uno a tu carrito.',
+    'Mmm, no logré entenderte 🍦 Puedo ayudarte con el menú, los precios, los ingredientes de cada sabor o tu carrito.',
+  ],
   pedidosSinSesion: 'Para ver tus pedidos inicia sesión 🍦 Luego los encuentras en tu Perfil, en «Tus Pedidos».',
   pedidosVacio: 'Aún no tienes pedidos registrados 🍦 Cuando compres, los verás aquí y en tu Perfil.',
   pedidosError: 'No pude consultar tus pedidos en este momento. Míralos en tu Perfil, en «Tus Pedidos».',
@@ -172,49 +194,78 @@ function textoPersonalizado(datos) {
 
 // ── El servidor entiende lo básico solo ───────────────────────
 // Para cuando el modelo no da un tema válido (escribió texto, JSON roto, herramienta inventada, caído, sin llave).
-const DESPEDIDA = /^(?:gracias|muchas gracias|adios|chao|hasta luego|hasta pronto|nos vemos|bye)\b/;
-const QUEJA = /\b(?:reclam\w*|quej\w*|derreti\w*|no (?:me )?(?:llego|ha llegado|carga|funciona|sirve|gusto|gustan|gustaron)|nunca llego|cobra(?:ron|do) (?:dos|doble|de mas)|reembols\w*|devoluci\w*|estafa\w*|pesim\w*|horrible|mal servicio|problemas?|equivoc\w*|llego otro|nadie me (?:responde|contesta)|molest[oa]s?|furios[oa]|enojad[oa]|ayuda|soporte)\b/;
+// "gracias" ya no despide: solo adiós, chao, hasta luego, nos vemos, me voy...
+const DESPEDIDA = /\b(?:adios|chao|chau|hasta luego|hasta pronto|hasta manana|nos vemos|bye|me voy|me retiro)\b/;
+const QUEJA = /\b(?:reclam\w*|quej\w*|derreti\w*|no (?:me )?(?:llego|ha llegado|carga|funciona|sirve|gusto|gustan|gustaron)|nunca llego|cobra(?:ron|do) (?:dos|doble|de mas)|reembols\w*|devoluci\w*|estafa\w*|pesim\w*|horrible|mal servicio|(?:esta|estan|estuvo|fue|muy) mal[oa]?s?|problemas?|equivoc\w*|llego otro|nadie me (?:responde|contesta)|molest[oa]s?|furios[oa]|enojad[oa])\b/;
+// Pide ayuda o pregunta qué puede hacer Gelbot (no es una queja). "gracias por la ayuda" no cuenta.
+const AYUDA = /\b(?:ayuda|ayudame|ayudarme|me ayudas|me puedes ayudar|puedes ayudarme|soporte|que puedes hacer|que sabes hacer|en que me (?:puedes )?ayudar|como funcionas)\b/;
+const GRACIAS_POR_AYUDA = /\bgracias por (?:la|tu|su) ayuda\b/g;
+const AYUDA_CON_SABOR = /\b(?:sabor\w*|helados?|escoger|elegir|pedir|recomend\w*|menu|carta)\b/;
+const MEDIOS_PAGO = /\b(?:efectivo|daviplata|tarjetas?|credito|debito|transferencia|paypal|contraentrega|contra entrega)\b/;
+const CARO = /\b(?:caro|caros|cara|caras|costos[oa]s?|barat[oa]s?|economic[oa]s?)\b/;
 const PEDIDOS = /\b(?:mis? (?:pedidos?|ordene?s?|compras|facturas?|recibos?|historial)|donde esta mi|estado de mi|ya pague|mi factura|que he comprado)\b/;
-const PAGAR = /\b(?:pagar|pago|pague|pagos|carrito|checkout|tarjetas?|efectivo|nequi|pse|bancolombia|daviplata)\b/;
+const PAGAR = /\b(?:pagar|pago|pague|pagos|(?:ver|ir al|abrir|abre|donde esta el|mi) carrito|checkout|tarjetas?|efectivo|nequi|pse|bancolombia|daviplata|credito|debito|transferencia|contraentrega|contra entrega)\b/;
 const PUNTOS = /\b(?:super ?points?|puntos?|nivel(?:es)?)\b/;
 const PERSONALIZADO = /\b(?:3d|personaliz\w*|armar\w*|arma mi|mi propio|creador)\b/;
 const CONTACTO = /\b(?:horarios?|hora|abren|abre|cierran|cierra|abiert[oa]s?|domingos?|festivos?|direccion|ubica\w*|donde (?:estan|quedan|queda|esta la tienda)|telefonos?|whatsapp|celular|contacto|correo|email|domicilios?|envios?|envian|entregas?|delivery|sucursal\w*|locales|tiendas?|promo\w*|descuentos?|cupon\w*|humano|asesor\w*|gerente|located)\b/;
-const QUIEN = /\b(?:quien eres|que eres|eres (?:un |una )?(?:bot|robot|humano|ia|persona|maquina|real)|como te llamas|tu nombre|que puedes hacer|que sabes hacer|que haces)\b/;
+const QUIEN = /\b(?:quien eres|que eres|eres (?:un |una )?(?:bot|robot|humano|ia|persona|maquina|real)|como te llamas|tu nombre|que haces)\b/;
 const SALUDO = /^(?:hola+|ola+|holi\w*|buenas|buen dia|buenos dias|buenas (?:tardes|noches)|hey|hello|hi|que tal|q tal|que mas|k onda|que onda|saludos)\b/;
 const GRACIAS = /\b(?:gracias|grasias|thanks|thank you|te agradezco|muy amable)\b/;
 
 // tema ('producto' = no hay tema, pero nombra un sabor del catálogo: lo decide quien llama) y si van tarjetas.
+// Si nombra un sabor, ni saludo ni gracias ("qué tal el mango" pregunta por el mango).
 function temaPorPalabras(mensaje, { nombraProducto = false } = {}) {
   const t = soloPalabras(mensaje).slice(0, MAX_LARGO_MENSAJE);
-  const reglas = [[DESPEDIDA, 'despedida'], [QUEJA, 'queja'], [PEDIDOS, 'pedidos'], [PAGAR, 'pagar'], [PERSONALIZADO, 'personalizado'], [PUNTOS, 'superpoints'],
-    [CONTACTO, 'contacto'], [QUIEN, 'quien'], [SALUDO, 'saludo'], [GRACIAS, 'gracias']];
-  const encontrado = reglas.find(([patron]) => patron.test(t));
+  const sinGraciasPorAyuda = t.replace(GRACIAS_POR_AYUDA, 'gracias');
+  const reglas = [[QUEJA, 'queja'], [PEDIDOS, 'pedidos'], [PAGAR, 'pagar'], [AYUDA, 'ayuda'], [PERSONALIZADO, 'personalizado'], [PUNTOS, 'superpoints'],
+    [QUIEN, 'quien'], [CONTACTO, 'contacto'], [DESPEDIDA, 'despedida'], ...(nombraProducto ? [] : [[SALUDO, 'saludo'], [GRACIAS, 'gracias']])];
+  const encontrado = reglas.find(([patron]) => patron.test(sinGraciasPorAyuda));
   if (encontrado) return encontrado[1];
   if (nombraProducto) return 'producto';
-  if (preguntaPrecio(mensaje)) return 'precio';
+  if (preguntaPrecio(mensaje) || CARO.test(t)) return 'precio';
   return 'otro';
 }
 
+// ¿Las palabras del mensaje respaldan un tema de baja gravedad que eligió el modelo? (queja, despedida, pedidos)
+const RESPALDO = { queja: QUEJA, despedida: DESPEDIDA, pedidos: PEDIDOS };
+const respaldaTema = (tema, mensaje) => !RESPALDO[tema] || RESPALDO[tema].test(soloPalabras(mensaje));
+// ¿El mensaje rechaza o cuenta algo? (entonces no se ofrece agregar)
+const rechazaOCuenta = (mensaje, productos) => {
+  const { negacion, relato } = analizarMensaje(mensaje, productos);
+  return negacion || relato;
+};
+
 // "otro" muestra el menú, salvo en quejas, rechazos o si pide otra cosa ("dame un momento", "quiero un descuento").
-function otroConTarjetas(mensaje, productos) {
+// Tampoco si el mensaje anterior del bot ya fue un "no te entendí" (fuera de tema repetido: el menú ya está a la vista).
+function otroConTarjetas(mensaje, productos, textoBot = '') {
   const t = soloPalabras(mensaje);
   const { negacion, relato } = analizarMensaje(mensaje, productos);
-  return !negacion && !relato && !QUEJA.test(t) && !pideOtraCosa(t);
+  const yaSeMostro = TEXTOS.otro.some((v) => String(textoBot).includes(v));
+  return !negacion && !relato && !QUEJA.test(t) && !pideOtraCosa(t) && !yaSeMostro;
 }
 
 // Texto de un tema sin datos ni producto (los demás los arma quien llama). null si el tema necesita datos.
-function respuestaDeTemaFijo(tema, mensaje, productos) {
+function respuestaDeTemaFijo(tema, mensaje, productos, textoBot = '') {
+  const t = soloPalabras(mensaje);
   if (tema === 'despedida') return { response: variante(TEXTOS.despedida, mensaje), action: 'closeChat' };
-  if (['saludo', 'gracias', 'pagar', 'queja', 'contacto', 'quien'].includes(tema)) return { response: variante(TEXTOS[tema], mensaje) };
+  if (tema === 'pagar') return { response: MEDIOS_PAGO.test(t) ? TEXTOS.mediosPago : variante(TEXTOS.pagar, mensaje) };
+  if (tema === 'ayuda') {
+    const texto = variante(TEXTOS.ayuda, mensaje);
+    return AYUDA_CON_SABOR.test(t) ? respuestaMenu(productos, `${texto} Estos son nuestros sabores:`) : { response: texto };
+  }
+  if (['saludo', 'gracias', 'queja', 'contacto', 'quien'].includes(tema)) return { response: variante(TEXTOS[tema], mensaje) };
   if (tema === 'menu') return respuestaMenu(productos);
   if (tema === 'agregar') return respuestaElegirSabor(productos);
-  if (tema === 'otro') return { response: TEXTOS.otro, ...(otroConTarjetas(mensaje, productos) ? { productos: productosParaTarjetas(productos) } : {}) };
+  if (tema === 'otro') {
+    const texto = variante(TEXTOS.otro, mensaje);
+    return { response: texto, ...(otroConTarjetas(mensaje, productos, textoBot) ? { productos: productosParaTarjetas(productos) } : {}) };
+  }
   return null;
 }
 
 module.exports = {
   paraCliente, normalizarEntrada, limpiarHistorial, ultimoMensajeDelBot, formatearCOP, productosParaTarjetas, productoParaCarrito,
   textoInfoProducto, textoAgregadoAlCarrito, textoCualProducto, respuestaAgregar, respuestaCual, respuestaElegirSabor, respuestaMenu,
-  textoPedidos, textoPuntos, textoPersonalizado, temaPorPalabras, respuestaDeTemaFijo, TEMAS, TEXTOS, MENSAJE_SABORES, MENSAJE_PRECIOS,
+  textoPedidos, textoPuntos, textoPersonalizado, temaPorPalabras, respaldaTema, rechazaOCuenta, respuestaDeTemaFijo, TEMAS, TEXTOS, MENSAJE_SABORES, MENSAJE_PRECIOS,
   MENSAJE_NADA_AGREGADO, MENSAJE_NADA_AGREGADO_RELATO, MAX_LARGO_MENSAJE, MAX_PRODUCTOS_TARJETAS,
 };
