@@ -23,9 +23,14 @@ export function contarOcultos(productos) {
   return (productos || []).filter((p) => !estaVisible(p)).length;
 }
 
-// Aviso cuando el borrado falla: { texto, ofrecerOcultar }. Solo el 409 por ventas ofrece el botón "Ocultar".
-export function avisoTrasBorrar(status, data) {
+// Aviso cuando el borrado falla: { texto, ofrecerOcultar }. Solo el 409 por ventas de un producto visible
+// ofrece el botón "Ocultar"; si ya está oculto, se le dice al admin que no hace falta nada más.
+export function avisoTrasBorrar(status, data, visible = true) {
   const mensaje = typeof data?.message === 'string' && data.message.trim() ? data.message : '';
-  if (status === 409 && /ventas/i.test(mensaje)) return { texto: MENSAJE_BORRADO_CON_VENTAS, ofrecerOcultar: true };
+  if (status === 409 && /ventas/i.test(mensaje)) {
+    return visible
+      ? { texto: MENSAJE_BORRADO_CON_VENTAS, ofrecerOcultar: true }
+      : { texto: 'Este producto tiene ventas registradas y no se puede borrar. Ya está oculto de la tienda.', ofrecerOcultar: false };
+  }
   return { texto: mensaje || 'Error al eliminar producto', ofrecerOcultar: false };
 }

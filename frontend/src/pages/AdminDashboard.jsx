@@ -771,9 +771,9 @@ const AdminDashboard = ({ user, onLogout }) => {
       } else {
         const data = await res.json().catch(() => ({}));
         // Con ventas no se puede borrar (409): el aviso ofrece ocultarlo de la tienda en un clic.
-        const { texto, ofrecerOcultar } = avisoTrasBorrar(res.status, data);
         const producto = (dashboardData.products || []).find(p => String(p.id) === String(id));
-        const accion = ofrecerOcultar && estaVisible(producto)
+        const { texto, ofrecerOcultar } = avisoTrasBorrar(res.status, data, !producto || estaVisible(producto));
+        const accion = ofrecerOcultar
           ? { etiqueta: 'Ocultar', alHacer: () => { cerrarAviso(); handleCambiarVisibilidad(id, true); } }
           : null;
         mostrarAviso(texto, 'error', accion);
@@ -1663,7 +1663,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                     <th className="p-6">Precio</th>
                     <th className="p-6">Categoría</th>
                     <th className="p-6">Stock Disponible</th>
-                    <th className="p-6">En la tienda</th>
+                    <th className="p-4">En la tienda</th>
                     <th className="p-6">Destacado</th>
                     <th className="p-6 text-right">Acciones</th>
                   </tr>
@@ -1683,9 +1683,9 @@ const AdminDashboard = ({ user, onLogout }) => {
                       <tr key={p.id} className={`transition-colors group ${visible ? 'hover:bg-white/[0.02]' : 'bg-white/[0.015] hover:bg-white/[0.03]'}`}>
                         <td className="p-6 text-white/20 font-mono text-xs">PROD-{p.id}</td>
                         <td className="p-6">
-                          <div className={`flex items-center gap-4 min-w-[260px] transition-opacity ${visible ? '' : 'opacity-50'}`}>
+                          <div className="flex items-center gap-4 min-w-[260px]">
                             <div 
-                              className="relative group/img cursor-pointer w-14 h-14 shrink-0 rounded-2xl overflow-hidden bg-[#111116] border border-white/10 group-hover/img:border-gold-premium/40 transition-all flex items-center justify-center" 
+                              className={`relative group/img cursor-pointer w-14 h-14 shrink-0 rounded-2xl overflow-hidden bg-[#111116] border border-white/10 group-hover/img:border-gold-premium/40 transition-all flex items-center justify-center ${visible ? '' : 'opacity-40 grayscale'}`}
                               onClick={() => handleOpenImageModal(p)}
                               title="Haz clic para modificar la imagen de este producto"
                             >
@@ -1716,7 +1716,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                                   </span>
                                 )}
                               </p>
-                              <p className="text-[11px] text-white/40 line-clamp-1 mt-0.5">{p.desc}</p>
+                              <p className={`text-[11px] line-clamp-1 mt-0.5 ${visible ? 'text-white/40' : 'text-white/30'}`}>{p.desc}</p>
                             </div>
                           </div>
                         </td>
@@ -1848,9 +1848,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                             <span aria-hidden="true" className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${visible ? 'bg-emerald-400/80' : 'bg-white/20'}`}>
                               <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${visible ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                             </span>
-                            {cambiandoVisibilidad === p.id
-                              ? <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
-                              : (visible ? <Eye size={12} aria-hidden="true" /> : <EyeOff size={12} aria-hidden="true" />)}
+                            {cambiandoVisibilidad === p.id && <RefreshCw size={12} className="animate-spin" aria-hidden="true" />}
                             <span>{visible ? 'Visible' : 'Oculto'}</span>
                           </button>
                         </td>

@@ -39,6 +39,10 @@ describe('avisoTrasBorrar: un producto con ventas ofrece ocultarlo', () => {
     expect(aviso).toEqual({ texto: MENSAJE_BORRADO_CON_VENTAS, ofrecerOcultar: true });
     expect(MENSAJE_BORRADO_CON_VENTAS).toBe('Este producto tiene ventas registradas y no se puede borrar. Puedes ocultarlo de la tienda.');
   });
+  it('409 por ventas de un producto que YA está oculto -> lo dice, sin botón', () => {
+    const aviso = avisoTrasBorrar(409, { message: 'Este producto tiene ventas registradas y no se puede borrar.' }, false);
+    expect(aviso).toEqual({ texto: 'Este producto tiene ventas registradas y no se puede borrar. Ya está oculto de la tienda.', ofrecerOcultar: false });
+  });
   it('409 por otro motivo (personalizado) -> su mensaje, sin botón', () => {
     expect(avisoTrasBorrar(409, { message: 'El helado personalizado no se edita desde el panel.' }))
       .toEqual({ texto: 'El helado personalizado no se edita desde el panel.', ofrecerOcultar: false });
