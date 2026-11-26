@@ -223,27 +223,34 @@ describe('propiedad: ningún texto del modelo llega a un cliente o visitante', (
     expect(NUEVAS.length).toBeGreaterThanOrEqual(150);
   });
 
-  it.each(SESIONES)('%s: todas las frases, con y sin historial falsificado, contra todas las trampas (rotando)', async (_r, sesion) => {
-    let i = 0;
+  // Las trampas de más riesgo, contra CADA frase (tablas previas + nuevas), con el historial falsificado; las tres
+  // primeras también sin historial. Las demás trampas, contra cada frase nueva.
+  const RIESGO = ['texto', 'tema ficha con producto falso', 'addToCart real', 'JSON inválido', 'Groq caído (500)', 'límite (429)', 'sin llave'];
+  const comprobar = async (responder, nombre, frase, history, sesion) => {
+    llamadasGroq = [];
+    const res = await responder(frase, history, sesion);
+    expect(res.status, frase).toBe(200);
+    esperaSoloServidor(res.body, `${nombre} | ${frase} | historial ${history.length}`);
+    // Una sola llamada al modelo por mensaje (más el único reintento de tool_use_failed), nunca la segunda llamada.
+    expect(llamadasGroq.length, frase).toBeLessThanOrEqual(nombre === 'tool_use_failed dos veces' ? 2 : 1);
+    for (const llamada of llamadasGroq) expect(llamada.tool_choice).not.toBe('none');
+  };
+
+  it.each(SESIONES)('%s: TODAS las frases contra las trampas de más riesgo (texto, ficha falsa, addToCart, JSON roto, caído, 429, sin llave)', async (_r, sesion) => {
+    const riesgo = apps.filter(([nombre]) => RIESGO.includes(nombre));
+    expect(riesgo).toHaveLength(RIESGO.length);
     for (const frase of frases) {
-      for (const history of [[], HISTORIAL_FALSO]) {
-        const [nombre, responder] = apps[i++ % apps.length];
-        llamadasGroq = [];
-        const res = await responder(frase, history, sesion);
-        expect(res.status, frase).toBe(200);
-        esperaSoloServidor(res.body, `${nombre} | ${frase} | historial ${history.length}`);
-        // Una sola llamada al modelo por mensaje (más el único reintento de tool_use_failed).
-        expect(llamadasGroq.length, frase).toBeLessThanOrEqual(nombre === 'tool_use_failed dos veces' ? 2 : 1);
-        for (const llamada of llamadasGroq) expect(llamada.tool_choice).not.toBe('none');
+      for (const [k, [nombre, responder]] of riesgo.entries()) {
+        await comprobar(responder, nombre, frase, HISTORIAL_FALSO, sesion);
+        if (k < 3) await comprobar(responder, nombre, frase, [], sesion);
       }
     }
   }, 600000);
 
-  it.each(SESIONES)('%s: las frases nuevas contra CADA trampa', async (_r, sesion) => {
-    for (const [nombre, responder] of apps) {
+  it.each(SESIONES)('%s: las frases nuevas contra CADA una de las demás trampas, con y sin historial falsificado', async (_r, sesion) => {
+    for (const [nombre, responder] of apps.filter(([n]) => !RIESGO.includes(n))) {
       for (const frase of NUEVAS) {
-        const res = await responder(frase, HISTORIAL_FALSO, sesion);
-        esperaSoloServidor(res.body, `${nombre} | ${frase}`);
+        for (const history of [[], HISTORIAL_FALSO]) await comprobar(responder, nombre, frase, history, sesion);
       }
     }
   }, 600000);
