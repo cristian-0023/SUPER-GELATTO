@@ -3,10 +3,13 @@
 // se muestra lo que dice la ficha, o se dice que no está registrada, y siempre se remite al equipo.
 //  - leerConsultaFicha: ¿el mensaje pregunta por la ficha? ¿de qué productos? ¿además hace un pedido?
 //  - respuestaFicha / textoFicha: los textos (sin palabras que armen un "sí, agrégalo": ver gelbotIntencion)
-//  - hablaDeSalud: ¿este texto del modelo da datos de ingredientes o salud? (entonces no se muestra)
+//  - ofertaTrasSalud / leerOfertaTrasSalud: pidió un sabor y contó una alergia: se ofrece agregarlo solo si confirma
+//  - avisoSinIngrediente: "dame una fresa sin azúcar": la línea "Ojo: la ficha indica ..." si la ficha lo registra
+//  - pideInformacion: ¿el mensaje pide información o habla de salud? (para no responder un precio a una pregunta así)
 // Nombres y etiquetas vienen de la base: se comparan como texto, nunca como regex ni como instrucciones.
 const { soloPalabras, soloNombra, variantes, SEPARADOR, analizarMensaje, resolverPedido, buscarProductos, preguntaPrecio } = require('./gelbotIntencion');
 const { fichaPropia } = require('./datosSabores');
+const { nombreVisible } = require('./gelbotTexto');
 
 // ── Textos ────────────────────────────────────────────────────
 const CONFIRMA = 'Si tienes alergia, confirma con el equipo antes de comer: puede haber contacto cruzado.';
@@ -18,16 +21,39 @@ const NOMBRE_PERSONALIZADO = 'Helado personalizado 3D';
 const MAX_LISTA = 40;
 const MENSAJE_CONSULTA_FICHA = `Ese dato no te lo puedo dar de memoria: está en la ficha de cada sabor, o pregúntale al equipo. Dime el nombre de un sabor y ${PIDE_SABOR} 🍦\n${AVISO_SIN_FICHA}`;
 
-// ── Vocabulario ───────────────────────────────────────────────
-const ALERGENO = '(?:leche|lacteos?|lactosa|huevos?|yemas?|gluten|trigo|frutos secos|nuez|nueces|mani|cacahuates?|almendras?|avellanas?|pistachos?|coco|cacao|cafeina|cafe|avena|soya|soja|miel|mantequilla|crema de leche|mascarpone|alcohol|licor|gelatina|azucar|azucares|endulzantes?|edulcorantes?|colorantes?|conservantes?)';
+// ── Vocabulario (ÚNICA fuente de alérgenos e ingredientes que se preguntan) ──
+// De salud: con "sin" delante ("sin lactosa") es una condición, no un gusto: se muestra la ficha y no se agrega.
+const ALERGENOS_DE_SALUD = ['leche', 'lacteos?', 'lactosa', 'huevos?', 'gluten', 'trigo', 'tacc', 'frutos secos', 'nuez', 'nueces', 'mani',
+  'cacahuates?', 'almendras?', 'avellanas?', 'sesamo', 'ajonjoli', 'soya', 'soja', 'sulfitos?'];
+// Otros ingredientes por los que se pregunta ("¿tiene coco?"); con "sin" delante son un gusto ("sin azúcar").
+const OTROS_INGREDIENTES = ['yemas?', 'pistachos?', 'coco', 'cacao', 'cafeina', 'cafe', 'avena', 'miel', 'mantequilla', 'crema de leche', 'mascarpone',
+  'alcohol', 'licor', 'gelatina', 'azucar', 'azucares', 'endulzantes?', 'edulcorantes?', 'colorantes?', 'conservantes?', 'trazas?'];
+const ALERGENO = `(?:${[...ALERGENOS_DE_SALUD, ...OTROS_INGREDIENTES].join('|')})`;
+const ALERGENO_DE_SALUD = `(?:${ALERGENOS_DE_SALUD.join('|')})`;
+
+// Otras formas de preguntar lo mismo: "q/ke/k" por "que", erratas de "ingredientes" e inglés básico. Se aplican al
+// texto ya en minúsculas y sin tildes; solo sirven para reconocer la pregunta (la respuesta siempre es la ficha).
+const TRADUCCIONES = [
+  [/\b(?:q|qe|ke|k)\b/g, 'que'],
+  [/\bing?r[aeiy]?d[aeiy]{0,2}e?n?t?[ea]?s?\b/g, 'ingredientes'],
+  [/\bwhat(?: s| is)? in\b/g, 'que lleva'],
+  [/\b(?:allergy|allergies|allergic)\b/g, 'alergia'], [/\ballergens?\b/g, 'alergenos'],
+  [/\bpeanuts?\b/g, 'mani'], [/\bnuts?\b/g, 'nueces'], [/\bdairy\b/g, 'lacteos'], [/\bmilk\b/g, 'leche'], [/\beggs?\b/g, 'huevo'],
+  [/\blactose\b/g, 'lactosa'], [/\bsugar\b/g, 'azucar'], [/\bsoy\b/g, 'soya'], [/\bsesame\b/g, 'sesamo'], [/\bwheat\b/g, 'trigo'],
+  [/\bceliacs?\b/g, 'celiaco'], [/\bcalories\b/g, 'calorias'], [/\bvegan\b/g, 'vegano'], [/\bvegetarian\b/g, 'vegetariano'],
+  [/\bsafe\b/g, 'seguro'], [/\bcontains?\b/g, 'contiene'], [/\b(?:have|has)\b/g, 'tiene'], [/\bwhich (?:ones|flavors?)\b/g, 'cuales'],
+  [/\bpistachio\b/g, 'pistacho'], [/\b([a-z]+) free\b/g, 'sin $1'],
+];
+const traducir = (t) => TRADUCCIONES.reduce((texto, [patron, cambio]) => texto.replace(patron, cambio), t);
+const textoDeConsulta = (mensaje) => soloPalabras(traducir(soloPalabras(mensaje)));
 const LISTA_ALERGENOS = `${ALERGENO}(?: (?:y|o|u|e|ni)(?: sin)? ${ALERGENO})*`;
 const ALGO_DE = '(?: (?:algo|algun|alguna|rastros?|trazas?|nada|mucha?|poca?|cuanta?)(?: de)?)?';
 // También pueden ser sabores del menú: "¿tienen coco?" pregunta si hay, no qué lleva.
 const TAMBIEN_SABOR = /\b(?:coco|pistachos?|cacao|cafe|miel|almendras?|avellanas?|mani|nuez|nueces|licor|mantequilla)\b/;
 
 // Declara una condición, o pide "sin" algo que es de salud: aunque pida un sabor, primero ve la ficha.
-const CONDICION_DE_SALUD = new RegExp('\\b(?:alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*'
-  + '|(?:sin|libres? de) (?:lactosa|lacteos?|leche|gluten|trigo|huevos?|frutos secos|nuez|nueces|mani|cacahuates?|soya|soja))\\b');
+const DECLARA_CONDICION = /\b(?:alergi\w*|intoleran\w*|celia(?:c|qu)\w*|diabet\w*)/;
+const CONDICION_DE_SALUD = new RegExp(`\\b(?:alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|(?:sin|libres? de) ${ALERGENO_DE_SALUD})\\b`);
 // Preguntas que no dejan duda.
 const PREGUNTA_FUERTE = new RegExp('\\b(?:ingredientes?|alergen\\w*|lacteos?|lactosa|gluten|frutos secos|vegan\\w*|vegetarian\\w*|calori\\w*|nutri(?:cion|cional|cionales|entes?)|engorda\\w*|keto|kosher|halal|que leches?'
   + '|(?:esta|estan|es|son) hech[oa]s? (?:de|con)|de que (?:esta|estan|es|son) hech[oa]s?|hech[oa]s? con|con que (?:(?:esta|estan|lo|la|los|las|se) )?(?:hech[oa]s?|hacen?|preparan?)'
@@ -35,7 +61,7 @@ const PREGUNTA_FUERTE = new RegExp('\\b(?:ingredientes?|alergen\\w*|lacteos?|lac
   + '|que le (?:ponen|echan)|(?:libres? de|sin) ' + ALERGENO + ')\\b');
 const HECHO = /\bhech[oa]s?\b/;
 // "tiene leche", "lleva huevo", "no puedo tomar leche": el verbo y el alérgeno seguidos.
-const VERBO_Y_ALERGENO = new RegExp('\\b(?:tienen?|tengan?|contienen?|contengan?|llevan?|lleven?|traen?|traigan?|incluyen?|hay|usan|come|como|comer|tomo|tomar|consumo|consumir|tolero|tolera)'
+const VERBO_Y_ALERGENO = new RegExp('\\b(?:tienen?|tener|tengan?|contienen?|contener|contengan?|llevan?|llevar|lleven?|traen?|traigan?|incluyen?|hay|usan|come|como|comer|tomo|tomar|consumo|consumir|tolero|tolera)'
   + `${ALGO_DE} (?:(?:la|el|los) (?=leche|huevos?|gluten|lactosa))?${LISTA_ALERGENOS}\\b`);
 const CUANTO_ALERGENO = new RegExp(`\\bcuant[oa]s? ${ALERGENO}\\b`);
 // Solo cuentan si nombran un sabor ("¿qué lleva la fresa?", no "¿qué lleva mi pedido?").
@@ -113,19 +139,21 @@ function sinNombresEnganosos(t, productos) {
 
 // ── ¿Pregunta por la ficha? ───────────────────────────────────
 // 'salud' (declara una condición), 'pregunta', 'atributo' ("sin azúcar") o null.
-function tipoDePregunta(t, hayProducto) {
+function tipoDePregunta(t, hayProducto, productos = []) {
   if (CONDICION_DE_SALUD.test(t)) return 'salud';
   const delPedido = DEL_PEDIDO.test(t);
   const fuerte = t.match(PREGUNTA_FUERTE);
   if (fuerte && !(delPedido && HECHO.test(fuerte[0]))) {
     // "sin azúcar" es un atributo, salvo que además pregunte ("sin azúcar, ¿tiene leche?").
-    return fuerte[0].startsWith('sin ') ? tipoDePregunta(t.replace(fuerte[0], ' '), hayProducto) || 'atributo' : 'pregunta';
+    return fuerte[0].startsWith('sin ') ? tipoDePregunta(t.replace(fuerte[0], ' '), hayProducto, productos) || 'atributo' : 'pregunta';
   }
   if (delPedido) return null;
   if (CUANTO_ALERGENO.test(t)) return 'pregunta';
   const conVerbo = t.match(VERBO_Y_ALERGENO);
   if (conVerbo) {
-    const puedeSerSabor = TAMBIEN_SABOR.test(conVerbo[0]) && !hayProducto && !SOBRE_TODOS.test(t);
+    // "¿tienen coco?" pregunta si hay un sabor, si existe un sabor así; "¿tiene maní?" no (no hay sabor de maní).
+    const puedeSerSabor = TAMBIEN_SABOR.test(conVerbo[0]) && !hayProducto && !SOBRE_TODOS.test(t)
+      && buscarProductos(conVerbo[0], productos).length > 0;
     if (!puedeSerSabor) return 'pregunta';
   }
   return hayProducto && PREGUNTA_DEBIL.test(t) ? 'pregunta' : null;
@@ -157,8 +185,8 @@ function esSeguimiento(mensaje, textoBot, productos) {
 function hayPedidoAparte(mensaje, productos) {
   if (!analizarMensaje(mensaje, productos).pide) return false;
   const partes = mensaje.split(SEPARADOR).filter((parte) => {
-    const t = soloPalabras(parte);
-    return t && !PIDE_INFORMACION.test(t) && [null, 'atributo'].includes(tipoDePregunta(t, true));
+    const t = textoDeConsulta(parte);
+    return t && !PIDE_INFORMACION.test(t) && [null, 'atributo'].includes(tipoDePregunta(t, true, productos));
   });
   return partes.length > 0 && resolverPedido(partes.join(', '), productos) !== null;
 }
@@ -168,17 +196,17 @@ function hayPedidoAparte(mensaje, productos) {
 // parte del mensaje; 'posible' = "sin azúcar" es un atributo: si es un pedido claro, gana el pedido.
 function leerConsultaFicha(mensaje, textoBot, catalogo) {
   const productos = (Array.isArray(catalogo) ? catalogo : []).filter((p) => p && typeof p.nombre === 'string' && p.nombre.trim());
-  const completo = soloPalabras(mensaje).replace(CUAL_DATO, '');
+  const completo = textoDeConsulta(mensaje).replace(CUAL_DATO, '');
   const t = sinNombresEnganosos(completo, productos);
   const { alergenos, sujeto } = separarAlergenos(t);
   const nombrados = productosNombrados(t === completo ? sujeto : completo, productos);
 
-  const tipo = tipoDePregunta(t, nombrados.length > 0 || PERSONALIZADO.test(t));
+  const tipo = tipoDePregunta(t, nombrados.length > 0 || PERSONALIZADO.test(t), productos);
   if (!tipo) {
     const seguimiento = esSeguimiento(mensaje, textoBot, productos);
     return seguimiento.length ? { productos: seguimiento, alergenos: '', pedido: 'no', texto: t } : null;
   }
-  const consulta = { productos: [], alergenos: DIABETES.test(t) ? `${alergenos} azucar` : alergenos, pedido: 'no', texto: t };
+  const consulta = { productos: [], alergenos: DIABETES.test(t) ? `${alergenos} azucar` : alergenos, pedido: 'no', texto: t, condicion: DECLARA_CONDICION.test(t) };
   if (tipo === 'atributo') consulta.pedido = 'posible';
   else if (tipo === 'pregunta' && hayPedidoAparte(mensaje, productos)) consulta.pedido = 'aparte';
 
@@ -195,7 +223,7 @@ function leerConsultaFicha(mensaje, textoBot, catalogo) {
 // ── Respuestas ────────────────────────────────────────────────
 const enumerar = (lista) => (lista.length > 1 ? `${lista.slice(0, -1).join(', ')} y ${lista.at(-1)}` : lista.join(''));
 const textoSinFicha = (nombre) =>
-  `No tengo la lista de ingredientes de **${nombre}**: su ficha de alérgenos no está registrada. Pregúntale al equipo antes de pedirlo.`;
+  `No tengo la lista de ingredientes de **${nombreVisible(nombre)}**: su ficha de alérgenos no está registrada. Pregúntale al equipo antes de pedirlo.`;
 
 // Lo que se sabe de una dieta: { etiqueta } de la tienda, { registra } lo que la ficha tiene en contra, o {}
 // (sin dato, o la etiqueta y la ficha se contradicen).
@@ -225,7 +253,7 @@ function textoFicha(producto, texto = '') {
   if (!ficha) return `${textoSinFicha(producto.nombre)}\n${AVISO_SIN_FICHA}`;
   const alergenos = alergenosDe(ficha);
   return [
-    `${INICIO_FICHA} **${producto.nombre}**:`,
+    `${INICIO_FICHA} **${nombreVisible(producto.nombre)}**:`,
     `• Ingredientes: ${ficha.ingredients.join(', ')}`,
     alergenos.length ? `• Alérgenos: ${alergenos.join(', ')}` : '• Alérgenos: la ficha no registra alérgenos',
     ...DIETAS.filter((d) => d.pregunta.test(texto)).map((d) => lineaDeDieta(d, producto, ficha)),
@@ -247,11 +275,11 @@ function ingredientesQueNombran(ficha, alergenos) {
 
 function lineaDeLista(producto, dietas, { alergenos, texto }) {
   const ficha = fichaPropia(producto.nombre);
-  if (!ficha) return `• **${producto.nombre}**: ficha no registrada: pregunta al equipo`;
+  if (!ficha) return `• **${nombreVisible(producto.nombre)}**: ficha no registrada: pregunta al equipo`;
   const registrados = alergenosDe(ficha);
   const nombran = ingredientesQueNombran(ficha, alergenos);
   const etiquetas = dietas.map((d) => datoDeDieta(d, producto, ficha).etiqueta).filter(Boolean);
-  return `• **${producto.nombre}**: ${registrados.length ? registrados.join(', ') : 'la ficha no registra alérgenos'}`
+  return `• **${nombreVisible(producto.nombre)}**: ${registrados.length ? registrados.join(', ') : 'la ficha no registra alérgenos'}`
     + (nombran.length ? ` (entre sus ingredientes: ${nombran.join(', ')})` : '')
     + (etiquetas.length ? ` (etiqueta de la tienda: ${etiquetas.join(', ')})` : '')
     + (PREGUNTA_NUTRICION.test(texto) ? ` (calorías: ${ficha.nutrition.calorias})` : '');
@@ -272,7 +300,7 @@ function textoLista(productos, consulta) {
 }
 
 const textoDeQueSabor = (productos) =>
-  `Dime el nombre de un sabor y ${PIDE_SABOR}: ${productos.slice(0, 6).map((p) => `**${p.nombre}**`).join(', ')}.\n${AVISO_SIN_FICHA}`;
+  `Dime el nombre de un sabor y ${PIDE_SABOR}: ${productos.slice(0, 6).map((p) => `**${nombreVisible(p.nombre)}**`).join(', ')}.\n${AVISO_SIN_FICHA}`;
 
 // Respuesta lista para el cliente. formatearPrecio: para "¿cuánto cuesta y qué lleva?" (el precio sale de la base).
 function respuestaFicha(consulta, catalogo, formatearPrecio) {
@@ -282,27 +310,65 @@ function respuestaFicha(consulta, catalogo, formatearPrecio) {
   else if (productos.length > 1) response = textoDeQueSabor(productos);
   else if (productos.length === 1) {
     const [producto] = productos;
-    const precio = PREGUNTA_CUANTO_CUESTA.test(texto) ? `**${producto.nombre}** cuesta **${formatearPrecio(producto.precio)}**.\n` : '';
+    const precio = PREGUNTA_CUANTO_CUESTA.test(texto) ? `**${nombreVisible(producto.nombre)}** cuesta **${formatearPrecio(producto.precio)}**.\n` : '';
     response = precio + textoFicha(producto, texto);
   } else {
-    const conNombre = catalogo.filter((p) => p && typeof p.nombre === 'string' && p.nombre.trim());
+    const conNombre = catalogo.filter((p) => p && typeof p.nombre === 'string' && nombreVisible(p.nombre));
     response = conNombre.length ? textoLista(conNombre, consulta) : MENSAJE_CONSULTA_FICHA;
   }
   return { response, action: null, product: null };
 }
 
-// ── Filtro del texto del modelo ───────────────────────────────
-const SALUD = new RegExp('\\b(?:ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|gluten|lactosa|lacteos?|leche|huevos?|yemas?|frutos secos|nuez|nueces|mani'
-  + '|vegan\\w*|vegetarian\\w*|calori\\w*|azucar\\w*|vinagre|hech[oa]s? (?:con|de)|elaborad[oa]s? con|(?:es|son|seria) segur[oa]s? (?:para|comer\\w*|consumir\\w*|si)|apt[oa]s? para|contacto cruzado'
-  + '|(?<!pedido )(?<!carrito )(?:contienen?|llevan?))\\b');
-function hablaDeSalud(texto, catalogo) {
-  let t = soloPalabras(texto);
-  if (!SALUD.test(t)) return false;
-  for (const p of Array.isArray(catalogo) ? catalogo : []) {
-    const nombre = soloPalabras(p?.nombre);
-    if (nombre && SALUD.test(nombre)) t = t.split(nombre).join(' ');
-  }
-  return SALUD.test(t);
+// ── Alergia + pedido: se ofrece agregar SOLO si confirma ──────
+// La oferta es una frase fija: en el turno siguiente, "sí" solo confirma si el último mensaje del bot es esta frase y
+// el nombre es exactamente el de un producto del catálogo (si no, no se agrega nada).
+const OFERTA = /responde "sí, agrégalo" y pongo (\d{1,2}) × \*\*([^*\n]{1,120})\*\* en tu carrito/;
+const traeOfertaTrasSalud = (textoBot) => OFERTA.test(String(textoBot || ''));
+
+// La ficha con la oferta antes del aviso (el aviso sigue siendo la última línea).
+function conOfertaTrasSalud(response, producto, cantidad) {
+  const lineas = response.split('\n');
+  const oferta = `No lo agregué todavía por lo que me contaste. Si después de revisarlo lo quieres igual, responde "sí, agrégalo" y pongo ${cantidad} × **${nombreVisible(producto.nombre)}** en tu carrito.`;
+  return [...lineas.slice(0, -1), oferta, lineas.at(-1)].join('\n');
 }
 
-module.exports = { leerConsultaFicha, respuestaFicha, textoFicha, hablaDeSalud, MENSAJE_CONSULTA_FICHA };
+// { producto, cantidad } si el último mensaje del bot es la oferta de un producto que existe; si no, null.
+function leerOfertaTrasSalud(textoBot, catalogo) {
+  const encontrado = String(textoBot || '').match(OFERTA);
+  if (!encontrado) return null;
+  const nombre = soloPalabras(encontrado[2]);
+  const productos = (Array.isArray(catalogo) ? catalogo : []).filter((p) => p && typeof p.nombre === 'string' && soloPalabras(nombreVisible(p.nombre)) === nombre);
+  if (productos.length !== 1 || !nombre) return null;
+  return { producto: productos[0], cantidad: Math.min(10, Math.max(1, Number(encontrado[1]) || 1)) };
+}
+
+// ── "sin X" que no es alérgeno ────────────────────────────────
+const SIN_ALGO = /\bsin ([a-z0-9]+(?: (?:ni|y|e|o|u) [a-z0-9]+){0,6})/g;
+const NO_SON_INGREDIENTES = new Set([...SIN_PESO, 'helado', 'helados', 'sabor', 'nada', 'nadie', 'eso', 'esto', 'falta', 'problema']);
+// "Ojo: la ficha de Fresa Salvaje indica Azúcar de caña." si la ficha registra lo que pidió quitar; si no, ''.
+function avisoSinIngrediente(producto, mensaje) {
+  const ficha = fichaPropia(producto?.nombre);
+  if (!ficha) return '';
+  const palabras = [...soloPalabras(mensaje).matchAll(SIN_ALGO)]
+    .flatMap((m) => m[1].split(' ')).filter((w) => w.length >= 3 && !NO_SON_INGREDIENTES.has(w));
+  if (!palabras.length) return '';
+  const formas = new Set(palabras.flatMap(variantes));
+  const registra = ficha.ingredients.filter((i) => soloPalabras(i).split(' ').flatMap(variantes).some((w) => formas.has(w)));
+  return registra.length ? `Ojo: la ficha de ${nombreVisible(producto.nombre)} indica ${registra.join(', ')}.` : '';
+}
+
+// ── ¿Pide información o habla de salud? ───────────────────────
+// Si el modelo no da un tema claro y el mensaje nombra un sabor, esto decide entre su ficha (con aviso) o su precio.
+const PIDE_INFO = new RegExp(`\\b(?:${ALERGENO}|ingredientes?|alergen\\w*|alergi\\w*|intoleran\\w*|celia(?:c|qu)\\w*|diabet\\w*|vegan\\w*|vegetarian\\w*`
+  + '|calori\\w*|nutri\\w*|engorda\\w*|segur[oa]s?|apt[oa]s?|sano|sana|saludables?|natural(?:es)?|light|contiene\\w*|lleva\\w*|trae\\w*|hech[oa]s?|receta'
+  + '|cuentame|cuenta(?:nos)?|hablame|habla(?:nos)?|info|informacion|detalles?|describe\\w*|explica\\w*|que es|como es|mas de|sobre|tell|about)\\b');
+// Las palabras del nombre de los sabores nombrados no cuentan ("me gusta el coco" nombra Coco & Lima, no pregunta).
+function pideInformacion(mensaje, nombrados = []) {
+  const delNombre = new Set(nombrados.flatMap((p) => soloPalabras(p?.nombre).split(' ').flatMap(variantes)));
+  return PIDE_INFO.test(textoDeConsulta(mensaje).split(' ').filter((w) => !delNombre.has(w)).join(' '));
+}
+
+module.exports = {
+  leerConsultaFicha, respuestaFicha, textoFicha, productosNombrados, conOfertaTrasSalud, leerOfertaTrasSalud, traeOfertaTrasSalud,
+  avisoSinIngrediente, pideInformacion, textoDeConsulta, MENSAJE_CONSULTA_FICHA, CONFIRMA,
+};

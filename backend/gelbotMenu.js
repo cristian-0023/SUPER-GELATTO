@@ -45,4 +45,7 @@ function leerPedidoDeMenu(mensaje, productos) {
   return OTRA_COSA.test(t) ? null : 'modelo';
 }
 
-module.exports = { leerPedidoDeMenu };
+// ¿Pide algo que no es un helado ("dame un momento", "quiero un descuento", "mi factura")?
+const pideOtraCosa = (texto) => OTRA_COSA.test(soloPalabras(texto));
+
+module.exports = { leerPedidoDeMenu, pideOtraCosa };

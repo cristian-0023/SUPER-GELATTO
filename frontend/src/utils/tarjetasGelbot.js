@@ -2,7 +2,7 @@
 // a validar antes de mostrarlos: id y precio válidos, nombre recortado y foto segura (https o ruta local).
 
 export const FOTO_POR_DEFECTO = '/images/gelato_berries.png';
-export const MAX_TARJETAS = 12;
+export const MAX_TARJETAS = 24; // mismo tope que el servidor (gelbotRespuestas.js)
 const MAX_LARGO_NOMBRE = 80;
 
 // Misma regla que el servidor (backend/imagenProducto.js): ruta local "/..." sin "//" ni "..", o https sin usuario.
