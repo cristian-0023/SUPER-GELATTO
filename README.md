@@ -57,15 +57,15 @@ Integrantes:
 ├── supabase/           Base de datos
 │   ├── schema_base_2026-10-25.sql   Foto de las tablas
 │   ├── migrations/       Cambios de la base (se aplican a mano en el SQL Editor)
-│   └── rollbacks/        Cómo deshacer cada migración
+│   ├── rollbacks/        Cómo deshacer cada migración
+│   └── historico/        migration.sql: script antiguo de limpieza de la base (no se usa)
 ├── docs/               Documentación
 │   ├── arquitectura/     Modelo C4 (01 a 08) y figuras Anatomy
 │   ├── chatbot_documentation.md, modelos-3d.md, reconocimiento-facial.md, como-se-construyo.md
 │   ├── CI.md, PAYMENT_GATEWAY.md
+│   ├── historico/        VALIDATIONS.md: reglas de validación del registro (desactualizado)
 │   └── superpowers/      Especificaciones y planes de varios cambios
-├── .github/workflows/  CI (ci.yml)
-├── VALIDATIONS.md      Reglas de validación del registro
-└── migration.sql       Script antiguo de limpieza de la base (histórico)
+└── .github/workflows/  CI (ci.yml)
 ```
 
 ---
