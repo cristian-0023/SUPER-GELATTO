@@ -19,11 +19,11 @@ const bcrypt = require('bcryptjs'); // Usamos bcryptjs para mejor compatibilidad
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient } = require('@supabase/supabase-js');
-const { handleChatbotRequest, invalidarCacheProductos } = require('./chatbot');
-const { getFlavorData } = require('./datosSabores');
-const { imagenProductoValida } = require('./imagenProducto');
-const { copiarModeloATienda, borrarModeloAnterior } = require('./modelos3dStorage');
-const { correoParaIlike } = require('./correoIlike');
+const { handleChatbotRequest, invalidarCacheProductos } = require('./gelbot/chatbot');
+const { getFlavorData } = require('./datos/datosSabores');
+const { imagenProductoValida } = require('./servicios/imagenProducto');
+const { copiarModeloATienda, borrarModeloAnterior } = require('./servicios/modelos3dStorage');
+const { correoParaIlike } = require('./servicios/correoIlike');
 
 
 const {

@@ -13,7 +13,7 @@ const CLAVE = 'Clave123!';
 
 describe('correoParaIlike', () => {
   it('escapa "_", "%" y "\\" y deja lo demás igual', () => {
-    const { correoParaIlike } = require('../../correoIlike.js');
+    const { correoParaIlike } = require('../../servicios/correoIlike.js');
     expect(correoParaIlike('a_b%c\\d@x.com')).toBe('a\\_b\\%c\\\\d@x.com');
     expect(correoParaIlike('ana.perez@example.com')).toBe('ana.perez@example.com');
   });

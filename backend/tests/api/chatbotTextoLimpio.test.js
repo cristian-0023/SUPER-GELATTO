@@ -123,7 +123,7 @@ describe('1. la limpieza es rápida con textos raros', () => {
     ['negritas con herramienta', '**getProducts. '.repeat(260)],
   ])('%s: menos de 250 ms', (_n, entrada) => {
     let modulo = {};
-    try { modulo = requireNode('../../gelbotTexto.js'); } catch { /* aún no existe */ }
+    try { modulo = requireNode('../../gelbot/gelbotTexto.js'); } catch { /* aún no existe */ }
     expect(modulo.cleanText, 'gelbotTexto.js exporta cleanText').toBeTypeOf('function');
     const inicio = performance.now();
     modulo.cleanText(entrada);

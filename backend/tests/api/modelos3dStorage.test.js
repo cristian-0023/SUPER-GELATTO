@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 
 const requireNode = createRequire(import.meta.url);
-const { copiarModeloATienda, borrarModeloAnterior } = requireNode('../../modelos3dStorage.js');
+const { copiarModeloATienda, borrarModeloAnterior } = requireNode('../../servicios/modelos3dStorage.js');
 
 const URL_TRIPO = 'https://cdn.tripo.test/modelo.glb?firma=abc';
 const BASE_PUBLICA = 'http://supabase.fake.local/storage/v1/object/public/modelos-3d/';

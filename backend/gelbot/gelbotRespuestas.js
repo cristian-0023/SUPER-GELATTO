@@ -6,7 +6,7 @@
 //  - temaPorPalabras: si el modelo no da un tema claro (o está caído), el servidor entiende lo básico solo.
 //  - textos con datos: precio, carrito, pedidos, Super Points y helado 3D (números de la base, nunca del modelo).
 // Nombres de productos: los escribe un admin; siempre pasan por nombreVisible (sin *, `, saltos ni invisibles).
-const { imagenProductoValida } = require('./imagenProducto');
+const { imagenProductoValida } = require('../servicios/imagenProducto');
 const { soloPalabras, analizarMensaje, preguntaPrecio } = require('./gelbotIntencion');
 const { nombreVisible, NO_VISIBLES } = require('./gelbotTexto');
 const { pideOtraCosa } = require('./gelbotMenu');

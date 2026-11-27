@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 
-const intencion = createRequire(import.meta.url)('../../gelbotIntencion.js');
+const intencion = createRequire(import.meta.url)('../../gelbot/gelbotIntencion.js');
 const USUARIO = { id_usuario: 7, nombre: 'Carlos Cliente', email: 'carlos@example.com', rol: 'cliente' };
 const tokenCliente = () => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: 7, email: USUARIO.email, rol: 'cliente' })}` });
 

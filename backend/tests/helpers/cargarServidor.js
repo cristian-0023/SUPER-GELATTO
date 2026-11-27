@@ -140,7 +140,7 @@ export function cargarServidor(fake, { sinSupabase = false, limitePagos = 100000
   const rutaServer = resolve(raiz, 'server.js');
   delete requireNode.cache[rutaServer];
   // chatbot.js crea su cliente Groq al cargarse: se recarga para que use el falso de esta prueba.
-  delete requireNode.cache[resolve(raiz, 'chatbot.js')];
+  delete requireNode.cache[resolve(raiz, 'gelbot/chatbot.js')];
   const app = requireNode(rutaServer);
   return { app, escrituras };
 }

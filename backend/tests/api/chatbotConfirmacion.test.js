@@ -317,7 +317,7 @@ describe('getSalesSummary con muchas ventas', () => {
 describe('validación de addProduct y deleteProduct', () => {
   let funciones;
   beforeAll(() => {
-    funciones = createRequire(import.meta.url)('../../chatbot.js').functions;
+    funciones = createRequire(import.meta.url)('../../gelbot/chatbot.js').functions;
   });
 
   it.each([

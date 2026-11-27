@@ -17,8 +17,8 @@ const requireNode = createRequire(import.meta.url);
 const aqui = dirname(fileURLToPath(import.meta.url));
 const { APIError } = requireNode('groq-sdk/error');
 const errorGroq = (status, code) => APIError.generate(status, { error: { message: 'MENTIRA-42 detalle', code } }, undefined, new Headers());
-const intencion = requireNode('../../gelbotIntencion.js');
-const { FLAVOR_DATA_MAP } = requireNode('../../datosSabores.js');
+const intencion = requireNode('../../gelbot/gelbotIntencion.js');
+const { FLAVOR_DATA_MAP } = requireNode('../../datos/datosSabores.js');
 
 const bearer = (id, rol) => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: id, email: 'x@example.com', rol })}` });
 const tokenCliente = () => bearer(7, 'cliente');
@@ -81,7 +81,7 @@ function servidor(guion) {
 }
 // Para la propiedad (miles de mensajes): el mismo handler del servidor, llamado sin HTTP. La sesión es la que
 // server.js saca del token (null = visitante).
-const rutaChatbot = resolve(aqui, '../../chatbot.js');
+const rutaChatbot = resolve(aqui, '../../gelbot/chatbot.js');
 function manejador(guion) {
   servidor(guion);
   const { handleChatbotRequest } = requireNode(rutaChatbot); // la instancia que acaba de cargar server.js
@@ -574,8 +574,8 @@ describe('tarjetas, nombres y velocidad', () => {
   const GRANDE = Array.from({ length: 200 }, (_, i) => ({ ...CATALOGO_REAL[0], id_producto: i + 1, nombre: `Sabor especial sin azúcar número ${i} fresa con mango` }));
   it.each([['hola '], ['tiene mani '], ['q contiene '], ['ingredentes '], ['allergic to nuts '], ['mis pedidos '], ['cómo pago '], ['\u200b'], ['ｆ'], ['sin azucar '], ['soy alergico, dame '], ['a']])(
     'mensaje de 1000 caracteres con %j y 200 productos: menos de 150 ms por función', (trozo) => {
-      const { temaPorPalabras, normalizarEntrada } = requireNode('../../gelbotRespuestas.js');
-      const { leerConsultaFicha, avisoSinIngrediente } = requireNode('../../gelbotFichas.js');
+      const { temaPorPalabras, normalizarEntrada } = requireNode('../../gelbot/gelbotRespuestas.js');
+      const { leerConsultaFicha, avisoSinIngrediente } = requireNode('../../gelbot/gelbotFichas.js');
       const mensaje = MIL(trozo);
       const medir = (f) => {
         let mejor = Infinity;
@@ -604,7 +604,7 @@ describe('tarjetas, nombres y velocidad', () => {
   });
 
   it('botOfrecioAgregar no se activa con los textos fijos que no ofrecen un sabor', () => {
-    const { TEXTOS } = requireNode('../../gelbotRespuestas.js');
+    const { TEXTOS } = requireNode('../../gelbot/gelbotRespuestas.js');
     for (const nombre of ['saludo', 'despedida', 'gracias', 'queja', 'contacto', 'quien', 'otro']) {
       for (const t of [TEXTOS[nombre]].flat()) {
         expect(intencion.botOfrecioAgregar(t), t).toBe(false);
