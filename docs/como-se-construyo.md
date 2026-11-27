@@ -12,8 +12,6 @@ Construir esta app fue como **abrir una heladería de verdad**:
 4. Más tarde llegaron las **novedades**: la tarjeta de puntos, las maquetas 3D, el helado personalizado y un mesero-chat.
 5. Al final vino una **inspección** (la auditoría): un revisor recorrió el local con una lista, anotó lo que había que arreglar y el equipo lo fue corrigiendo, cambio por cambio, con un control de calidad automático en la puerta que no deja pasar nada que no esté probado.
 
-**Una aclaración honesta:** parte del trabajo se hizo con ayuda de asistentes de inteligencia artificial (Claude Code). Esa ayuda siempre pasó por la **revisión del equipo**: las pruebas automáticas y la revisión de código decidían si algo se podía unir a `main`.
-
 ## Detalle técnico
 
 ### Línea de tiempo
@@ -75,7 +73,7 @@ npm run dev              # http://localhost:3000, reenvía /api al servidor
 
 1. **Una rama por cambio** (`feat/...`, `fix/...`, `docs/...`, `perf/...`, `chore/...`). Nunca se trabaja directo en `main`.
 2. **TDD** ("primero la prueba"): se escribe la prueba, se ve **fallar** (rojo), se escribe el código mínimo para que pase (verde) y se limpia. En el historial se ve: un commit `test: ... (rojo)` y después el `fix:` que lo arregla.
-3. **Revisión** antes de unir: se corren todas las pruebas, un compañero (o un asistente de revisión) revisa el código y, si toca datos, login o pagos, también una revisión de seguridad.
+3. **Revisión** antes de unir: se corren todas las pruebas, un compañero revisa el código y, si toca datos, login o pagos, también una revisión de seguridad.
 4. **CI que bloquea:** GitHub Actions corre `backend` (`npm test`) y `frontend` (`vite build`) en cada pull request. La rama `main` está protegida con una regla de GitHub: si un check falla, no se une. Detalle en [CI.md](CI.md).
 5. **Publicación:** al unirse a `main`, Vercel publica la página y la API. (Esa conexión está configurada en el panel de Vercel, no en el repositorio.)
 6. **La base de datos se toca a mano y con cuidado:** los cambios van como **migraciones** en `supabase/migrations/` (cada una con su `rollback` en `supabase/rollbacks/`) y **una persona las aplica en el SQL Editor de Supabase**, antes de publicar el código que las usa.

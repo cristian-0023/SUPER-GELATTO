@@ -27,4 +27,4 @@ Cada comando reescribe su `.svg` y su `.html` en esta carpeta.
 
 - `heladeria-maquina.mjs`, `viaje-compra.mjs` y `gelbot-mesero.mjs`: arman cada figura pieza por pieza.
 - `common.mjs`: piezas compartidas (base, placas con nombre, la tarjeta del SVG y la página HTML).
-- `kit/iso-kit.mjs`: el kit de dibujo isométrico de la skill Anatomy (licencia MIT, en `kit/LICENSE`).
+- `kit/iso-kit.mjs`: el kit de dibujo isométrico Anatomy (licencia MIT, en `kit/LICENSE`).

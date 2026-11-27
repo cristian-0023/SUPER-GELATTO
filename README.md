@@ -8,8 +8,6 @@ Integrantes:
 - Breidis Tabares
 - Miguel Villa
 
-Parte del trabajo se hizo con ayuda de asistentes de inteligencia artificial (Claude Code), siempre con revisión del equipo, pruebas automáticas y revisión de código.
-
 > Para entender el proyecto sin ser programador, empieza por [Cómo se construyó el proyecto](./docs/como-se-construyo.md) y por la [arquitectura explicada con la analogía de la heladería](./docs/arquitectura/README.md).
 
 ---
