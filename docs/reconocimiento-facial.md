@@ -104,4 +104,4 @@ La respuesta correcta es **idéntica a la del login con contraseña** (la misma 
 3. Cerrar sesión y entrar con "Entrar con Reconocimiento Facial".
 4. Sin AWS configurado, las pruebas automáticas siguen pasando (`cd backend && npm test`).
 
-Más contexto: [flujos](arquitectura/08-flujos.md#2-iniciar-sesión), [servidor](arquitectura/04-componentes-backend.md) y [modelo de datos](arquitectura/07-modelo-datos.md).
+Más contexto: [flujos](arquitectura/08-flujos.md#2-registrarse-e-iniciar-sesión), [servidor](arquitectura/04-componentes-backend.md) y [modelo de datos](arquitectura/07-modelo-datos.md).

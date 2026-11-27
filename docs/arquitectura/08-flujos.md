@@ -13,6 +13,8 @@ Los nombres de las piezas son los mismos de la [tabla de piezas](03-contenedores
 
 ## Detalle técnico
 
+Los flujos citan **rutas y funciones** (los números de línea cambian con cada PR). Verificado contra `main` el 2026-11-26.
+
 ### 1. Compra
 
 ```mermaid
@@ -42,20 +44,37 @@ sequenceDiagram
   end
 ```
 
-| Paso | Referencia |
+| Paso | Dónde |
 |---|---|
-| Llamada de la página (sin token) | `PaymentGateway.jsx:127-150` |
-| Límite y validaciones (incluye `puntosUsar`) | `server.js:2771-2807`; `validarPuntosUsar` en `server.js:2719-2723` |
-| Resultado simulado y espera | `server.js:2818-2834` |
-| `registrar_venta` con `p_puntos_usar` | `server.js:2839-2850`; migración `20261111120000_super_points.sql:202-430` |
-| Canje: saldo, tope y descuento | migración `20261111120000_super_points.sql:343-366` |
-| Correo de confirmación (muestra el descuento) | `server.js:2885-2941` |
-| Respuesta (total, descuento, puntos usados y ganados) | `server.js:2953-2960` |
-| Vaciar carrito | `CheckoutPage.jsx:62-66` |
+| Llamada de la página | `PaymentGateway.jsx` (manda el token con `apiFetch`) |
+| Límite y validaciones (incluye `puntosUsar` y las líneas personalizadas) | ruta `POST /api/payments/process`, `validarCarrito`, `validarPuntosUsar` |
+| Resultado simulado y espera | misma ruta (90 % aprobado, 1 a 2 s) |
+| `registrar_venta` con `p_puntos_usar` | migración `20261120130000_helado_personalizado.sql` (versión vigente) |
+| Correo de confirmación (muestra el descuento y la composición del helado personalizado) | misma ruta |
+| Vaciar carrito | `CheckoutPage.jsx` |
 
-### 2. Iniciar sesión
+### 2. Registrarse e iniciar sesión
 
-**a) Con correo y contraseña**
+**a) Registro con correo y contraseña (queda con la sesión iniciada)**
+
+```mermaid
+sequenceDiagram
+  actor C as Cliente
+  participant W as Tienda web
+  participant API as API Express
+  participant DB as Base de datos
+  C->>W: Datos en /register
+  W->>API: POST /api/register
+  API->>API: Límite 10 cada 15 min, valida nombre, correo y contraseña, rechaza correos reservados
+  API->>DB: Busca el correo y, si no existe, inserta el cliente (contraseña con bcrypt)
+  DB-->>API: Fila creada (sin password_hash)
+  API-->>W: 201 con token y user, el mismo formato que el login
+  W->>W: Guarda la sesión y entra directo a la tienda
+```
+
+Si dos registros llegan a la vez con el mismo correo, el segundo recibe 409 (candado único de la base). Si la base no devolvió la fila, se registra sin sesión y la página manda a `/login`.
+
+**b) Con correo y contraseña**
 
 ```mermaid
 sequenceDiagram
@@ -73,9 +92,7 @@ sequenceDiagram
   W->>W: Guarda el token, apiFetch lo manda como Bearer
 ```
 
-Referencias: `Login.jsx:115`; `server.js:1140-1188`; firma en `server.js:816-822`; guardado en `api.js:21-26`.
-
-**b) Con Google**
+**c) Con Google**
 
 ```mermaid
 sequenceDiagram
@@ -95,28 +112,11 @@ sequenceDiagram
   API-->>W: token
 ```
 
-Referencias: `Login.jsx:75`, `Login.jsx:312`; `server.js:1365-1463`; elevación en `server.js:810-813` y `server.js:1418-1426`.
+**d) Facial (solo administradores)**
 
-**c) Facial (solo administradores)**
+Se explica completo en [reconocimiento-facial.md](../reconocimiento-facial.md). En resumen: la foto viaja a `POST /api/admin/faceid/rekognition-login`, AWS Rekognition busca el rostro (similitud mínima 70), la base dice a qué usuario pertenece y se exige `rol = 'admin'`; la respuesta es el mismo `token` y `user` del login.
 
-```mermaid
-sequenceDiagram
-  actor A as Administrador
-  participant W as Tienda web
-  participant API as API Express
-  participant R as AWS Rekognition
-  participant DB as Base de datos
-  Note over A,DB: Antes, ya con sesión, el admin registró su rostro con POST /api/admin/faceid/rekognition-register
-  A->>W: Foto con CapturaFacial en /login
-  W->>API: POST /api/admin/faceid/rekognition-login con la imagen
-  API->>R: SearchFacesByImage, similitud mínima 70
-  R-->>API: FaceId encontrado
-  API->>DB: admin_face_rekognition, luego usuario
-  API->>API: Exige rol admin en la base
-  API-->>W: token o 401 genérico
-```
-
-Referencias: registro `server.js:1193-1254`; login `server.js:1257-1355`; `Login.jsx:143`.
+Todos los caminos guardan la sesión igual (`frontend/src/utils/sesion.js`) y esta dura lo que dura el token (24 h).
 
 ### 3. Recuperar la contraseña
 
@@ -129,23 +129,20 @@ sequenceDiagram
   participant M as Servidor de correo SMTP
   C->>W: Correo en /forgot-password
   W->>API: POST /api/forgot-password
-  API->>DB: Busca el usuario
-  API->>API: Crea un código aleatorio válido 1 hora, guardado en memoria
-  API->>M: Correo con el enlace FRONTEND_URL/reset-password/código
+  API->>DB: Busca el usuario y cuenta sus enlaces recientes (espera de 2 min, tope de 5 al día)
+  API->>DB: Anula los enlaces anteriores y guarda el sha256 del nuevo en reset_tokens
+  API->>M: Correo con el enlace FRONTEND_URL/reset-password/código, válido 30 min
   API-->>W: Mensaje genérico, no revela si el correo existe
   C->>W: Abre el enlace
-  W->>API: GET /api/reset-password/código para validar el enlace
-  API-->>W: 404, esa ruta no existe
-  Note over C,W: Hoy el flujo se corta aquí: la página muestra un error y no enseña el formulario
-  C->>W: Escribe la nueva contraseña, solo si el formulario apareciera
+  W->>API: GET /api/reset-password/código
+  API-->>W: valid true o ENLACE_INVALIDO
+  C->>W: Escribe la nueva contraseña
   W->>API: POST /api/reset-password/código
-  API->>DB: Guarda el nuevo password_hash
-  API-->>W: Contraseña actualizada, el código ya no sirve
+  API->>DB: Marca el enlace como usado (una sola vez) y guarda el nuevo password_hash
+  API-->>W: Contraseña actualizada, el enlace ya no sirve
 ```
 
-Referencias: `server.js:1466-1518`, `server.js:1521-1562`; códigos en memoria `server.js:624`; páginas `ForgotPassword.jsx:49`, `ResetPassword.jsx:20` (validación con `GET`, que el servidor no tiene), `ResetPassword.jsx:195` (pantalla de error), `ResetPassword.jsx:138` (envío con `POST`).
-
-> **Error conocido:** la recuperación de contraseña está rota de punta a punta. El servidor solo acepta `POST /api/reset-password/:token`; la página primero pide un `GET` a esa dirección, recibe 404 y se queda en la pantalla de error. Ver [05-componentes-frontend.md](05-componentes-frontend.md#desajustes-entre-la-página-y-el-servidor).
+Antes estaba rota (la página validaba con un `GET` que el servidor no tenía); se arregló en el PR #5 y hoy tiene su prueba (`backend/tests/api/recuperarContrasena.test.js`). Sin SMTP real o sin `FRONTEND_URL` en producción, la ruta responde 503 en lugar de mandar enlaces a localhost.
 
 ### 4. Cambio de estado de una venta y correo
 
@@ -169,25 +166,50 @@ sequenceDiagram
   end
 ```
 
-Referencias: `AdminDashboard.jsx:333`; `server.js:2149-2229` (ruta; la llamada a la base en `server.js:2163`); plantilla de correo `server.js:679-781`. Los puntos del cambio de estado (cobrar o cancelar) se describen en la sección 7.
+Los puntos del cambio de estado (cobrar o cancelar) se describen en la sección 8.
 
-### 5. Gelbot con confirmación
+### 5. Gelbot: chat con textos del servidor
+
+Detalle completo en [chatbot_documentation.md](../chatbot_documentation.md). Para un **cliente o visitante**:
+
+```mermaid
+sequenceDiagram
+  actor C as Cliente
+  participant W as Tienda web (Gelbot)
+  participant API as API Express
+  participant GB as gelbotCliente
+  participant Q as Groq
+  participant DB as Base de datos
+  C->>W: Escribe un mensaje
+  W->>API: POST /api/chatbot con message y, si hay, el Bearer
+  API->>GB: Sesión sacada del token (sin token = visitante)
+  GB->>GB: Atajos sin modelo (ficha, precio, pedido claro, menú, gracias...)
+  opt Ningún atajo alcanza
+    GB->>Q: UNA llamada: el modelo solo puede elegir un tema o una herramienta
+    Q-->>GB: tema (su texto se descarta)
+  end
+  GB->>DB: Catálogo (caché 1 min), pedidos del token o reglas de puntos si el tema lo pide
+  GB->>GB: Arma la respuesta con plantillas del servidor y la ficha del sabor
+  GB-->>W: texto, acción (addToCart o closeChat), producto y tarjetas con foto
+```
+
+Para un **administrador** el flujo es el de dos llamadas, con confirmación para las acciones que cambian datos:
 
 ```mermaid
 sequenceDiagram
   actor A as Administrador
   participant W as Tienda web
   participant API as API Express
-  participant GB as Gelbot
+  participant GB as Gelbot (chatbot.js)
   participant Q as Groq
   participant DB as Base de datos
   A->>W: Escribe borra el producto 7
   W->>API: POST /api/chatbot con message y Bearer
   API->>GB: Sesión sacada del token
-  GB->>Q: Mensaje y herramientas permitidas para su rol
+  GB->>Q: Mensaje y herramientas de administrador
   Q-->>GB: Pide la herramienta deleteProduct
-  GB->>GB: No ejecuta, crea un código de un solo uso de 5 min
-  GB-->>W: Pide confirmación con el código
+  GB->>GB: No ejecuta, crea un código de un solo uso de 5 min ligado a este admin
+  GB-->>W: Pide confirmación con el resumen y el código
   A->>W: Pulsa Confirmar
   W->>API: POST /api/chatbot con confirmar igual al código
   GB->>GB: Valida que el código sea del mismo admin y no haya vencido
@@ -195,7 +217,7 @@ sequenceDiagram
   GB-->>W: Acción hecha
 ```
 
-Referencias: `Gelbot.jsx:142-144`, `Gelbot.jsx:220-221`; `server.js:2703-2707`; `chatbot.js:333-382`, `chatbot.js:519-538`, `chatbot.js:544-549`, `chatbot.js:716-731`. Un visitante o cliente nunca recibe las herramientas de admin (`chatbot.js:599-600`).
+Un visitante o cliente nunca recibe las herramientas de administrador.
 
 ### 6. Producto con modelo 3D
 
@@ -205,28 +227,51 @@ sequenceDiagram
   participant W as Tienda web
   participant API as API Express
   participant T as Tripo 3D
-  participant JS as Archivos JSON locales
+  participant S as Storage (modelos-3d)
   participant DB as Base de datos
   A->>W: Crea un producto con un prompt 3D
   W->>API: POST /api/admin/products
-  API->>DB: Inserta el producto, la base da el id
+  API->>DB: Inserta el producto con las reglas compartidas
+  API->>DB: Reserva model_3d_estado = generando (update condicional)
   API->>T: Crea la tarea text_to_model
   T-->>API: task_id
-  API->>JS: Guarda la tarea como generando
-  loop Cada pocos segundos, máximo 50 veces
+  API->>DB: Guarda model_3d_task_id
+  loop Cada 3 s mientras genera
     W->>API: GET /api/admin/products/id/model-3d
     API->>T: Consulta el estado de la tarea
-    T-->>API: progreso o URL del modelo
+    T-->>API: progreso o URL temporal del modelo
   end
-  API->>DB: Guarda producto.model_3d_url
-  API->>JS: Marca la tarea como lista
+  API->>T: Descarga el GLB (60 s y 50 MB como máximo, solo https público)
+  API->>S: Sube producto-id/taskId.glb
+  API->>DB: model_3d_url = URL permanente, model_3d_estado = listo
+  API->>S: Borra el modelo anterior del producto
   API-->>W: estado listo y URL
   W->>W: Model3DPreview muestra el modelo
 ```
 
-Referencias: `server.js:2077-2179` (crear e iniciar Tripo), `server.js:126-182` (llamadas a Tripo), `server.js:2712-2775` (consulta y guardado), `server.js:2778-2809` (regenerar); sondeo en la página `AdminDashboard.jsx:740-760`.
+Detalle y límites en [modelos-3d.md](../modelos-3d.md).
 
-### 7. Cancelar una venta y devolver Super Points
+### 7. Helado personalizado 3D
+
+```mermaid
+sequenceDiagram
+  actor C as Cliente
+  participant W as Tienda web (GelatoBuilder3D)
+  participant API as API Express
+  participant RV as registrar_venta
+  C->>W: Arma envase, sabores (1 a 3) y toppings (0 a 3)
+  W->>API: GET /api/personalizado/precios
+  API-->>W: precios y límites de la base
+  C->>W: Agrega al carrito y paga
+  W->>API: POST /api/payments/process con la línea personalizada
+  API->>API: Valida solo la forma de la línea
+  API->>RV: rpc registrar_venta
+  Note over RV: Valida ids y máximos, pone el precio, guarda la composición en detalle_venta.personalizacion y no descuenta stock
+  RV-->>API: venta con la composición
+  API-->>W: recibo con la composición
+```
+
+### 8. Cancelar una venta y devolver Super Points
 
 Cuando un admin pasa una venta cobrada a "Cancelado", la base hace todo en una sola transacción: devuelve lo canjeado y quita lo ganado.
 
@@ -255,4 +300,25 @@ sequenceDiagram
 - Si un admin saca la venta de "Cancelado", los puntos no se vuelven a mover.
 - Una venta sin movimientos (Fallido, Pendiente o anterior al programa) no mueve nada al cancelarse.
 
-Referencias: `server.js:2149-2229` (ruta; la llamada en `server.js:2163`); función `cambiar_estado_venta` en `supabase/migrations/20261111120000_super_points.sql:446-533` (reversa en las líneas 497-520).
+La función `cambiar_estado_venta` está en `supabase/migrations/20261111120000_super_points.sql`.
+
+### 9. Ocultar o mostrar un producto
+
+```mermaid
+sequenceDiagram
+  actor A as Administrador
+  participant W as Tienda web (panel)
+  participant API as API Express
+  participant DB as Base de datos
+  A->>W: Intenta borrar un producto que tiene ventas
+  W->>API: DELETE /api/admin/products/id
+  API-->>W: 409, no se puede borrar
+  W->>W: Aviso con el botón Ocultar
+  A->>W: Pulsa Ocultar
+  W->>API: PUT /api/admin/products/id/visible con estado false
+  API->>DB: update producto set estado = false
+  API-->>W: ok; el panel lo marca como Oculto (con Deshacer)
+  Note over API,DB: La tienda y Gelbot solo leen estado = true; la caché del chat se invalida y la del CDN tarda hasta unos 60 s
+```
+
+El panel pide la lista con `GET /api/admin/products`, que incluye también los ocultos.
