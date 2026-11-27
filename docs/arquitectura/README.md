@@ -49,7 +49,7 @@ C4 es una forma de dibujar un sistema en cuatro niveles de zoom, como un mapa:
 | 1. Contexto | ¿Quién usa el sistema y con qué servicios de afuera habla? | [02-contexto.md](02-contexto.md) |
 | 2. Contenedores | ¿En qué piezas grandes se divide (página, servidor, base)? ¿Dónde vive cada una? | [03-contenedores.md](03-contenedores.md) |
 | 3. Componentes | ¿Qué partes tiene cada pieza por dentro? | [04-componentes-backend.md](04-componentes-backend.md), [05-componentes-frontend.md](05-componentes-frontend.md) |
-| 4. Código | El código mismo | `backend/server.js`, `backend/chatbot.js` y `backend/gelbot*.js`, `frontend/src/` |
+| 4. Código | El código mismo | `backend/server.js`, `backend/gelbot/` (`chatbot.js` y `gelbot*.js`), `backend/datos/`, `backend/servicios/`, `frontend/src/` |
 
 Todos los datos están verificados contra el código de `main` en el commit `f8ab6ee` (2026-11-26). Las referencias son **nombres** (rutas, funciones, migraciones); para ubicarlas en el código se busca el nombre con `grep`.
 
@@ -62,7 +62,7 @@ Todos los datos están verificados contra el código de `main` en el commit `f8a
 | [03-contenedores.md](03-contenedores.md) | C4 nivel 2: página, servidor, base y Storage; variables de entorno; despliegue; **tabla de piezas** (nombres oficiales) | Quien instala o publica la app |
 | [04-componentes-backend.md](04-componentes-backend.md) | C4 nivel 3 del servidor: módulos, las 35 rutas, permisos, límites de intentos, chatbot y seguridad | Programadores del backend, revisores de seguridad |
 | [05-componentes-frontend.md](05-componentes-frontend.md) | C4 nivel 3 de la página: pantallas, componentes, panel, carrito, ayudante de API | Programadores del frontend |
-| [06-pruebas-y-calidad.md](06-pruebas-y-calidad.md) | Las 3.389 pruebas: qué cubre cada carpeta, CI y rama protegida | Todo programador antes de unir una rama |
+| [06-pruebas-y-calidad.md](06-pruebas-y-calidad.md) | Las 3.419 pruebas: qué cubre cada carpeta, CI y rama protegida | Todo programador antes de unir una rama |
 | [07-modelo-datos.md](07-modelo-datos.md) | Tablas, columnas, `registrar_venta`, funciones, Storage, índices y permisos | Quien toca la base de datos |
 | [08-flujos.md](08-flujos.md) | Paso a paso de compra, registro e inicio de sesión, recuperar contraseña, estados, chatbot, modelos 3D, helado personalizado, cancelación y ocultar productos | Todo el equipo |
 

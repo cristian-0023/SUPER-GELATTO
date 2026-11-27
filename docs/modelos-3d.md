@@ -82,7 +82,7 @@ Antes el estado de cada tarea 3D estaba en un archivo del servidor, que en Verce
 | `model_3d_actualizado` | Cuándo se reservó la generación |
 | `model_3d_url` | URL **permanente** del modelo en el bucket |
 
-### 3. Dónde se guardan: el bucket `modelos-3d` y `modelos3dStorage.js`
+### 3. Dónde se guardan: el bucket `modelos-3d` y `backend/servicios/modelos3dStorage.js`
 
 Cuando Tripo termina (`success`), el servidor:
 

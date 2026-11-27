@@ -10,24 +10,26 @@ Gelbot, el ayudante del chat, también vive en esta cocina. Para los clientes es
 
 ## Detalle técnico
 
-Casi todo el servidor está en un solo archivo, `backend/server.js` (3.414 líneas al 2026-11-26), más el chatbot, que ya está repartido en módulos (`backend/chatbot.js` de 958 líneas y los módulos `gelbot*`). Los "componentes" de abajo son **secciones lógicas**; los números de línea cambian con cada PR, por eso este documento cita **nombres de funciones y rutas**, no números de línea. (Medido con `wc -l` el 2026-11-26.)
+Casi todo el servidor está en un solo archivo, `backend/server.js` (3.414 líneas al 2026-11-26), más el chatbot, que ya está repartido en módulos (`backend/gelbot/chatbot.js` de 958 líneas y los módulos `gelbot*` de la misma carpeta). Los "componentes" de abajo son **secciones lógicas**; los números de línea cambian con cada PR, por eso este documento cita **nombres de funciones y rutas**, no números de línea. (Medido con `wc -l` el 2026-11-26.)
 
 ### Módulos del backend
+
+Rutas relativas a `backend/`: el chat está en `gelbot/`, las fichas de sabores en `datos/` y las utilidades en `servicios/`.
 
 | Archivo | Líneas | Qué hace |
 |---|---|---|
 | `server.js` | 3.414 | La API Express: rutas, guardias, límites, base simulada, correos, pagos, Tripo |
-| `chatbot.js` | 958 | Entrada de Gelbot: cliente de Groq, herramientas y confirmaciones del modo admin, cachés |
-| `gelbotCliente.js` | 293 | Flujo de clientes y visitantes: atajos, una llamada al modelo y respuesta del servidor |
-| `gelbotIntencion.js` | 356 | Entiende el mensaje sin IA: qué pide, qué rechaza, cantidades, afirmaciones |
-| `gelbotFichas.js` | 374 | Ingredientes, alérgenos y dietas, siempre de la ficha del sabor y con aviso |
-| `gelbotRespuestas.js` | 271 | Todos los textos del cliente (plantillas por tema) y la frontera `paraCliente` |
-| `gelbotMenu.js` | 51 | Detecta cuándo mostrar el menú con fotos |
-| `gelbotTexto.js` | 143 | Limpia el texto del modelo (modo admin) |
-| `datosSabores.js` | 162 | Fichas de los sabores (ingredientes, alérgenos, nutrición) para la tienda y el chat |
-| `imagenProducto.js` | 23 | Valida la URL de la foto de un producto (ruta local o `https`) |
-| `modelos3dStorage.js` | 224 | Copia el modelo 3D de Tripo al bucket `modelos-3d` y borra el anterior |
-| `correoIlike.js` | 6 | Escapa los comodines (`%`, `_`, `\`) de un correo para compararlo con `ilike` |
+| `gelbot/chatbot.js` | 958 | Entrada de Gelbot: cliente de Groq, herramientas y confirmaciones del modo admin, cachés |
+| `gelbot/gelbotCliente.js` | 293 | Flujo de clientes y visitantes: atajos, una llamada al modelo y respuesta del servidor |
+| `gelbot/gelbotIntencion.js` | 356 | Entiende el mensaje sin IA: qué pide, qué rechaza, cantidades, afirmaciones |
+| `gelbot/gelbotFichas.js` | 374 | Ingredientes, alérgenos y dietas, siempre de la ficha del sabor y con aviso |
+| `gelbot/gelbotRespuestas.js` | 271 | Todos los textos del cliente (plantillas por tema) y la frontera `paraCliente` |
+| `gelbot/gelbotMenu.js` | 51 | Detecta cuándo mostrar el menú con fotos |
+| `gelbot/gelbotTexto.js` | 143 | Limpia el texto del modelo (modo admin) |
+| `datos/datosSabores.js` | 162 | Fichas de los sabores (ingredientes, alérgenos, nutrición) para la tienda y el chat |
+| `servicios/imagenProducto.js` | 23 | Valida la URL de la foto de un producto (ruta local o `https`) |
+| `servicios/modelos3dStorage.js` | 224 | Copia el modelo 3D de Tripo al bucket `modelos-3d` y borra el anterior |
+| `servicios/correoIlike.js` | 6 | Escapa los comodines (`%`, `_`, `\`) de un correo para compararlo con `ilike` |
 
 Las dependencias de los módulos del chat no forman ciclos: `gelbotIntencion` y `gelbotTexto` no dependen de nada; `gelbotMenu` usa `gelbotIntencion`; `gelbotFichas` usa `gelbotIntencion`, `datosSabores` y `gelbotTexto`; `gelbotRespuestas` usa `imagenProducto`, `gelbotIntencion`, `gelbotTexto` y `gelbotMenu`; `gelbotCliente` usa los anteriores; `chatbot.js` usa `gelbotCliente`.
 

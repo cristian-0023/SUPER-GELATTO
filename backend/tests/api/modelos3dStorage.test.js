@@ -1,4 +1,4 @@
-// Pruebas de backend/modelos3dStorage.js: copia el GLB que genera Tripo al bucket propio "modelos-3d".
+// Pruebas de backend/servicios/modelos3dStorage.js: copia el GLB que genera Tripo al bucket propio "modelos-3d".
 // Contrato:
 //  - Solo se sube un GLB de verdad (los primeros 4 bytes son "glTF"); HTML o JSON de error no se suben.
 //  - Descarga con tiempo máximo y tamaño máximo: si se cuelga o pesa demasiado, se corta sin subir nada.

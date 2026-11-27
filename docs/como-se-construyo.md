@@ -66,7 +66,7 @@ npm run dev              # http://localhost:3000, reenvía /api al servidor
 - `backend/.env.example` y `frontend/.env.example` solo traen **nombres** de variables; los valores te los da el equipo y **no se escriben en el código ni en documentos**. Las variables de AWS (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `REKOGNITION_COLLECTION_ID`) no están en el ejemplo; solo hacen falta para el login facial.
 - Sin la configuración de Supabase, el servidor arranca en **modo simulado** (una base de mentira en memoria, solo para desarrollo). En producción no arranca así.
 - Sin `GROQ_API_KEY`, Gelbot igual responde con sus palabras clave.
-- **Pruebas:** `cd backend && npm test` (3.389 pruebas, unos 2 minutos, sin internet ni llaves reales). Ver [06-pruebas-y-calidad.md](arquitectura/06-pruebas-y-calidad.md).
+- **Pruebas:** `cd backend && npm test` (3.419 pruebas, unos 2 minutos, sin internet ni llaves reales). Ver [06-pruebas-y-calidad.md](arquitectura/06-pruebas-y-calidad.md).
 - **Compilar la página como lo hace el CI:** `cd frontend && npx vite build`.
 
 ### La forma de trabajar

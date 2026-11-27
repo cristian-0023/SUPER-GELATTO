@@ -1,5 +1,5 @@
 // Login: en ilike, "_" y "%" son comodines. Sin escaparlos, "a_b@x.com" también encajaría con "axb@x.com".
-//  - correoParaIlike (backend/correoIlike.js) escapa "_", "%" y "\" (el mismo helper del login con Google).
+//  - correoParaIlike (backend/servicios/correoIlike.js) escapa "_", "%" y "\" (el mismo helper del login con Google).
 //  - POST /api/login manda a ilike el correo escapado y un correo con "_" sigue entrando a su cuenta.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createRequire } from 'module';

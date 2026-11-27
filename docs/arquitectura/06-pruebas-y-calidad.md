@@ -3,7 +3,7 @@
 ## Para principiantes
 
 Antes de abrir cada día, una heladería seria prueba sus helados: que la caja cobre bien, que el guardia no deje pasar a quien no tiene carnet, que no se venda un sabor agotado.
-Las **pruebas automáticas** hacen eso con el código: son **3.389 pequeños "exámenes"** repartidos en 89 archivos, que se ejecutan solos en unos dos minutos.
+Las **pruebas automáticas** hacen eso con el código: son **3.419 pequeños "exámenes"** repartidos en 90 archivos, que se ejecutan solos en unos dos minutos.
 Para no tocar la bodega de verdad, usan una **bodega de juguete**: una base Postgres (el programa de bases de datos que usa el proyecto) real pero en memoria (PGlite) y una Supabase falsa que responde como la de verdad.
 Si un examen falla, algo se rompió y no se debe publicar.
 La regla del equipo es "primero la prueba, después el código" (TDD): se escribe el examen, se ve fallar y luego se arregla el código hasta que pase.
@@ -20,7 +20,7 @@ npm test      # = vitest run
 ```
 
 - Configuración: `backend/vitest.config.mjs` (busca `tests/**/*.test.js`; tiempo de espera de 30 s porque PGlite tarda ~1 s en arrancar cada base).
-- Resultado verificado el 2026-11-26 en `main` (después del PR #25): **89 archivos, 3.389 pruebas, todas en verde**, unos 2 minutos.
+- Resultado verificado el 2026-11-27 en la rama `chore/ordenar-estructura` (después del PR #26): **90 archivos, 3.419 pruebas, todas en verde**, unos 2 minutos.
 - No necesitan internet, ni Supabase, ni llaves reales: todo lo externo es falso.
 - Aviso: aunque las pruebas viven en `backend/tests/`, **también cubren utilidades del frontend** (carpeta `tests/frontend/`). Las pantallas en sí (componentes React) no tienen pruebas.
 
@@ -46,9 +46,9 @@ npm test      # = vitest run
 | Carpeta | Archivos | Pruebas | Qué comprueba |
 |---|---|---|---|
 | `tests/db/` | 9 | 203 | Migraciones y funciones SQL en un Postgres real: `registrar_venta`, Super Points, nivel por saldo, helado personalizado, estado y modelo 3D en la base, bucket `modelos-3d`, Storage de helados, tokens de recuperación y seguridad de tablas (RLS) |
-| `tests/api/` | 52 | 2.767 | Rutas de la API Express con supertest y la Supabase falsa, y los módulos del chatbot |
+| `tests/api/` | 53 | 2.797 | Rutas de la API Express con supertest y la Supabase falsa, los módulos del chatbot y la estructura de carpetas (`estructura.test.js`) |
 | `tests/frontend/` | 28 | 419 | Funciones puras de la Tienda web (`frontend/src/utils/`) y reglas del panel y del chat |
-| **Total** | **89** | **3.389** | |
+| **Total** | **90** | **3.419** | |
 
 ### Por tema
 

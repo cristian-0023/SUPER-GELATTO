@@ -21,9 +21,9 @@ Estos nombres se usan **igual** en todos los diagramas y figuras de esta carpeta
 | **Administrador** | Admin o super admin | Encargado / dueño | Su navegador | — |
 | **Tienda web** | Página de una sola página (SPA) | Mostrador | Vercel | React 19, Vite 8, Tailwind 4, React Router 7, Three.js / @react-three, @react-oauth/google |
 | **API Express** | Servidor con 35 rutas | Cocina | Vercel (proyecto aparte, solo API) | Node.js, Express 4 (CommonJS), `backend/server.js` |
-| **Gelbot** | Asistente de chat (módulos de la API) | Mesero que lee del menú impreso | Dentro de la API Express | `backend/chatbot.js` y `backend/gelbot*.js`, `datosSabores.js`, groq-sdk |
+| **Gelbot** | Asistente de chat (módulos de la API) | Mesero que lee del menú impreso | Dentro de la API Express | `backend/gelbot/` (`chatbot.js` y `gelbot*.js`), `backend/datos/datosSabores.js`, groq-sdk |
 | **Base de datos** | Postgres con las tablas del negocio | Bodega con su libreta | Supabase | Postgres, supabase-js con llave `service_role` |
-| **Bucket `modelos-3d`** | Archivos GLB de los modelos 3D que genera Tripo | Vitrina donde se guardan las maquetas terminadas | Supabase Storage | Lectura pública; solo el servidor (`service_role`) sube y borra. `backend/modelos3dStorage.js` |
+| **Bucket `modelos-3d`** | Archivos GLB de los modelos 3D que genera Tripo | Vitrina donde se guardan las maquetas terminadas | Supabase Storage | Lectura pública; solo el servidor (`service_role`) sube y borra. `backend/servicios/modelos3dStorage.js` |
 | **registrar_venta** | Función de la base que cobra y anota la venta (también el helado personalizado) | Caja registradora | Dentro de la Base de datos | PL/pgSQL, `security invoker` |
 | **cambiar_estado_venta**, **super_points_reglas**, **super_points_resumen**, **helado_personalizado_reglas** | Otras funciones de la base | Reglamento de la tarjeta de puntos y de la lista de precios | Dentro de la Base de datos | PL/pgSQL |
 | **Guardia (token de sesión)** | Revisión del token en cada petición (middleware de la API) | Guardia que pide carnet | Dentro de la API Express | JWT |

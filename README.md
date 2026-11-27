@@ -37,17 +37,17 @@ Integrantes:
 
 ---
 
-## Estructura de carpetas
+## Estructura del proyecto
 
 ```
 .
 ├── backend/            Servidor Express
-│   ├── server.js         La API (35 rutas), guardias, límites, pagos y modelos 3D
-│   ├── chatbot.js        Entrada de Gelbot y modo administrador
-│   ├── gelbot*.js        Módulos del chat: intención, fichas, respuestas, menú, texto y flujo del cliente
-│   ├── datosSabores.js   Fichas de los sabores
-│   ├── modelos3dStorage.js  Copia de los modelos 3D al bucket modelos-3d
-│   ├── imagenProducto.js, correoIlike.js   Utilidades pequeñas
+│   ├── server.js         La API (35 rutas), guardias, límites, pagos y modelos 3D (punto de entrada)
+│   ├── gelbot/           El chat: chatbot.js (entrada y modo administrador) y los módulos gelbot*.js
+│   │                     (intención, fichas, respuestas, menú, texto y flujo del cliente)
+│   ├── datos/            datosSabores.js: fichas de los sabores
+│   ├── servicios/        modelos3dStorage.js (copia los modelos 3D al bucket modelos-3d),
+│   │                     imagenProducto.js y correoIlike.js (utilidades pequeñas)
 │   ├── scripts/          Herramientas de mantenimiento (AWS, administradores)
 │   ├── tests/            Pruebas: api/, db/, frontend/ y helpers/
 │   └── vercel.json       Cron diario que despierta la base gratuita
@@ -97,7 +97,7 @@ npm run dev               # http://localhost:3000 (reenvía /api al servidor)
 ### 3. Probarlo
 
 ```bash
-cd backend && npm test                 # 3.389 pruebas en 89 archivos, unos 2 minutos, sin internet ni llaves
+cd backend && npm test                 # 3.419 pruebas en 90 archivos, unos 2 minutos, sin internet ni llaves
 cd frontend && npx vite build          # comprueba que la página compila (lo mismo que hace el CI)
 ```
 

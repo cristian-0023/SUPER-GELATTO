@@ -8,7 +8,7 @@ solo y muestra una luz verde o roja. Nadie tiene que acordarse de correr las pru
 
 | Check | Qué hace | Tiempo aproximado |
 |---|---|---|
-| `backend` | `npm ci` y `npm test` en `backend/`: las 3389 pruebas (89 archivos) del servidor, de la base (PGlite) y de las utilidades del frontend (`backend/tests/frontend`). | unos 2 a 4 min |
+| `backend` | `npm ci` y `npm test` en `backend/`: las 3419 pruebas (90 archivos) del servidor, de la base (PGlite) y de las utilidades del frontend (`backend/tests/frontend`). | unos 2 a 4 min |
 | `frontend` | `npm ci` y `npx vite build` en `frontend/`: comprueba que la aplicación compila. | 1 min |
 
 - Usa Node 22 (LTS) y las versiones exactas de los `package-lock.json`.
