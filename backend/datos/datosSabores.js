@@ -2,7 +2,7 @@
 //  - getFlavorData: la tienda; empareja por palabra suelta del nombre (puede prestar la ficha de un sabor parecido).
 //  - fichaPropia: el chat; solo si el nombre del producto es EXACTAMENTE el de la ficha (salud: ante la duda, null).
 
-const { soloPalabras } = require('./gelbotIntencion');
+const { soloPalabras } = require('../gelbot/gelbotIntencion');
 
 // Mapa de datos nutricionales, ingredientes y alérgenos por nombre de producto
 const FLAVOR_DATA_MAP = [

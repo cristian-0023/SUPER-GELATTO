@@ -1,4 +1,4 @@
-// Pruebas de backend/modelos3dStorage.js: copia el GLB que genera Tripo al bucket propio "modelos-3d".
+// Pruebas de backend/servicios/modelos3dStorage.js: copia el GLB que genera Tripo al bucket propio "modelos-3d".
 // Contrato:
 //  - Solo se sube un GLB de verdad (los primeros 4 bytes son "glTF"); HTML o JSON de error no se suben.
 //  - Descarga con tiempo máximo y tamaño máximo: si se cuelga o pesa demasiado, se corta sin subir nada.
@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 
 const requireNode = createRequire(import.meta.url);
-const { copiarModeloATienda, borrarModeloAnterior } = requireNode('../../modelos3dStorage.js');
+const { copiarModeloATienda, borrarModeloAnterior } = requireNode('../../servicios/modelos3dStorage.js');
 
 const URL_TRIPO = 'https://cdn.tripo.test/modelo.glb?firma=abc';
 const BASE_PUBLICA = 'http://supabase.fake.local/storage/v1/object/public/modelos-3d/';

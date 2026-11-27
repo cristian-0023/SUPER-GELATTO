@@ -11,7 +11,7 @@ import { cargarServidor, tokenPrueba } from '../helpers/cargarServidor.js';
 import { CATALOGO_REAL, FICHAS } from '../helpers/catalogoReal.js';
 
 const requireNode = createRequire(import.meta.url);
-const intencion = requireNode('../../gelbotIntencion.js');
+const intencion = requireNode('../../gelbot/gelbotIntencion.js');
 const bearer = (id, rol) => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: id, email: 'x@example.com', rol })}` });
 const tokenCliente = () => bearer(7, 'cliente');
 
@@ -428,9 +428,9 @@ describe('9. nombres raros de la base y velocidad', () => {
     ['sin '], ['sin azucar '], ['vegano '], ['frutos secos '], ['muestrame los sabores '], ['que helados '], ['quiero un helado '], ['recomiendame '], ['dame '], ['ver el menu de los '], ['**'], ['no se '],
     ['sabor especial sin azucar numero '], ['te muestro su ficha '], ['cual es el '],
   ])('mensaje de 1000 caracteres con %j y 200 productos: menos de 150 ms', (trozo) => {
-    for (const modulo of ['gelbotFichas', 'gelbotMenu']) expect(existsSync(new URL(`../../${modulo}.js`, import.meta.url)), modulo).toBe(true);
-    const { leerConsultaFicha } = requireNode('../../gelbotFichas.js');
-    const { leerPedidoDeMenu } = requireNode('../../gelbotMenu.js');
+    for (const modulo of ['gelbotFichas', 'gelbotMenu']) expect(existsSync(new URL(`../../gelbot/${modulo}.js`, import.meta.url)), modulo).toBe(true);
+    const { leerConsultaFicha } = requireNode('../../gelbot/gelbotFichas.js');
+    const { leerPedidoDeMenu } = requireNode('../../gelbot/gelbotMenu.js');
     const grande = Array.from({ length: 200 }, (_, i) => ({ ...CATALOGO_REAL[0], id_producto: i, nombre: `Sabor especial sin azúcar número ${i} fresa con mango` }));
     const mensaje = MIL(trozo);
     const medir = (f) => {

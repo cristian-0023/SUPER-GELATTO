@@ -34,6 +34,11 @@ Thumbs.db
 
 .cursor/
 
+# Configuración y herramientas locales del editor (no se suben al repositorio)
+/mcp.json
+/skills-lock.json
+/.agents/
+
 # Estado local que el modo simulado podría recrear (la base es la única fuente de verdad)
 backend/featured_state.json
 backend/fallback_sales.json

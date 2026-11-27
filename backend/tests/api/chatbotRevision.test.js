@@ -275,8 +275,8 @@ describe('5. caché de productos', () => {
   });
 
   it('invalidarCacheProductos se exporta', () => {
-    delete requireNode.cache[resolve(raiz, 'chatbot.js')];
-    expect(typeof requireNode(resolve(raiz, 'chatbot.js')).invalidarCacheProductos).toBe('function');
+    delete requireNode.cache[resolve(raiz, 'gelbot/chatbot.js')];
+    expect(typeof requireNode(resolve(raiz, 'gelbot/chatbot.js')).invalidarCacheProductos).toBe('function');
   });
 
   it('después de que el admin borra/desactiva un producto, el chatbot ya no lo ofrece', async () => {
@@ -338,7 +338,7 @@ describe('8. la segunda llamada también reintenta una vez', () => {
 
 describe('10. sin caracteres combinantes literales en el código', () => {
   it.each([['chatbot.js'], ['gelbotIntencion.js']])('%s escribe el rango de tildes con escapes \\u', (archivo) => {
-    const fuente = readFileSync(resolve(raiz, archivo), 'utf8');
+    const fuente = readFileSync(resolve(raiz, 'gelbot', archivo), 'utf8');
     expect(/[̀-ͯ]/.test(fuente)).toBe(false);
   });
 });

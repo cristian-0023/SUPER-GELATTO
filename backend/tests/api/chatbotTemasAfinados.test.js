@@ -15,7 +15,7 @@ const requireNode = createRequire(import.meta.url);
 const aqui = dirname(fileURLToPath(import.meta.url));
 const { APIError } = requireNode('groq-sdk/error');
 const errorGroq = (status, code) => APIError.generate(status, { error: { message: 'x', code } }, undefined, new Headers());
-const intencion = requireNode('../../gelbotIntencion.js');
+const intencion = requireNode('../../gelbot/gelbotIntencion.js');
 
 const bearer = (id, rol) => ({ Authorization: `Bearer ${tokenPrueba({ id_usuario: id, email: 'x@example.com', rol })}` });
 const ROLES = [['visitante', () => ({})], ['cliente', () => bearer(7, 'cliente')]];
@@ -235,7 +235,7 @@ describe('7. reintento de tool_use_failed para un cliente', () => {
 describe('8. defensa en profundidad: el ejecutor de herramientas del admin no corre sin admin', () => {
   it('sin admin, ninguna herramienta toca la base ni crea propuestas', async () => {
     cargarServidor(fake, { groq: async () => texto('x') });
-    const { ejecutarHerramientasAdmin } = requireNode(resolve(aqui, '../../chatbot.js'));
+    const { ejecutarHerramientasAdmin } = requireNode(resolve(aqui, '../../gelbot/chatbot.js'));
     expect(ejecutarHerramientasAdmin).toBeTypeOf('function');
     const llamada = (name, args = {}) => ({ id: `c_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } });
     const messages = [];

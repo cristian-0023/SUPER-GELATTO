@@ -8,10 +8,10 @@ import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 import { cargarServidor } from '../helpers/cargarServidor.js';
 import { CATALOGO_REAL, FICHAS } from '../helpers/catalogoReal.js';
 
-const ruta = new URL('../../datosSabores.js', import.meta.url);
+const ruta = new URL('../../datos/datosSabores.js', import.meta.url);
 const cargar = () => {
   expect(existsSync(ruta)).toBe(true);
-  return createRequire(import.meta.url)('../../datosSabores.js');
+  return createRequire(import.meta.url)('../../datos/datosSabores.js');
 };
 
 describe('/api/products no cambia al mover las fichas', () => {

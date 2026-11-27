@@ -24,15 +24,15 @@ Por eso Gelbot **no puede inventar un precio, un ingrediente ni una promesa de s
 | Pieza | Qué hace |
 |---|---|
 | Ruta `POST /api/chatbot` | Recibe el mensaje; la identidad sale **solo del token** (sin token = visitante). Límite de 20 mensajes por minuto por IP (`CHATBOT_RATE_LIMIT_MAX`) |
-| `backend/chatbot.js` | Punto de entrada. Cliente de Groq, herramientas del **modo admin**, confirmaciones, caché del catálogo (1 min) y de las reglas de puntos y del helado 3D (5 min) |
-| `backend/gelbotCliente.js` | Flujo de clientes y visitantes: atajos sin modelo, **una** llamada al modelo y respuesta del servidor |
-| `backend/gelbotIntencion.js` | Entiende el mensaje sin IA: qué pide, qué rechaza ("no quiero fresa, quiero mango"), cantidad, afirmaciones cortas |
-| `backend/gelbotFichas.js` | Ingredientes, alérgenos y dietas, siempre desde la ficha del sabor, con aviso |
-| `backend/gelbotRespuestas.js` | Todos los textos del cliente (plantillas por tema) y la "frontera" `paraCliente` |
-| `backend/gelbotMenu.js` | Detecta cuándo hay que mostrar el menú con fotos |
-| `backend/gelbotTexto.js` | Limpia el texto del modelo (en el modo admin): quita razonamiento, código y nombres de herramientas |
-| `backend/datosSabores.js` | Fichas de los sabores (ingredientes, alérgenos, nutrición); la tienda y el chat usan la misma fuente |
-| `backend/imagenProducto.js` | Valida la URL de la foto de un producto antes de mostrarla en una tarjeta |
+| `backend/gelbot/chatbot.js` | Punto de entrada. Cliente de Groq, herramientas del **modo admin**, confirmaciones, caché del catálogo (1 min) y de las reglas de puntos y del helado 3D (5 min) |
+| `backend/gelbot/gelbotCliente.js` | Flujo de clientes y visitantes: atajos sin modelo, **una** llamada al modelo y respuesta del servidor |
+| `backend/gelbot/gelbotIntencion.js` | Entiende el mensaje sin IA: qué pide, qué rechaza ("no quiero fresa, quiero mango"), cantidad, afirmaciones cortas |
+| `backend/gelbot/gelbotFichas.js` | Ingredientes, alérgenos y dietas, siempre desde la ficha del sabor, con aviso |
+| `backend/gelbot/gelbotRespuestas.js` | Todos los textos del cliente (plantillas por tema) y la "frontera" `paraCliente` |
+| `backend/gelbot/gelbotMenu.js` | Detecta cuándo hay que mostrar el menú con fotos |
+| `backend/gelbot/gelbotTexto.js` | Limpia el texto del modelo (en el modo admin): quita razonamiento, código y nombres de herramientas |
+| `backend/datos/datosSabores.js` | Fichas de los sabores (ingredientes, alérgenos, nutrición); la tienda y el chat usan la misma fuente |
+| `backend/servicios/imagenProducto.js` | Valida la URL de la foto de un producto antes de mostrarla en una tarjeta |
 | Modelo | `openai/gpt-oss-20b` por defecto; se cambia con la variable `GROQ_MODEL` (un valor con formato raro se ignora) |
 
 ## Flujo de un mensaje de cliente o visitante

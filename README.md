@@ -37,17 +37,17 @@ Integrantes:
 
 ---
 
-## Estructura de carpetas
+## Estructura del proyecto
 
 ```
 .
 ├── backend/            Servidor Express
-│   ├── server.js         La API (35 rutas), guardias, límites, pagos y modelos 3D
-│   ├── chatbot.js        Entrada de Gelbot y modo administrador
-│   ├── gelbot*.js        Módulos del chat: intención, fichas, respuestas, menú, texto y flujo del cliente
-│   ├── datosSabores.js   Fichas de los sabores
-│   ├── modelos3dStorage.js  Copia de los modelos 3D al bucket modelos-3d
-│   ├── imagenProducto.js, correoIlike.js   Utilidades pequeñas
+│   ├── server.js         La API (35 rutas), guardias, límites, pagos y modelos 3D (punto de entrada)
+│   ├── gelbot/           El chat: chatbot.js (entrada y modo administrador) y los módulos gelbot*.js
+│   │                     (intención, fichas, respuestas, menú, texto y flujo del cliente)
+│   ├── datos/            datosSabores.js: fichas de los sabores
+│   ├── servicios/        modelos3dStorage.js (copia los modelos 3D al bucket modelos-3d),
+│   │                     imagenProducto.js y correoIlike.js (utilidades pequeñas)
 │   ├── scripts/          Herramientas de mantenimiento (AWS, administradores)
 │   ├── tests/            Pruebas: api/, db/, frontend/ y helpers/
 │   └── vercel.json       Cron diario que despierta la base gratuita
@@ -57,15 +57,15 @@ Integrantes:
 ├── supabase/           Base de datos
 │   ├── schema_base_2026-10-25.sql   Foto de las tablas
 │   ├── migrations/       Cambios de la base (se aplican a mano en el SQL Editor)
-│   └── rollbacks/        Cómo deshacer cada migración
+│   ├── rollbacks/        Cómo deshacer cada migración
+│   └── historico/        migration.sql: script antiguo de limpieza de la base (no se usa)
 ├── docs/               Documentación
 │   ├── arquitectura/     Modelo C4 (01 a 08) y figuras Anatomy
 │   ├── chatbot_documentation.md, modelos-3d.md, reconocimiento-facial.md, como-se-construyo.md
 │   ├── CI.md, PAYMENT_GATEWAY.md
+│   ├── historico/        VALIDATIONS.md: reglas de validación del registro (desactualizado)
 │   └── superpowers/      Especificaciones y planes de varios cambios
-├── .github/workflows/  CI (ci.yml)
-├── VALIDATIONS.md      Reglas de validación del registro
-└── migration.sql       Script antiguo de limpieza de la base (histórico)
+└── .github/workflows/  CI (ci.yml)
 ```
 
 ---
@@ -97,7 +97,7 @@ npm run dev               # http://localhost:3000 (reenvía /api al servidor)
 ### 3. Probarlo
 
 ```bash
-cd backend && npm test                 # 3.389 pruebas en 89 archivos, unos 2 minutos, sin internet ni llaves
+cd backend && npm test                 # 3.419 pruebas en 90 archivos, unos 2 minutos, sin internet ni llaves
 cd frontend && npx vite build          # comprueba que la página compila (lo mismo que hace el CI)
 ```
 

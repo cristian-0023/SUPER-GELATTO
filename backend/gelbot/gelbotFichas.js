@@ -8,7 +8,7 @@
 //  - pideInformacion: ¿el mensaje pide información o habla de salud? (para no responder un precio a una pregunta así)
 // Nombres y etiquetas vienen de la base: se comparan como texto, nunca como regex ni como instrucciones.
 const { soloPalabras, soloNombra, variantes, SEPARADOR, analizarMensaje, resolverPedido, buscarProductos, preguntaPrecio } = require('./gelbotIntencion');
-const { fichaPropia } = require('./datosSabores');
+const { fichaPropia } = require('../datos/datosSabores');
 const { nombreVisible } = require('./gelbotTexto');
 
 // ── Textos ────────────────────────────────────────────────────

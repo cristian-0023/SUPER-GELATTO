@@ -1,3 +1,5 @@
+> **Documento histórico:** está desactualizado y se conserva solo como referencia. Lo vigente está en el código y en `docs/arquitectura/`.
+
 # 📋 Informe Técnico de Validaciones - Super Gelatto
 **Proyecto:** Tecnología en Análisis y Desarrollo de Software (SENA)
 **Fase:** Planeación / Ejecución

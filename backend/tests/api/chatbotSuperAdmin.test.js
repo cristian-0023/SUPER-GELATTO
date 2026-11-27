@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { crearFakeSupabase } from '../helpers/fakeSupabase.js';
 
 const requireNode = createRequire(import.meta.url);
-const rutaChatbot = requireNode.resolve('../../chatbot.js');
+const rutaChatbot = requireNode.resolve('../../gelbot/chatbot.js');
 
 let fake;
 let herramientas;
