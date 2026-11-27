@@ -2,6 +2,12 @@
 
 **Super Gelatto** es una heladería artesanal en línea, hecha como **proyecto estudiantil** (los pagos son simulados y no se cobra dinero real). El cliente elige sabores o **arma su propio helado en 3D**, lo paga con la pasarela simulada, acumula **Super Points** y puede pedir ayuda a **Gelbot**, un asistente de chat. Los administradores manejan el catálogo, las ventas y los usuarios desde un panel.
 
+Integrantes:
+- Cristian Munera
+- Jaider Funes
+- Breidis Tabares
+- Miguel Villa
+
 Parte del trabajo se hizo con ayuda de asistentes de inteligencia artificial (Claude Code), siempre con revisión del equipo, pruebas automáticas y revisión de código.
 
 > Para entender el proyecto sin ser programador, empieza por [Cómo se construyó el proyecto](./docs/como-se-construyo.md) y por la [arquitectura explicada con la analogía de la heladería](./docs/arquitectura/README.md).
