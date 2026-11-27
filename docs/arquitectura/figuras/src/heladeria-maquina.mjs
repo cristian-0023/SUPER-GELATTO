@@ -301,7 +301,7 @@ const plates = [
 ];
 
 const LABEL =
-  "La heladería como máquina. Sobre un banco, en fila: el cliente con su celular, el mostrador (la página web, hecha con React y publicada en Vercel), un guardia con una barrera, la cocina (el servidor, hecho con Express y publicado en Render) y la bodega (la base de datos Supabase / Postgres). Detrás, en un estante, cinco proveedores cableados a la cocina: Google Sign-In, Groq, AWS Rekognition, Tripo 3D y Servidor de correo SMTP. Un pedido viaja por el riel del cliente a la bodega.";
+  "La heladería como máquina. Sobre un banco, en fila: el cliente con su celular, el mostrador (la página web, hecha con React y publicada en Vercel), un guardia con una barrera, la cocina (el servidor, hecho con Express y publicado en Vercel) y la bodega (la base de datos Supabase / Postgres). Detrás, en un estante, cinco proveedores cableados a la cocina: Google Sign-In, Groq, AWS Rekognition, Tripo 3D y Servidor de correo SMTP. Un pedido viaja por el riel del cliente a la bodega.";
 
 function drawing(pose) {
   const puckX = pose.x;
@@ -331,7 +331,7 @@ const LEGEND = [
   { n: "1", name: "Cliente", what: "navegador o celular" },
   { n: "2", name: "Mostrador: página web (React, Vercel)", what: "" },
   { n: "3", name: "Guardia (token de sesión)", what: "revisa el token / la sesión" },
-  { n: "4", name: "Cocina: servidor (Express, Render)", what: "" },
+  { n: "4", name: "Cocina: servidor (Express, Vercel)", what: "" },
   { n: "5", name: "Bodega: base de datos (Supabase / Postgres)", what: "" },
   ...PROVIDERS.map((p, i) => ({ n: String.fromCharCode(65 + i), name: p.name, what: p.what })),
 ];
@@ -500,7 +500,7 @@ const plate = k.plateHtml({
     { mark: "dashed", label: "Cable activo hacia un proveedor" },
   ],
   caption:
-    "1 Cliente (navegador o celular) · 2 Mostrador: página web (React, Vercel) · 3 Guardia: revisa el token / la sesión · 4 Cocina: servidor (Express, Render) · 5 Bodega: base de datos (Supabase / Postgres). En el estante, de izquierda a derecha: Google Sign-In (login), Groq (chatbot Gelbot), AWS Rekognition (login facial de admins), Tripo 3D (modelos 3D de productos) y Servidor de correo SMTP (nodemailer). " +
+    "1 Cliente (navegador o celular) · 2 Mostrador: página web (React, Vercel) · 3 Guardia: revisa el token / la sesión · 4 Cocina: servidor (Express, Vercel) · 5 Bodega: base de datos (Supabase / Postgres). En el estante, de izquierda a derecha: Google Sign-In (login), Groq (chatbot Gelbot), AWS Rekognition (login facial de admins), Tripo 3D (modelos 3D de productos) y Servidor de correo SMTP (nodemailer). " +
     CAPTION,
   body: `<div class="iso-stage" tabindex="0" role="slider" aria-label="La heladería como máquina: las flechas mueven el pedido de una pieza a otra" aria-valuetext="${TEXT0()}">${svg}</div>`,
 });
