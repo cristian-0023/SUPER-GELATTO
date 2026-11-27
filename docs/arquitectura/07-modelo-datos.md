@@ -12,7 +12,7 @@ Solo la cocina (el servidor) tiene la llave de esa caja: ni el mostrador ni un e
 
 Fuentes: `supabase/schema_base_2026-10-25.sql` (foto de las tablas) y las migraciones de `supabase/migrations/` (9 archivos, del `20261025120000` al `20261120130000`, cada una con su rollback en `supabase/rollbacks/`). La tabla `admin_face_rekognition` no está en `supabase/`: se crea con `backend/scripts/create-rekognition-table.sql`. Las tablas y columnas se confirmaron, solo leyendo (SELECT), contra la base real el 2026-11-26: **16 tablas en `public`, todas con RLS**. Las migraciones se aplican **a mano** en el SQL Editor de Supabase.
 
-### Diagrama entidad-relación (9 tablas en uso)
+### Diagrama entidad-relación (11 tablas dibujadas de las 16 que hay)
 
 ```mermaid
 erDiagram

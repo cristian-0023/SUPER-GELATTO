@@ -18,8 +18,8 @@ Si algo no cuadra, la respuesta es siempre la misma frase genérica ("Reconocimi
 | Pieza | Qué hace |
 |---|---|
 | `frontend/src/components/CapturaFacial.jsx` | Abre la cámara (`getUserMedia`, 640x480 ideal, cámara frontal), muestra la vista previa, saca la foto y la convierte a JPEG (calidad 0,9) en base64. Pide confirmar o repetir. Apaga la cámara al terminar |
-| `frontend/src/pages/Login.jsx` | Botón "Entrar con Reconocimiento Facial"; manda la foto a `POST /api/admin/faceid/rekognition-login` y guarda la sesión que responde |
-| `frontend/src/pages/AdminDashboard.jsx` | Sección "Reconocimiento Facial Universal": el administrador con sesión registra **su** rostro con `POST /api/admin/faceid/rekognition-register` |
+| `frontend/src/pages/Login.jsx` | Botón "Entrar con Reconocimiento Facial (AWS)"; manda la foto a `POST /api/admin/faceid/rekognition-login` y guarda la sesión que responde |
+| `frontend/src/pages/AdminDashboard.jsx` | Sección "Reconocimiento Facial Universal (AWS Cloud)": el administrador con sesión registra **su** rostro con `POST /api/admin/faceid/rekognition-register` |
 | `backend/server.js` | Las dos rutas, el cliente de AWS (`@aws-sdk/client-rekognition`) y el límite de intentos |
 | AWS Rekognition | Una **colección** de rostros (nombre por defecto `supergelatto-admins`, región por defecto `us-east-2`; se cambian con `REKOGNITION_COLLECTION_ID` y `AWS_REGION`) |
 | Tabla `admin_face_rekognition` | La libreta propia: `id` (uuid), `aws_face_id` (único), `id_usuario` (referencia a `usuario`, con borrado en cascada) y `created_at` |
@@ -87,21 +87,20 @@ La respuesta correcta es **idéntica a la del login con contraseña** (la misma 
 
 ### Pendientes y riesgos (anotados con honestidad)
 
-- **Umbral de parecido de 70 %.** Es el valor del código; el propio AWS recomienda umbrales mucho más altos cuando se usa para verificar identidad. Conviene que el equipo decida si lo sube y lo pruebe.
-- **Sin prueba de vida.** El sistema compara fotos; no comprueba que haya una persona real frente a la cámara. Es una limitación conocida del enfoque actual.
-- **Borrar un administrador no borra su rostro en AWS.** Al borrar la cuenta se borra el vínculo de la base, pero el código no llama a `DeleteFaces`; la descripción del rostro sigue en la colección de AWS hasta que alguien la borre a mano. Es un tema de **privacidad** a resolver. Además, `sync-rekognition.js` puede volver a vincular una ficha huérfana a un número de usuario.
-- **Registrar varias veces agrega varias fichas** para la misma persona; no hay un tope por administrador.
+- **Falta confirmar con una prueba de que hay una persona real frente a la cámara.** Hoy el sistema compara imágenes. Mejora recomendada: añadir una verificación de presencia real (la que ofrezca el proveedor) antes de dar la sesión.
+- **Falta ajustar con el equipo qué tan estricta es la comparación.** Mejora recomendada: revisar el criterio de parecido con las recomendaciones del proveedor y probarlo con casos reales antes de usarlo fuera de clase.
+- **Falta borrar el rostro en AWS al eliminar un administrador.** Al borrar la cuenta se borra el vínculo de la base, pero la descripción del rostro queda en la colección de AWS. Es un tema de **privacidad**. Mejora recomendada: borrar también el rostro en AWS al eliminar la cuenta (o al volver a registrarlo).
+- **Falta un tope de rostros por administrador.** Registrar varias veces agrega varias fichas para la misma persona. Mejora recomendada: limitar a una ficha por administrador y reemplazar la anterior.
 - **Los administradores que entran por correo de la lista `ADMIN_EMAILS`** (y el super admin, que se reconoce por correo) pueden no tener `rol = 'admin'` en la base; en ese caso el login facial los rechaza (ver [01-negocio.md](arquitectura/01-negocio.md)).
-- **Mensajes de error con detalles de AWS:** ante una falla de AWS el servidor devuelve parte del mensaje técnico y algunos textos todavía nombran a Render (la API hoy está en Vercel). Conviene dejar un texto fijo y registrar el detalle solo en el servidor.
-- **Textos de la pantalla que dicen "AWS":** son pensados para el equipo, no para el público.
+- **Mensajes de error demasiado técnicos.** Ante una falla del servicio externo, algunos mensajes muestran parte del texto técnico y otros todavía nombran a Render (la API hoy está en Vercel). Mejora recomendada: dejar textos fijos para el usuario y registrar el detalle solo en el servidor.
 - **Datos personales:** un rostro es un dato biométrico. Para un proyecto real habría que informar al administrador, pedir su consentimiento y definir cuánto tiempo se conserva. No está documentado ni implementado.
 - **Las credenciales de AWS pueden vencer** (si son temporales): entonces las dos rutas responden error de servidor hasta que se actualicen en el panel de Vercel.
 
 ### Cómo probarlo
 
-1. Crear la colección (`node backend/scripts/create-collection.js`) y la tabla (`backend/scripts/create-rekognition-table.sql` en el SQL Editor) y poner las variables de AWS en `backend/.env` (usa `backend/.env.example` como guía).
+1. Crear la colección (`node backend/scripts/create-collection.js`) y la tabla (`backend/scripts/create-rekognition-table.sql` en el SQL Editor) y poner en `backend/.env` las variables de AWS que lee `server.js`: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (solo si las credenciales son temporales) y `REKOGNITION_COLLECTION_ID`. Estas variables **no están** en `backend/.env.example`: hay que agregarlas a mano en tu `.env` (los valores te los da el equipo).
 2. Entrar como administrador, abrir el panel y pulsar "Registrar Reconocimiento Facial".
-3. Cerrar sesión y entrar con "Entrar con Reconocimiento Facial".
+3. Cerrar sesión y entrar con "Entrar con Reconocimiento Facial (AWS)".
 4. Sin AWS configurado, las pruebas automáticas siguen pasando (`cd backend && npm test`).
 
 Más contexto: [flujos](arquitectura/08-flujos.md#2-registrarse-e-iniciar-sesión), [servidor](arquitectura/04-componentes-backend.md) y [modelo de datos](arquitectura/07-modelo-datos.md).
